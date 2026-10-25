@@ -183,6 +183,17 @@ final class EditorModel: ObservableObject {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]
         if panel.runModal() == .OK, let url = panel.url { addImage(url) }
     }
+    /// Writes the current edit to a temporary PNG named after the capture, for dragging into other apps.
+    func dragFile() -> URL? {
+        do {
+            let name = (item?.title ?? "Screenshot").replacingOccurrences(of: "/", with: "-")
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-drag-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(name + ".png")
+            try ImageRenderer.data(flattened()).write(to: url)
+            return url
+        } catch { self.error = error.localizedDescription; return nil }
+    }
     func dragProvider() -> NSItemProvider {
         do {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("Still-\(UUID()).png")

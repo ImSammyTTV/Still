@@ -119,7 +119,8 @@ struct EditorView: View {
             Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.buttonStyle(.plain).disabled(!model.canRedo).help("Redo (⇧⌘Z)").accessibilityLabel("Redo").keyboardShortcut("z", modifiers: [.command, .shift])
             Text("\(model.source.width) × \(model.source.height)\(model.dirty ? " •" : "")").font(.system(size: 10)).foregroundStyle(.secondary)
             Spacer()
-            Text("≡   Drag Me   ≡").padding(.horizontal, 13).padding(.vertical, 7).background(Color.primary.opacity(0.07), in: Capsule()).onDrag { model.dragProvider() }.accessibilityLabel("Drag the edited image to another app")
+            Text("≡   Drag Me   ≡").padding(.horizontal, 13).padding(.vertical, 7).background(Color.primary.opacity(0.07), in: Capsule())
+                .overlay(DragSource(file: { model.dragFile() }).accessibilityLabel("Drag the edited image to another app"))
             Spacer()
             EditorStatus(library: model.library).frame(maxWidth: 170)
             roundButton("text.viewfinder", model.isRecognizing ? "Recognizing text…" : "Recognize Text") { model.recognize() }.disabled(model.isRecognizing)
@@ -223,3 +224,32 @@ struct BackgroundEditor: View {
     private func setting(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View { VStack { HStack { Text(title); Spacer(); Text("\(Int(value.wrappedValue)) px").foregroundStyle(.secondary) }; Slider(value: value, in: range, step: 1) } }
 }
 struct BackgroundPreset: Codable { var frame: String; var padding: Double; var radius: Double; var shadow: Double; var aspect: Double?; var image: Data?; var x: Double?; var y: Double? }
+
+/// A native drag source: SwiftUI's onDrag gets swallowed by the transparent title bar window, and it
+/// can't show the screenshot under the pointer. This hands other apps a real PNG file.
+struct DragSource: NSViewRepresentable {
+    let file: () -> URL?
+    func makeNSView(context: Context) -> DragSourceView { DragSourceView(file: file) }
+    func updateNSView(_ view: DragSourceView, context: Context) { view.file = file }
+}
+
+final class DragSourceView: NSView, NSDraggingSource {
+    var file: () -> URL?
+    private var start: NSPoint?
+    init(file: @escaping () -> URL?) { self.file = file; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError() }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func mouseDown(with event: NSEvent) { start = event.locationInWindow }
+    override func mouseDragged(with event: NSEvent) {
+        guard let start, hypot(event.locationInWindow.x-start.x, event.locationInWindow.y-start.y) > 3, let url = file() else { return }
+        self.start = nil
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let image = NSImage(contentsOf: url) ?? NSImage()
+        let width: CGFloat = 220, height = image.size.width > 0 ? width*image.size.height/image.size.width : 140
+        let point = convert(event.locationInWindow, from: nil)
+        item.setDraggingFrame(CGRect(x: point.x-width/2, y: point.y-height/2, width: width, height: height), contents: image)
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+}
