@@ -153,7 +153,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         std::thread::sleep(Duration::from_millis(80));
         let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
-        let windows = if purpose == "screenshot" { capture::list_windows(std::process::id(), factor) } else { vec![] };
+        let windows = if purpose == "screenshot" { capture::list_windows(factor) } else { vec![] };
         let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
@@ -471,7 +471,7 @@ fn install_update(app: &AppHandle) {
 // ---- Commands -----------------------------------------------------------------------------------
 
 #[tauri::command]
-fn settings_get(app: AppHandle) -> Value {
+async fn settings_get(app: AppHandle) -> Value {
     let mut v = st(&app).settings.lock().unwrap().values.clone();
     let s = st(&app).session.lock().unwrap();
     v["platform"] = json!(platform());
@@ -481,13 +481,13 @@ fn settings_get(app: AppHandle) -> Value {
     v
 }
 #[tauri::command]
-fn settings_set(app: AppHandle, patch: Value) -> Value {
+async fn settings_set(app: AppHandle, patch: Value) -> Value {
     let values = st(&app).settings.lock().unwrap().update(&patch);
     after_settings(&app, &patch);
     values
 }
 #[tauri::command]
-fn settings_reset(app: AppHandle, key: String) -> Value {
+async fn settings_reset(app: AppHandle, key: String) -> Value {
     let values = st(&app).settings.lock().unwrap().reset(&key);
     after_settings(&app, &json!({ key: true }));
     values
@@ -501,40 +501,40 @@ fn after_settings(app: &AppHandle, patch: &Value) {
     broadcast(app, "settings:changed", values);
 }
 #[tauri::command]
-fn settings_choose_folder(app: AppHandle) -> Option<String> {
+async fn settings_choose_folder(app: AppHandle) -> Option<String> {
     let folder = app.dialog().file().blocking_pick_folder()?.into_path().ok()?;
     let path = folder.to_string_lossy().to_string();
     settings_set(app, json!({ "exportFolder": path }));
     Some(path)
 }
 #[tauri::command]
-fn shortcuts_pause(app: AppHandle, paused: bool) { if paused { let _ = app.global_shortcut().unregister_all(); } else { register_shortcuts(&app); } }
+async fn shortcuts_pause(app: AppHandle, paused: bool) { if paused { let _ = app.global_shortcut().unregister_all(); } else { register_shortcuts(&app); } }
 
 #[tauri::command]
-fn overlay_done(app: AppHandle, payload: Value) { let a = app.clone(); std::thread::spawn(move || finish_selection(&a, payload)); }
+async fn overlay_done(app: AppHandle, payload: Value) { let a = app.clone(); std::thread::spawn(move || finish_selection(&a, payload)); }
 #[tauri::command]
-fn overlay_cancel(app: AppHandle) { end_selection(&app); }
+async fn overlay_cancel(app: AppHandle) { end_selection(&app); }
 #[tauri::command]
-fn overlay_fullscreen(app: AppHandle, display_id: u32) {
+async fn overlay_fullscreen(app: AppHandle, display_id: u32) {
     let grab = { let mut s = st(&app).session.lock().unwrap(); std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id) };
     end_selection(&app);
     if let Some(g) = grab { complete_image(&app, g.image, false); }
 }
 #[tauri::command]
-fn overlay_timer(app: AppHandle, delay: u64) {
+async fn overlay_timer(app: AppHandle, delay: u64) {
     let purpose = st(&app).session.lock().unwrap().purpose.clone();
     end_selection(&app);
     start_selection(&app, &purpose, delay, false);
 }
 #[tauri::command]
-fn overlay_purpose(app: AppHandle, purpose: String) {
+async fn overlay_purpose(app: AppHandle, purpose: String) {
     st(&app).session.lock().unwrap().purpose = purpose.clone();
     broadcast(&app, "overlay:purpose", json!(purpose));
 }
 #[tauri::command]
-fn overlay_window_mode(app: AppHandle, on: bool) { broadcast(&app, "overlay:windowMode", json!(on)); }
+async fn overlay_window_mode(app: AppHandle, on: bool) { broadcast(&app, "overlay:windowMode", json!(on)); }
 #[tauri::command]
-fn overlay_pointer(app: AppHandle, window: tauri::Window) {
+async fn overlay_pointer(app: AppHandle, window: tauri::Window) {
     for l in st(&app).session.lock().unwrap().overlays.iter() { if l != window.label() { let _ = app.emit_to(l.as_str(), "overlay:clear", ()); } }
 }
 
@@ -545,37 +545,37 @@ fn item_json(lib: &Library, item: &Item) -> Value {
     v
 }
 #[tauri::command]
-fn library_list(app: AppHandle, query: Value) -> Vec<Value> {
+async fn library_list(app: AppHandle, query: Value) -> Vec<Value> {
     let lib = st(&app).library.lock().unwrap();
     lib.search(query["query"].as_str().unwrap_or(""), query["kind"].as_str().unwrap_or("all")).iter().map(|i| item_json(&lib, i)).collect()
 }
 #[tauri::command]
-fn library_get(app: AppHandle, id: String) -> Value {
+async fn library_get(app: AppHandle, id: String) -> Value {
     let lib = st(&app).library.lock().unwrap();
     match lib.get(&id) { Some(item) => { let mut v = item_json(&lib, &item); v["project"] = lib.project(&id).unwrap_or(Value::Null); v } None => Value::Null }
 }
 #[tauri::command]
-fn library_rename(app: AppHandle, id: String, title: String) { st(&app).library.lock().unwrap().update(&id, |i| i.title = title); broadcast(&app, "library:changed", Value::Null); }
+async fn library_rename(app: AppHandle, id: String, title: String) { st(&app).library.lock().unwrap().update(&id, |i| i.title = title); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
-fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
+async fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
-fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
+async fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
     let (file, kind) = { let lib = st(&app).library.lock().unwrap(); let item = lib.get(&id).ok_or("Missing capture")?; (lib.file(&item), item.kind) };
     if kind == "recording" { return app.clipboard().write_text(file.to_string_lossy().to_string()).map_err(|e| e.to_string()); }
     let image = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).ok_or("Couldn’t read the capture")?;
     copy_image(&app, &image)
 }
 #[tauri::command]
-fn library_save(app: AppHandle, id: String) -> Option<String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
+async fn library_save(app: AppHandle, id: String) -> Option<String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
 #[tauri::command]
-fn library_save_as(app: AppHandle, id: String) -> Option<String> {
+async fn library_save_as(app: AppHandle, id: String) -> Option<String> {
     let item = st(&app).library.lock().unwrap().get(&id)?;
     let ext = Path::new(&item.file_name).extension()?.to_string_lossy().to_string();
     let target = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{}.{ext}", item.title)).blocking_save_file()?.into_path().ok()?;
     export_item(&app, &id, Some(target)).map(|p| p.to_string_lossy().to_string())
 }
 #[tauri::command]
-fn library_reveal(app: AppHandle, id: String) {
+async fn library_reveal(app: AppHandle, id: String) {
     let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
     if let Some(f) = file { reveal(&f); }
 }
@@ -590,17 +590,17 @@ fn open_path(file: &Path) {
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(file).spawn(); }
 }
 #[tauri::command]
-fn library_open(app: AppHandle, id: String) {
+async fn library_open(app: AppHandle, id: String) {
     let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (i.kind.clone(), lib.file(&i))) };
     match found { Some((kind, file)) if kind == "recording" => open_path(&file), Some(_) => open_editor(&app, Some(&id), false), None => {} }
 }
 #[tauri::command]
-fn library_pin(app: AppHandle, id: String) {
+async fn library_pin(app: AppHandle, id: String) {
     let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
     if let Some(bytes) = file.and_then(|f| std::fs::read(f).ok()) { if let Some(img) = capture::decode(&bytes) { pin_image(&app, &img); } }
 }
 #[tauri::command]
-fn library_drag(app: AppHandle, window: tauri::Window, id: String) {
+async fn library_drag(app: AppHandle, window: tauri::Window, id: String) {
     let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
     if let Some(f) = file { start_drag(&app, window, f); }
 }
@@ -621,7 +621,7 @@ fn start_drag(app: &AppHandle, window: tauri::Window, file: PathBuf) {
 }
 
 #[tauri::command]
-fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
+async fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
     let image = capture::decode(&bytes).ok_or("Bad image")?;
     let (encoded, ext) = encode(&app, &image);
@@ -634,12 +634,12 @@ fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> 
     Ok(id)
 }
 #[tauri::command]
-fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> {
+async fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> {
     let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
     copy_image(&app, &image)
 }
 #[tauri::command]
-fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Option<String> {
+async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Option<String> {
     let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b))?;
     let (bytes, ext) = encode(&app, &image);
     let name = if name.is_empty() { library::capture_name("Still") } else { name };
@@ -653,17 +653,17 @@ fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) 
     Some(file.to_string_lossy().to_string())
 }
 #[tauri::command]
-fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
+async fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
     let Some(bytes) = capture::data_url_bytes(&data_url) else { return };
     let file = std::env::temp_dir().join(format!("{}.png", library::capture_name("Still")));
     if std::fs::write(&file, bytes).is_ok() { start_drag(&app, window, file); }
 }
 #[tauri::command]
-fn editor_pin(app: AppHandle, data_url: String) {
+async fn editor_pin(app: AppHandle, data_url: String) {
     if let Some(img) = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)) { pin_image(&app, &img); }
 }
 #[tauri::command]
-fn editor_open_image(app: AppHandle) -> Option<String> {
+async fn editor_open_image(app: AppHandle) -> Option<String> {
     use base64::Engine;
     let path = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]).blocking_pick_file()?.into_path().ok()?;
     let image = capture::decode(&std::fs::read(path).ok()?)?;
@@ -689,18 +689,18 @@ fn pin_image(app: &AppHandle, image: &RgbaImage) {
 }
 
 #[tauri::command]
-fn preview_edit(app: AppHandle, window: tauri::Window, id: String) { let _ = window.close(); open_editor(&app, Some(&id), false); }
+async fn preview_edit(app: AppHandle, window: tauri::Window, id: String) { let _ = window.close(); open_editor(&app, Some(&id), false); }
 #[tauri::command]
-fn open_settings_cmd(app: AppHandle, page: Option<String>) { open_settings(&app, page.as_deref()); }
+async fn open_settings_cmd(app: AppHandle, page: Option<String>) { open_settings(&app, page.as_deref()); }
 #[tauri::command]
-fn open_history_cmd(app: AppHandle) { open_history(&app); }
+async fn open_history_cmd(app: AppHandle) { open_history(&app); }
 #[tauri::command]
-fn open_demo(app: AppHandle) { open_editor(&app, None, false); }
+async fn open_demo(app: AppHandle) { open_editor(&app, None, false); }
 #[tauri::command]
-fn capture_action(app: AppHandle, action: String) { run_action(&app, &action); }
+async fn capture_action(app: AppHandle, action: String) { run_action(&app, &action); }
 
 #[tauri::command]
-fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
+async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
     let _ = window.close();
     if let Some(dir) = st(&app).session.lock().unwrap().selftest.clone() { let _ = std::fs::write(dir.join("ocr.txt"), &text); return; }
     if let Some(e) = error { notify(&app, "Text recognition failed", &e); return; }
@@ -711,11 +711,11 @@ fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option
 }
 
 #[tauri::command]
-fn recording_started(app: AppHandle) { build_tray_menu(&app); }
+async fn recording_started(app: AppHandle) { build_tray_menu(&app); }
 #[tauri::command]
-fn recording_cancel(app: AppHandle) { stop_recording_state(&app); }
+async fn recording_cancel(app: AppHandle) { stop_recording_state(&app); }
 #[tauri::command]
-fn recording_error(app: AppHandle, message: String) { stop_recording_state(&app); notify(&app, "Recording couldn’t start", &message); }
+async fn recording_error(app: AppHandle, message: String) { stop_recording_state(&app); notify(&app, "Recording couldn’t start", &message); }
 #[tauri::command]
 fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected video bytes".into()) };
@@ -732,11 +732,11 @@ fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<()
 }
 
 #[tauri::command]
-fn update_status(app: AppHandle) -> Value { st(&app).session.lock().unwrap().update.clone() }
+async fn update_status(app: AppHandle) -> Value { st(&app).session.lock().unwrap().update.clone() }
 #[tauri::command]
-fn update_check(app: AppHandle) { check_update(&app, true); }
+async fn update_check(app: AppHandle) { check_update(&app, true); }
 #[tauri::command]
-fn update_install(app: AppHandle) { install_update(&app); }
+async fn update_install(app: AppHandle) { install_update(&app); }
 
 // ---- Self-test (run by CI on real Windows / Linux machines) -------------------------------------
 
@@ -763,11 +763,26 @@ fn self_test(app: AppHandle, dir: PathBuf) {
         if let Some(w) = &preview_win { let _ = w.eval("document.querySelector('#copy').click()"); }
         wait(1500);
         log("quickAccessCopy", json!(has_image()));
+        // Open windows from a page, the way buttons do (this path used to crash on Windows).
+        let a = app.clone();
+        let _ = app.run_on_main_thread(move || open_settings(&a, Some("About")));
+        wait(2500);
+        if let Some(w) = app.get_webview_window("settings") { let _ = w.eval("still.send('open:history')"); }
+        wait(3000);
+        log("historyFromSettings", json!(app.get_webview_window("history").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false)));
+        snap("1b-history");
+        let shot = st(&app).library.lock().unwrap().items.first().cloned();
+        if let (Some(item), Some(w)) = (shot.as_ref(), app.get_webview_window("history")) {
+            let _ = w.eval(&format!("still.invoke('library:open', '{}')", item.id));
+            wait(3500);
+            log("editorFromHistory", json!(app.get_webview_window(&format!("editor-{}", item.id)).is_some()));
+            if let Some(e) = app.get_webview_window(&format!("editor-{}", item.id)) { let _ = e.close(); }
+        }
         start_selection(&app, "screenshot", 0, false);
         wait(3000);
         let overlays = st(&app).session.lock().unwrap().overlays.clone();
         log("overlayWindows", json!(overlays.len()));
-        log("windowList", json!(capture::list_windows(std::process::id(), 1.0).len()));
+        log("windowList", json!(capture::list_windows(1.0).len()));
         snap("2-overlay");
         let display = st(&app).session.lock().unwrap().grabs.first().map(|g| g.id).unwrap_or(0);
         finish_selection(&app, json!({ "displayId": display, "purpose": "screenshot", "px": { "x": 50, "y": 50, "w": 300, "h": 200 }, "rect": Value::Null }));

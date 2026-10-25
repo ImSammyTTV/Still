@@ -1,7 +1,9 @@
 use image::{codecs::jpeg::JpegEncoder, DynamicImage, ImageFormat, RgbaImage};
 use serde::Serialize;
 use std::io::Cursor;
-use xcap::{Monitor, Window};
+use xcap::Monitor;
+#[cfg(not(windows))]
+use xcap::Window;
 
 /// One display grabbed at full resolution. `x`/`y` are its top-left in physical pixels.
 pub struct Grab {
@@ -36,12 +38,51 @@ pub fn grab_all() -> Result<Vec<Grab>, String> {
 #[derive(Clone, Serialize)]
 pub struct WindowRect { pub id: u32, pub x: f64, pub y: f64, pub w: f64, pub h: f64 }
 
-pub fn list_windows(own_pid: u32, factor: f64) -> Vec<WindowRect> {
+/// Windows: EnumWindows walks top-level windows front to back; DWM gives the visible frame
+/// (without the invisible resize border) and tells us which windows are cloaked on other desktops.
+#[cfg(windows)]
+pub fn list_windows(_factor: f64) -> Vec<WindowRect> {
+    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> BOOL {
+        let list = &mut *(data as *mut Vec<WindowRect>);
+        if IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0 { return 1; }
+        if GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0 { return 1; }
+        let mut class = [0u16; 64];
+        let len = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) as usize;
+        let class = String::from_utf16_lossy(&class[..len]);
+        if ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"].contains(&class.as_str()) { return 1; }
+        let mut title = [0u16; 128];
+        let tlen = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32) as usize;
+        let title = String::from_utf16_lossy(&title[..tlen]);
+        if title.is_empty() || title == "Capture Selection" { return 1; }
+        let mut cloaked: u32 = 0;
+        if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED as u32, &mut cloaked as *mut _ as *mut _, 4) == 0 && cloaked != 0 { return 1; }
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS as u32, &mut r as *mut _ as *mut _, std::mem::size_of::<RECT>() as u32) != 0 { return 1; }
+        let (w, h) = ((r.right - r.left) as f64, (r.bottom - r.top) as f64);
+        if w < 40.0 || h < 40.0 { return 1; }
+        list.push(WindowRect { id: hwnd as usize as u32, x: r.left as f64, y: r.top as f64, w, h });
+        1
+    }
+    let mut list: Vec<WindowRect> = Vec::new();
+    unsafe { EnumWindows(Some(visit), &mut list as *mut _ as LPARAM); }
+    list
+}
+
+/// Linux (X11) and macOS: xcap's window list, sorted front to back.
+#[cfg(not(windows))]
+pub fn list_windows(factor: f64) -> Vec<WindowRect> {
     let Ok(all) = Window::all() else { return vec![] };
     let mut list: Vec<(i32, WindowRect)> = all.into_iter().filter_map(|w| {
-        if w.is_minimized().unwrap_or(true) || w.pid().ok()? == own_pid { return None; }
+        if w.is_minimized().unwrap_or(true) { return None; }
+        let title = w.title().unwrap_or_default();
+        if title.is_empty() || title == "Capture Selection" { return None; }
         let (width, height) = (w.width().ok()? as f64 * factor, w.height().ok()? as f64 * factor);
-        if width < 40.0 || height < 40.0 || w.title().unwrap_or_default().is_empty() { return None; }
+        if width < 40.0 || height < 40.0 { return None; }
         Some((w.z().unwrap_or(0), WindowRect { id: w.id().ok()?, x: w.x().ok()? as f64 * factor, y: w.y().ok()? as f64 * factor, w: width, h: height }))
     }).collect();
     list.sort_by(|a, b| b.0.cmp(&a.0));

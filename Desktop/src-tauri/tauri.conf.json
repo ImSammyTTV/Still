@@ -20,7 +20,10 @@
           "$DESKTOP/**",
           "$PICTURE/**"
         ]
-      }
+      },
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "bundle": {
