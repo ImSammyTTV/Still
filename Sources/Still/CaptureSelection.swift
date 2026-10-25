@@ -61,6 +61,8 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
                 panel.title = "Capture Selection"
                 panel.level = .screenSaver; panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = false
                 panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
+                // A clear window lets clicks fall through; the overlay must catch every one.
+                panel.ignoresMouseEvents = false
                 let view = SelectionSurface(screen: screen, coordinator: self)
                 view.frame = CGRect(origin: .zero, size: screen.frame.size)
                 if let shot = shots[ObjectIdentifier(screen)] { view.setSnapshot(shot) }
@@ -72,12 +74,15 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil) }
         }
     }
+    /// Still's capture bar: a slim pill along the top of the screen the pointer is on.
     private func showBar() {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
-        let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-380, y: screen.visibleFrame.minY+70, width: 760, height: 66), styleMask: [.borderless], backing: .buffered, defer: false)
-        panel.title = "All-In-One"
+        let host = FirstClickHostingView(rootView: CaptureBar(selection: self))
+        let size = host.fittingSize
+        let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.maxY-size.height-18, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.title = "Capture Bar"
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue+1); panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.contentView = NSHostingView(rootView: CaptureBar(selection: self))
+        panel.contentView = host
         panel.orderFrontRegardless(); bar = panel
     }
     func setDimensions() {
@@ -132,6 +137,7 @@ struct OverlayWindow {
         }
     }
 }
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> { override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true } }
 final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; override var canBecomeMain: Bool { false } }
 
 /// The selection overlay. Everything is a Core Animation layer that only moves on pointer events,
@@ -157,6 +163,8 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     private let highlight = CALayer()
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    // Still isn't the active app while selecting (so menus and Spotlight stay open); take the first click anyway.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     init(screen: NSScreen, coordinator: CaptureSelection) {
         self.display = screen; self.coordinator = coordinator
@@ -314,22 +322,36 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
 
 struct CaptureBar: View {
     @ObservedObject var selection: CaptureSelection
+    private static let lime = Color(red: 0.85, green: 0.91, blue: 0.68)
     var body: some View {
-        HStack(spacing: 0) {
-            mode("Area", "viewfinder", selected: selection.purpose == .screenshot) { selection.purpose = .screenshot }
-            mode("Fullscreen", "display") { selection.fullscreen() }
+        HStack(spacing: 4) {
+            Image(systemName: "viewfinder").font(.system(size: 13, weight: .semibold)).foregroundStyle(Self.lime).padding(.leading, 6).padding(.trailing, 4)
+            mode("Area", "rectangle.dashed", selected: selection.purpose == .screenshot && !selection.windowMode) { selection.setWindowMode(false); selection.purpose = .screenshot }
             mode("Window", "macwindow", selected: selection.windowMode) { selection.toggleWindowMode() }
-            mode("Scrolling", "arrow.down.to.line", selected: selection.purpose == .scroll) { selection.purpose = .scroll }
+            mode("Screen", "display") { selection.fullscreen() }
+            mode("Scroll", "arrow.down.to.line", selected: selection.purpose == .scroll) { selection.setWindowMode(false); selection.purpose = .scroll }
+            divider
+            mode("Text", "text.viewfinder", selected: selection.purpose == .text) { selection.setWindowMode(false); selection.purpose = .text }
+            mode("Record", "record.circle", selected: selection.purpose == .recording) { selection.setWindowMode(false); selection.purpose = .recording }
             mode("Timer", "timer") { selection.timer() }
-            Divider().frame(height: 34)
-            mode("OCR", "textformat", selected: selection.purpose == .text) { selection.purpose = .text }
-            mode("Recording", "video", selected: selection.purpose == .recording) { selection.purpose = .recording }
-            Divider().frame(height: 34).padding(.horizontal, 9)
-            TextField("Width", text: $selection.width).frame(width: 48).textFieldStyle(.plain).multilineTextAlignment(.center).padding(.vertical, 6).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5)).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture width")
-            Text("×").foregroundStyle(.secondary).padding(.horizontal, 5)
-            TextField("Height", text: $selection.height).frame(width: 48).textFieldStyle(.plain).multilineTextAlignment(.center).padding(.vertical, 6).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5)).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture height")
-            Menu { Button("Freeform") { selection.aspect = 0 }; Button("1:1") { selection.aspect = 1 }; Button("4:3") { selection.aspect = 4.0/3 }; Button("16:9") { selection.aspect = 16.0/9 }; Button("9:16") { selection.aspect = 9.0/16 } } label: { Image(systemName: "aspectratio").frame(width: 28) }.menuStyle(.borderlessButton).fixedSize().help("Lock aspect ratio")
-        }.padding(.horizontal, 10).frame(height: 62).font(.system(size: 12)).background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.1))).environment(\.colorScheme, .dark)
+            divider
+            HStack(spacing: 4) {
+                TextField("W", text: $selection.width).frame(width: 40).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture width")
+                Text("×").foregroundStyle(.secondary)
+                TextField("H", text: $selection.height).frame(width: 40).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture height")
+            }.textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 12, design: .monospaced)).padding(.horizontal, 8).frame(height: 28).background(.white.opacity(0.07), in: Capsule())
+            Menu { Button("Freeform") { selection.aspect = 0 }; Button("1:1") { selection.aspect = 1 }; Button("4:3") { selection.aspect = 4.0/3 }; Button("16:9") { selection.aspect = 16.0/9 }; Button("9:16") { selection.aspect = 9.0/16 } } label: { Image(systemName: "aspectratio") }.menuStyle(.borderlessButton).fixedSize().frame(width: 30).help("Lock aspect ratio")
+        }.padding(.horizontal, 6).frame(height: 44).font(.system(size: 12, weight: .medium))
+            .background(.ultraThickMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.12))).environment(\.colorScheme, .dark).padding(10)
     }
-    private func mode(_ title: String, _ symbol: String, selected: Bool = false, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(spacing: 5) { Image(systemName: symbol).font(.system(size: 15)); Text(title).font(.system(size: 10)).foregroundStyle(.secondary) }.frame(width: 69, height: 51).background(selected ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(.plain).accessibilityLabel(title) }
+    private var divider: some View { Rectangle().fill(.white.opacity(0.14)).frame(width: 1, height: 20).padding(.horizontal, 4) }
+    private func mode(_ title: String, _ symbol: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) { Image(systemName: symbol).font(.system(size: 13)); Text(title) }
+                .padding(.horizontal, 11).frame(height: 32)
+                .foregroundStyle(selected ? Color.black.opacity(0.85) : .primary)
+                .background(selected ? Self.lime : .clear, in: Capsule()).contentShape(Capsule())
+        }.buttonStyle(.plain).accessibilityLabel(title)
+    }
 }
+

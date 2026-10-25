@@ -9,7 +9,7 @@
       <stop offset="1" stop-color="#d9e8ad" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="glow2" cx="0.85" cy="0.9" r="0.55">
-      <stop offset="0" stop-color="#0a84ff" stop-opacity="0.18"/>
+      <stop offset="0" stop-color="#0a84ff" stop-opacity="0.16"/>
       <stop offset="1" stop-color="#0a84ff" stop-opacity="0"/>
     </radialGradient>
     <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -22,10 +22,36 @@
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
       <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity="0.45"/>
     </filter>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="160%">
+    <filter id="soft" x="-25%" y="-25%" width="150%" height="170%">
       <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.4"/>
     </filter>
-    <clipPath id="screen"><rect x="700" y="56" width="500" height="308" rx="14"/></clipPath>
+    <clipPath id="screen"><rect x="700" y="40" width="500" height="320" rx="14"/></clipPath>
+    <style>
+      /* One 9-second loop: select, annotate, preview, then reset. Static viewers show the finished frame. */
+      .loop { animation-duration: 9s; animation-iteration-count: infinite; animation-timing-function: ease-out; }
+      .dim { animation-name: dim; }
+      .sel { stroke-dasharray: 760; animation-name: sel; }
+      .handles, .size { animation-name: pop; transform-box: fill-box; transform-origin: center; }
+      .box { stroke-dasharray: 310; animation-name: box; }
+      .shaft { stroke-dasharray: 70; animation-name: shaft; }
+      .head { animation-name: head; }
+      .badge { animation-name: badge; transform-box: fill-box; transform-origin: center; }
+      .preview { animation-name: preview; }
+      .hl { animation-name: hl; }
+      .intro { animation: intro .8s ease-out both; }
+      .d1 { animation-delay: .1s; } .d2 { animation-delay: .25s; } .d3 { animation-delay: .4s; } .d4 { animation-delay: .55s; } .d5 { animation-delay: .7s; }
+      @keyframes intro { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+      @keyframes dim { 0%, 4% { opacity: 0; } 10%, 92% { opacity: 1; } 100% { opacity: 0; } }
+      @keyframes sel { 0%, 4% { stroke-dashoffset: 760; opacity: 1; } 16%, 92% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+      @keyframes pop { 0%, 15% { opacity: 0; transform: scale(.6); } 19%, 92% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+      @keyframes box { 0%, 24% { stroke-dashoffset: 310; opacity: 1; } 34%, 92% { stroke-dashoffset: 0; opacity: 1; } 100% { opacity: 0; } }
+      @keyframes shaft { 0%, 35% { stroke-dashoffset: 70; opacity: 1; } 43%, 92% { stroke-dashoffset: 0; opacity: 1; } 100% { opacity: 0; } }
+      @keyframes head { 0%, 42% { opacity: 0; } 45%, 92% { opacity: 1; } 100% { opacity: 0; } }
+      @keyframes badge { 0%, 47% { opacity: 0; transform: scale(.3); } 51% { opacity: 1; transform: scale(1.15); } 54%, 92% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+      @keyframes preview { 0%, 58% { opacity: 0; transform: translateX(-60px); } 65%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; transform: none; } }
+      @keyframes hl { 0%, 56% { transform: none; } 62%, 92% { transform: translateX(0); } 100% { transform: none; } }
+      @media (prefers-reduced-motion: reduce) { .loop, .intro { animation: none; opacity: 1; } }
+    </style>
   </defs>
 
   <!-- Background -->
@@ -35,44 +61,35 @@
   <rect width="1280" height="420" rx="28" fill="url(#glow2)"/>
 
   <!-- App icon: viewfinder corners around a small camera -->
-  <g transform="translate(96 118)">
-    <rect width="120" height="120" rx="30" fill="#243029" stroke="#ffffff" stroke-opacity="0.08"/>
-    <g fill="none" stroke="#d9e8ad" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M28 46 V28 H46"/>
-      <path d="M74 28 H92 V46"/>
-      <path d="M92 74 V92 H74"/>
-      <path d="M46 92 H28 V74"/>
+  <g class="intro d1">
+    <g transform="translate(96 118)">
+      <rect width="120" height="120" rx="30" fill="#243029" stroke="#ffffff" stroke-opacity="0.08"/>
+      <g fill="none" stroke="#d9e8ad" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M28 46 V28 H46"/><path d="M74 28 H92 V46"/><path d="M92 74 V92 H74"/><path d="M46 92 H28 V74"/>
+      </g>
+      <rect x="44" y="47" width="32" height="27" rx="5" fill="#f5f5e8"/>
+      <circle cx="60" cy="60.5" r="6.5" fill="#243029"/>
     </g>
-    <rect x="44" y="47" width="32" height="27" rx="5" fill="#f5f5e8"/>
-    <circle cx="60" cy="60.5" r="6.5" fill="#243029"/>
   </g>
 
-  <!-- Name and tagline -->
+  <!-- Name, tagline, platforms -->
   <g font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">
-    <text x="244" y="200" font-size="88" font-weight="700" fill="#f5f5f0" letter-spacing="-2">Still</text>
-    <text x="246" y="244" font-size="25" fill="#c9d4c4">Capture, annotate and record.</text>
+    <text class="intro d2" x="244" y="200" font-size="88" font-weight="700" fill="#f5f5f0" letter-spacing="-2">Still</text>
+    <text class="intro d3" x="246" y="244" font-size="25" fill="#c9d4c4">Capture, annotate and share.</text>
     <g font-size="15" font-weight="600" fill="#d9e8ad">
-      <rect x="246" y="270" width="78" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/>
-      <text x="285" y="290" text-anchor="middle">macOS</text>
-      <rect x="334" y="270" width="96" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/>
-      <text x="382" y="290" text-anchor="middle">Windows</text>
-      <rect x="440" y="270" width="72" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/>
-      <text x="476" y="290" text-anchor="middle">Linux</text>
+      <g class="intro d3"><rect x="246" y="270" width="78" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/><text x="285" y="290" text-anchor="middle">macOS</text></g>
+      <g class="intro d4"><rect x="334" y="270" width="96" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/><text x="382" y="290" text-anchor="middle">Windows</text></g>
+      <g class="intro d5"><rect x="440" y="270" width="72" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/><text x="476" y="290" text-anchor="middle">Linux</text></g>
     </g>
   </g>
 
-  <!-- Product scene: a desktop with an app window being captured -->
-  <g filter="url(#shadow)">
-    <rect x="700" y="56" width="500" height="308" rx="14" fill="url(#wall)"/>
-  </g>
+  <!-- Scene: a desktop with an app window being captured -->
+  <g filter="url(#shadow)"><rect x="700" y="40" width="500" height="320" rx="14" fill="url(#wall)"/></g>
   <g clip-path="url(#screen)">
-    <!-- app window -->
-    <g transform="translate(742 88)">
+    <g transform="translate(742 96)">
       <rect width="416" height="236" rx="10" fill="#f7f7f9"/>
       <path d="M0 10 a10 10 0 0 1 10 -10 h396 a10 10 0 0 1 10 10 v20 h-416 z" fill="#e7e7ec"/>
-      <circle cx="16" cy="15" r="4.5" fill="#ff5f57"/>
-      <circle cx="31" cy="15" r="4.5" fill="#febc2e"/>
-      <circle cx="46" cy="15" r="4.5" fill="#28c840"/>
+      <circle cx="16" cy="15" r="4.5" fill="#ff5f57"/><circle cx="31" cy="15" r="4.5" fill="#febc2e"/><circle cx="46" cy="15" r="4.5" fill="#28c840"/>
       <rect x="24" y="52" width="150" height="14" rx="4" fill="#2b2b33"/>
       <rect x="24" y="78" width="210" height="8" rx="4" fill="#c9c9d3"/>
       <rect x="24" y="94" width="186" height="8" rx="4" fill="#c9c9d3"/>
@@ -84,51 +101,56 @@
       <rect x="262" y="140" width="130" height="34" rx="7" fill="#e3e3ea"/>
       <rect x="262" y="184" width="130" height="34" rx="7" fill="#e3e3ea"/>
     </g>
-    <!-- dimmed outside the selection -->
-    <path fill="#000000" fill-opacity="0.32" fill-rule="evenodd"
-      d="M700 56 h500 v308 h-500 z M752 120 h214 v160 h-214 z"/>
-    <!-- selection -->
-    <rect x="752" y="120" width="214" height="160" fill="none" stroke="#ffffff" stroke-width="1.5"/>
-    <g fill="#ffffff">
-      <rect x="748" y="116" width="8" height="8" rx="2"/><rect x="962" y="116" width="8" height="8" rx="2"/>
-      <rect x="748" y="276" width="8" height="8" rx="2"/><rect x="962" y="276" width="8" height="8" rx="2"/>
+    <path class="loop dim" fill="#000000" fill-opacity="0.32" fill-rule="evenodd" d="M700 40 h500 v320 h-500 z M752 128 h214 v160 h-214 z"/>
+    <rect class="loop sel" x="752" y="128" width="214" height="160" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+    <g class="loop handles" fill="#ffffff">
+      <rect x="748" y="124" width="8" height="8" rx="2"/><rect x="962" y="124" width="8" height="8" rx="2"/>
+      <rect x="748" y="284" width="8" height="8" rx="2"/><rect x="962" y="284" width="8" height="8" rx="2"/>
     </g>
-    <rect x="884" y="288" width="82" height="22" rx="6" fill="#000000" fill-opacity="0.7"/>
-    <text x="925" y="303" text-anchor="middle" font-family="'Cascadia Mono', 'SF Mono', Menlo, monospace" font-size="12" fill="#ffffff">428 × 320</text>
-    <!-- annotations inside the selection -->
-    <rect x="764" y="225" width="108" height="42" rx="8" fill="none" stroke="#ff453a" stroke-width="3"/>
-    <path d="M948 252 L884 247" stroke="#ff453a" stroke-width="4" stroke-linecap="round"/>
-    <path d="M876 246.5 L891 239 L889.5 255 Z" fill="#ff453a"/>
-    <circle cx="944" cy="146" r="13" fill="#0a84ff"/>
-    <text x="944" y="151.5" text-anchor="middle" font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="15" font-weight="700" fill="#ffffff">1</text>
+    <g class="loop size">
+      <rect x="884" y="296" width="82" height="22" rx="6" fill="#000000" fill-opacity="0.7"/>
+      <text x="925" y="311" text-anchor="middle" font-family="'Cascadia Mono', 'SF Mono', Menlo, monospace" font-size="12" fill="#ffffff">428 × 320</text>
+    </g>
+    <rect class="loop box" x="764" y="233" width="108" height="42" rx="8" fill="none" stroke="#ff453a" stroke-width="3"/>
+    <path class="loop shaft" d="M948 260 L884 255" stroke="#ff453a" stroke-width="4" stroke-linecap="round"/>
+    <path class="loop head" d="M876 254.5 L891 247 L889.5 263 Z" fill="#ff453a"/>
+    <g class="loop badge">
+      <circle cx="944" cy="154" r="13" fill="#0a84ff"/>
+      <text x="944" y="159.5" text-anchor="middle" font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="15" font-weight="700" fill="#ffffff">1</text>
+    </g>
+    <!-- Still's capture bar along the top -->
+    <g filter="url(#soft)"><rect x="776" y="54" width="364" height="32" rx="16" fill="#202123" stroke="#ffffff" stroke-opacity="0.12"/></g>
+    <g font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="11" font-weight="600">
+      <rect class="loop hl" x="804" y="58" width="58" height="24" rx="12" fill="#d9e8ad"/>
+      <path d="M788 66 v-3 h3 M796 63 h3 v3 M799 74 v3 h-3 M791 77 h-3 v-3" fill="none" stroke="#d9e8ad" stroke-width="1.6" stroke-linecap="round"/>
+      <text x="833" y="74" text-anchor="middle" fill="#1b211d">Area</text>
+      <text x="893" y="74" text-anchor="middle" fill="#e8e8ea">Window</text>
+      <text x="953" y="74" text-anchor="middle" fill="#e8e8ea">Screen</text>
+      <rect x="986" y="62" width="1" height="16" fill="#ffffff" fill-opacity="0.18"/>
+      <text x="1014" y="74" text-anchor="middle" fill="#e8e8ea">Text</text>
+      <text x="1063" y="74" text-anchor="middle" fill="#e8e8ea">Record</text>
+      <text x="1113" y="74" text-anchor="middle" fill="#e8e8ea">Timer</text>
+    </g>
   </g>
 
-  <!-- capture bar -->
-  <g filter="url(#soft)">
-    <rect x="852" y="334" width="214" height="44" rx="12" fill="#26262a" stroke="#ffffff" stroke-opacity="0.1"/>
-  </g>
-  <g fill="none" stroke="#f5f5f7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="862" y="339" width="38" height="34" rx="9" fill="#ffffff" fill-opacity="0.12" stroke="none"/>
-    <path d="M873 350 v-4 h4 M887 346 h4 v4 M891 362 v4 h-4 M877 366 h-4 v-4"/>
-    <rect x="913" y="347" width="20" height="14" rx="2"/><path d="M919 366 h8"/>
-    <rect x="953" y="346" width="20" height="18" rx="2"/><path d="M953 351 h20"/>
-    <circle cx="1003" cy="356" r="8"/><path d="M1003 352 v4 l3 2"/>
-    <rect x="1031" y="349" width="16" height="13" rx="2"/><path d="M1047 353 l5 -3 v12 l-5 -3"/>
-  </g>
-
-  <!-- Quick Access preview -->
-  <g filter="url(#soft)">
-    <rect x="664" y="262" width="148" height="104" rx="12" fill="#1c1c1f" stroke="#ffffff" stroke-opacity="0.16"/>
-  </g>
-  <rect x="670" y="268" width="136" height="92" rx="8" fill="#f7f7f9"/>
-  <rect x="680" y="280" width="62" height="7" rx="3" fill="#2b2b33"/>
-  <rect x="680" y="294" width="88" height="5" rx="2.5" fill="#c9c9d3"/>
-  <rect x="680" y="304" width="74" height="5" rx="2.5" fill="#c9c9d3"/>
-  <rect x="680" y="326" width="48" height="20" rx="5" fill="none" stroke="#ff453a" stroke-width="2"/>
-  <g font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="11" font-weight="600" text-anchor="middle">
-    <rect x="752" y="320" width="46" height="16" rx="8" fill="#0a84ff"/>
-    <text x="775" y="332" fill="#ffffff">Copy</text>
-    <rect x="752" y="340" width="46" height="16" rx="8" fill="#ffffff" stroke="#d0d0d8"/>
-    <text x="775" y="352" fill="#1d1d1f">Save</text>
+  <!-- Still's floating preview: capture on top, action bar underneath -->
+  <g class="loop preview">
+    <g filter="url(#soft)"><rect x="640" y="250" width="196" height="128" rx="12" fill="#1f2021" stroke="#ffffff" stroke-opacity="0.16"/></g>
+    <rect x="641" y="251" width="194" height="90" fill="#f7f7f9"/>
+    <rect x="652" y="262" width="62" height="7" rx="3" fill="#2b2b33"/>
+    <rect x="652" y="276" width="88" height="5" rx="2.5" fill="#c9c9d3"/>
+    <rect x="652" y="286" width="74" height="5" rx="2.5" fill="#c9c9d3"/>
+    <rect x="652" y="306" width="48" height="20" rx="5" fill="none" stroke="#ff453a" stroke-width="2"/>
+    <circle cx="814" cy="270" r="8" fill="#0a84ff"/>
+    <rect x="641" y="341" width="194" height="2" fill="#d9e8ad"/>
+    <rect x="650" y="350" width="50" height="20" rx="10" fill="#d9e8ad"/>
+    <text x="675" y="364" text-anchor="middle" font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="11" font-weight="700" fill="#1b211d">Copy</text>
+    <g fill="none" stroke="#e8e8ea" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M720 354 v8 m-4 -4 l4 4 l4 -4 M716 366 h8"/>
+      <path d="M742 366 l2 -6 l7 -7 l4 4 l-7 7 z"/>
+      <path d="M770 353 v6 m-4 0 h8 m-4 0 v7"/>
+      <path d="M788 364 a4 4 0 0 1 1 -8 a5 5 0 0 1 9 2 a3 3 0 0 1 0 6 z"/>
+      <path d="M816 356 l7 7 m0 -7 l-7 7"/>
+    </g>
   </g>
 </svg>

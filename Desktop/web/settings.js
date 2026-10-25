@@ -1,9 +1,9 @@
 const PAGES = [
-  ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Quick Access', 'panel-bottom', '#30b0c7'],
+  ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
   ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
-  ['allInOne', 'All-In-One'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Fullscreen'],
+  ['allInOne', 'Capture Bar'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Fullscreen'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
 let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false };
@@ -37,14 +37,14 @@ const pages = {
     group('Export', [row('Export location', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
       el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Desktop'),
       el('button', { class: 'btn', onclick: async () => { if (await still.invoke('settings:chooseFolder')) { prefs = await still.invoke('settings:get'); render(); } } }, 'Choose…')
-    ]))], 'Save actions from Quick Access, the editor and After Capture use this folder.'),
+    ]))], 'Save actions from Floating Preview, the editor and After Capture use this folder.'),
     group('After capture', [
-      toggle('Show Quick Access Overlay', 'afterCapture.quickAccess'), toggle('Copy to clipboard', 'afterCapture.copy'),
+      toggle('Show Floating Preview', 'afterCapture.quickAccess'), toggle('Copy to clipboard', 'afterCapture.copy'),
       toggle('Save to export location', 'afterCapture.save'), toggle('Open Annotate', 'afterCapture.annotate')
     ]),
-    group('After recording', [toggle('Show Quick Access Overlay', 'afterRecording.quickAccess'), toggle('Save to export location', 'afterRecording.save')]),
+    group('After recording', [toggle('Show Floating Preview', 'afterRecording.quickAccess'), toggle('Save to export location', 'afterRecording.save')]),
     el('div', { style: 'display:flex;gap:8px;margin-top:18px' }, [
-      el('button', { class: 'btn', onclick: () => still.send('capture', 'allInOne') }, 'All-In-One'),
+      el('button', { class: 'btn', onclick: () => still.send('capture', 'allInOne') }, 'Capture Bar'),
       el('button', { class: 'btn', onclick: () => still.send('open:history') }, 'Capture History'),
       el('div', { class: 'spacer', style: 'flex:1' }),
       el('button', { class: 'btn', onclick: () => still.send('open:demo') }, 'Try Annotate')
@@ -56,7 +56,7 @@ const pages = {
     prefs.wayland ? el('div', { class: 'hint warning' }, 'On Wayland, global shortcuts may need to be added in your desktop’s keyboard settings (run “still --capture=area”).') : null,
     el('div', { style: 'display:flex;justify-content:flex-end;margin-top:14px' }, [el('button', { class: 'btn', onclick: async () => { await still.invoke('settings:reset', 'shortcuts'); prefs = await still.invoke('settings:get'); render(); } }, 'Reset Defaults')])
   ],
-  'Quick Access': () => [
+  'Floating Preview': () => [
     group('Overlay', [
       select('Position', 'quickAccess.side', [['left', 'Bottom left'], ['right', 'Bottom right']]),
       select('Size', 'quickAccess.size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]),

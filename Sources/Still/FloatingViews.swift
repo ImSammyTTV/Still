@@ -7,30 +7,33 @@ struct PreviewView: View {
     @ObservedObject var library: Library
     let dismiss: () -> Void
     @State private var hovering = false
+    private static let lime = Color(red: 0.85, green: 0.91, blue: 0.68)
+    /// Still's floating preview: the capture on top, a permanent action bar underneath.
     var body: some View {
-        GeometryReader { geometry in
+        VStack(spacing: 0) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .windowBackgroundColor))
-                if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit().frame(width: geometry.size.width, height: geometry.size.height).clipShape(RoundedRectangle(cornerRadius: 12)) }
-                if item.isVideo { Button { AppController.shared.openItem(item); dismiss() } label: { Image(systemName: "play.circle.fill").font(.system(size: 34)).foregroundStyle(.white).shadow(radius: 4) }.buttonStyle(.plain).accessibilityLabel("Play recording") }
-                if hovering {
-                    VStack {
-                        HStack { Button(action: dismiss) { Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.white).shadow(radius: 2) }.buttonStyle(.plain).accessibilityLabel("Close overlay"); Spacer(); Text(item.isVideo ? "Recording" : "\(item.width) × \(item.height)").font(.system(size: 9)).foregroundStyle(.white).padding(5).background(.black.opacity(0.45), in: Capsule()) }.padding(8)
-                        Spacer()
-                        HStack(spacing: 0) {
-                            action(item.isVideo ? "play.fill" : "pencil", item.isVideo ? "Edit Video" : "Annotate") { AppController.shared.openItem(item); dismiss() }
-                            action("square.and.arrow.down", "Save") { if NSEvent.modifierFlags.contains(.option) { library.export(item) } else { library.quickSave(item) }; dismiss() }
-                            action("doc.on.doc", "Copy") { library.copy(item); dismiss() }
-                            if !item.isVideo { action("pin", "Pin") { if let image = ImageRenderer.load(library.url(item)) { AppController.shared.pin(image) }; dismiss() } }
-                            action("icloud.and.arrow.up", "Upload to Cloud") { AppController.shared.upload(item) }
-                            action("square.and.arrow.up", "Share") { AppController.shared.shareItem(item) }
-                        }.padding(4).background(.ultraThickMaterial, in: Capsule()).padding(8)
-                    }
-                }
-            }.contentShape(RoundedRectangle(cornerRadius: 12)).onHover { hovering = $0 }.onTapGesture(count: 2) { AppController.shared.openItem(item); dismiss() }
+                Color.black
+                if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFill() }
+                if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 30)).foregroundStyle(.white).shadow(radius: 4) }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                .overlay(alignment: .bottom) { Self.lime.frame(height: 2) }
+                .contentShape(Rectangle()).onTapGesture(count: 2) { AppController.shared.openItem(item); dismiss() }
                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
-                .contextMenu { Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Save") { library.quickSave(item) }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Button("Close Overlay") { dismiss() } }
-        }.overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15))).accessibilityLabel("Quick Access Overlay for \(item.title)")
+            HStack(spacing: 2) {
+                Button { library.copy(item); dismiss() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 9).frame(height: 24).foregroundStyle(Color.black.opacity(0.85)).background(Self.lime, in: Capsule()) }.buttonStyle(.plain)
+                Spacer(minLength: 2)
+                action("square.and.arrow.down", "Save") { if NSEvent.modifierFlags.contains(.option) { library.export(item) } else { library.quickSave(item) }; dismiss() }
+                action(item.isVideo ? "play.fill" : "pencil", item.isVideo ? "Edit Video" : "Annotate") { AppController.shared.openItem(item); dismiss() }
+                if !item.isVideo { action("pin", "Pin") { if let image = ImageRenderer.load(library.url(item)) { AppController.shared.pin(image) }; dismiss() } }
+                action("icloud.and.arrow.up", "Upload") { AppController.shared.upload(item) }
+                action("square.and.arrow.up", "Share") { AppController.shared.shareItem(item) }
+                action("xmark", "Close") { dismiss() }
+            }.padding(.horizontal, 6).frame(height: 34).background(Color(white: 0.12))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15)))
+        .environment(\.colorScheme, .dark).onHover { hovering = $0 }
+        .contextMenu { Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Save") { library.quickSave(item) }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Button("Close Preview") { dismiss() } }
+        .accessibilityLabel("Floating Preview for \(item.title)")
         .task {
             let timeout = Preferences.shared.previewTimeout
             guard timeout > 0 else { return }
@@ -42,7 +45,7 @@ struct PreviewView: View {
             }
         }
     }
-    private func action(_ symbol: String, _ title: String, perform: @escaping () -> Void) -> some View { Button(action: perform) { Image(systemName: symbol).font(.system(size: 13)).frame(maxWidth: .infinity).frame(height: 27).contentShape(Rectangle()) }.buttonStyle(.plain).help(title).accessibilityLabel(title) }
+    private func action(_ symbol: String, _ title: String, perform: @escaping () -> Void) -> some View { Button(action: perform) { Image(systemName: symbol).font(.system(size: 12)).frame(width: 26, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(title).accessibilityLabel(title) }
 }
 
 struct PinView: View {

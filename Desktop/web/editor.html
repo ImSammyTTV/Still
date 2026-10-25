@@ -7,10 +7,14 @@
 <style>
   body { display: grid; grid-template-rows: 44px 1fr 45px; }
   .titlebar { border-bottom: 1px solid var(--border); background: var(--bg); }
-  .tools { margin: 0 auto; }
-  .tools button svg { width: 15px; height: 15px; }
   .swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
-  main { position: relative; display: grid; grid-template-columns: 1fr auto; min-height: 0; background: var(--canvas); }
+  main { position: relative; display: grid; grid-template-columns: auto 1fr auto; min-height: 0; background: var(--canvas); }
+  /* Still's tool rail: drawing tools stacked down the left edge. */
+  .rail { width: 50px; padding: 10px 7px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; background: var(--bg); border-right: 1px solid var(--border); }
+  .rail button { width: 36px; height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--text); display: grid; place-items: center; flex: none; }
+  .rail button:hover { background: var(--surface-strong); }
+  .rail button.active { background: #d9e8ad; color: #1b211d; }
+  .rail svg { width: 16px; height: 16px; }
   .scroller { overflow: auto; display: grid; place-items: center; min-height: 0; padding: 28px; }
   #stage { display: block; box-shadow: 0 2px 20px rgba(0,0,0,.25); image-rendering: auto; }
   #stage.tool-select { cursor: default; }
@@ -30,7 +34,7 @@
   footer { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 13px; border-top: 1px solid var(--border); background: var(--bg); }
   .drag { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 0 14px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; gap: 10px; background: var(--surface-strong); cursor: grab; }
   .spacer { flex: 1; }
-  .crop-bar { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: none; gap: 8px; padding: 6px; border-radius: 999px; background: var(--hud); color: #fff; z-index: 5; }
+  .crop-bar { position: absolute; left: calc(50% + 25px); top: 14px; transform: translateX(-50%); display: none; gap: 8px; padding: 6px; border-radius: 999px; background: var(--hud); color: #fff; z-index: 5; }
   .crop-bar.show { display: flex; }
   .crop-bar .btn { background: rgba(255,255,255,.14); color: #fff; }
   .crop-bar .btn.primary { background: var(--accent); }
@@ -42,7 +46,7 @@
 </head>
 <body>
 <div class="titlebar">
-  <div class="segmented tools" id="tools"></div>
+  <div class="spacer"></div>
   <button class="btn plain icon no-drag" id="color" title="Color"><span class="swatch" id="swatch"></span></button>
   <button class="btn plain icon no-drag" id="stroke" title="Stroke width"><i data-lucide="minus"></i></button>
   <div class="segmented no-drag">
@@ -52,6 +56,7 @@
   <button class="btn plain icon no-drag" id="background" title="Background"><i data-lucide="image"></i></button>
 </div>
 <main>
+  <aside class="rail" id="tools" aria-label="Tools"></aside>
   <div class="crop-bar" id="cropBar">
     <button class="btn" id="cropReset">Reset</button>
     <button class="btn" id="cropCancel">Cancel</button>
@@ -77,7 +82,7 @@
   <button class="btn plain" id="zoom">Fit</button>
   <span id="size" style="color:var(--text-2)"></span>
   <div class="spacer"></div>
-  <div class="drag" id="dragMe" title="Drag the image into another app"><span>≡</span>Drag Me<span>≡</span></div>
+  <div class="drag" id="dragMe" title="Drag the image into another app">Drag to share</div>
   <button class="btn icon" id="ocr" title="Copy text (OCR)"><i data-lucide="scan-text"></i></button>
   <button class="btn icon" id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
   <button class="btn icon" id="upload" title="Upload and copy link"><i data-lucide="cloud-upload"></i></button>

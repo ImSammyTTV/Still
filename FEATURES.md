@@ -1,63 +1,103 @@
-# Still feature coverage
+# Still features
 
-Still’s implementation and verification checklist. This file tracks local functionality, automated coverage and the checks that require system permissions, connected hardware or a deployed service.
+What Still can do on each platform, and how far each feature has been checked.
 
-Status meanings: **implemented** means code exists; **verified** means an automated or live check passed; **in progress** is incomplete; **pending** has not been implemented. No row implies exact parity until its detailed interaction checks pass.
+| Mark | Meaning |
+|---|---|
+| ✅ | Built and checked: by an automated test, the self-test on real Windows/Linux machines, or by hand on a Mac |
+| ☑️ | Built, but not yet checked by hand or by a test |
+| — | Not available on this platform yet |
 
-| Area | Requirement | Status |
-| --- | --- | --- |
-| Interface | Menu-bar-first app; compact All-in-One capture bar | in progress |
-| Interface | Native native preferences and sidebar | in progress |
-| Interface | Compact editor toolbar and bottom quick actions | in progress |
-| Interface | Light and dark appearance | in progress |
-| Capture | Area, window, fullscreen, timer, Escape cancellation | implemented; permission-dependent live checks pending |
-| Capture | Previous selection, dimensions and aspect lock | in progress |
-| Capture | Crosshair, magnifier, freeze screen | in progress |
-| Capture | Multi-display capture | in progress |
-| Capture | Vertical and horizontal scrolling capture | in progress |
-| Capture | Desktop-icon hiding and custom wallpaper | implemented; live checks pending |
-| Overlay | Copy, save, annotate, pin, drag and dismiss | implemented; live checks pending |
-| Overlay | Position, size, auto-close, restore, hide all | implemented; hover-aware timeout |
-| Annotate | Select, move, resize, duplicate, delete | in progress |
-| Annotate | Four arrow styles, line, shapes, filled rectangle | in progress |
-| Annotate | Pencil, highlight, counter, seven text styles | in progress |
-| Annotate | Solid redaction | verified: opaque pixels after PNG encoding |
-| Annotate | Blur, pixelate and spotlight | in progress |
-| Annotate | Crop and resize, rotate and flip | in progress |
-| Annotate | Combine images by drag and drop | in progress |
-| Annotate | Editable project files and history sidecars | in progress; independent `.stillshot` format |
-| Annotate | Undo and redo | verified for basic marks and crop |
-| Background | Twenty backgrounds, custom image, presets | in progress |
-| Background | Padding, corner radius, shadow, aspect ratio | in progress |
-| Background | Alignment and Auto Balance | implemented; aspect/alignment export test passed |
-| OCR | On-device text recognition | verified by rendered text fixture |
-| OCR | QR codes, language choice, line-break handling | implemented; live checks pending |
-| Pin | Resize, opacity, arrow positioning, click-through lock | implemented; live checks pending |
-| History | Restore, filters and retention | implemented; rename and cloud actions included; retention defaults forever and moves expired library files to Trash on the next capture |
-| Recording | Window/display picker, H.264 MP4, cursor, mic/system audio | implemented; permission-dependent live checks pending |
-| Recording | Area recording, FPS, quality, resolution and GIF | area/FPS/resolution/GIF implemented; custom bitrate quality pending |
-| Recording | Pause/resume, camera, clicks and keystrokes | implemented; segment joining/alignment tested offline; hardware tests pending |
-| Recording | Recording timer and stop controls | implemented; live checks pending |
-| Video editor | Playback, trim and background | implemented; real MP4/GIF export tests passed |
-| Video editor | Zooms, cursor metadata, smooth cursor and motion blur | implemented; compositor export test passed; interaction checks pending |
-| Settings | Configurable shortcuts, filenames, after-capture actions | implemented; live capture checks pending |
-| Settings | Login item, menu visibility, sounds and export defaults | in progress |
-| Automation | URL scheme actions | implemented; registered still:// actions; live checks pending |
-| Cloud | Uploads, links, access control, expiry, comments and tags | implemented independently; 11 server tests passed; viewer/comment browser smoke test passed |
-| Cloud | Transcription, custom domains and team management | on-device transcription UI implemented, hardware/language assets unverified; team API tested; deployment example supplied, no remote host deployed |
-| Distribution | Signed local Apple-silicon app | implemented |
-| Distribution | Apple notarization and universal binary | pending; requires appropriate signing credentials/toolchain |
+The Mac app is native Swift. The Windows and Linux app is built with Tauri and shares one code base.
 
-Public hosting, identity-provider integration and enterprise certifications require independent setup and validation. Local functionality can be built and tested without deploying a service.
+## Capture
 
-## Remaining verification and interaction gaps
+| Feature | Mac | Windows & Linux |
+|---|---|---|
+| Area capture with crosshair, magnifier, size label | ✅ | ✅ |
+| Hold Space to capture a window | ✅ | ✅ Windows · ☑️ Linux (X11 only) |
+| Whole-screen capture, per display | ✅ | ✅ |
+| Capture Bar (modes, exact size, aspect lock, timer) | ✅ | ✅ |
+| Open menus and Spotlight stay in the capture | ✅ | ☑️ |
+| Timed capture (3, 5, 10 s) | ☑️ | ☑️ |
+| Arrow-key nudging and resizing of the selection | ☑️ | ☑️ |
+| Capture the previous area again | ☑️ | — |
+| Scrolling capture | ☑️ | — |
+| Hide desktop icons while capturing | ☑️ | — |
+| Copy text from the screen (OCR) | ✅ | ✅ English |
+| QR code reading | ☑️ | — |
 
-- The rebuilt binary still needs user-granted Screen Recording access. Screen/window/area capture, scrolling in actual applications, live audio/camera, keys and pause/resume remain unverified on this Mac.
-- Exact pixel and interaction parity is not established. Native preferences, editor drawing/undo and background sheet were visually checked against official reference media.
-- Multi-screen selection spanning displays, reverse scrolling, sticky/animated page handling and detailed keyboard-selection behavior need further work.
-- Video redo, editable curved-arrow handles, text-height highlighting and camera/microphone device selection are implemented; live interaction checks remain. Explicit bitrate presets are incomplete.
-- Speech transcription depends on locally installed Apple speech assets and has not been exercised with user audio.
-- OIDC needs an actual identity provider integration test. SCIM Groups, enterprise compliance, remote storage operations, external security review, a deployed domain and Apple notarization are not supplied.
-- All local image/project originals and recording metadata are preserved for editing; flattened redaction is verified, editable projects retain source pixels.
+## Floating Preview and after capture
 
-Latest offline suite: 17 native tests and 11 server tests. Native coverage includes curved-arrow control persistence, text-line geometry, rendered MP4 pixels and per-segment camera trimming.
+| Feature | Mac | Windows & Linux |
+|---|---|---|
+| Floating Preview with action bar (copy, save, edit, pin, upload, close) | ✅ | ✅ |
+| Copies to the clipboard automatically | ✅ | ✅ |
+| Closes on its own after 15 s, pauses while hovered | ✅ | ☑️ |
+| Drag the capture into another app | ☑️ | ☑️ |
+| Save to an export folder, Save As | ☑️ | ☑️ |
+| Pinned captures (move, resize, opacity, click-through) | ☑️ | ☑️ |
+| Capture History with search, rename, delete | ☑️ | ✅ opens and reopens captures |
+
+## Editor
+
+| Feature | Mac | Windows & Linux |
+|---|---|---|
+| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, crop | ✅ | ✅ |
+| Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
+| Solid redaction that survives export | ✅ | ☑️ |
+| Arrow styles (plain, filled, double, curved) and text styles | ☑️ | — |
+| Resize, rotate and flip | ☑️ | — |
+| Combine images by dropping them in | ☑️ | — |
+| Backgrounds: gradients, own image, padding, corners, shadow, aspect ratio | ✅ | ✅ |
+| Copy, save, Drag to share, pin, upload | ✅ | ✅ copy · ☑️ others |
+| Editable projects (reopen and change annotations later) | ✅ | ✅ |
+
+## Recording
+
+| Feature | Mac | Windows & Linux |
+|---|---|---|
+| Record an area or the whole screen | ☑️ | ☑️ Windows · ☑️ Linux where WebKitGTK supports screen sharing |
+| Microphone and computer audio | ☑️ | ☑️ Windows (computer audio) |
+| Pause, resume, restart, cancel | ☑️ | ☑️ |
+| MP4 | ✅ export tested | ☑️ (MP4 or WebM, depending on the system) |
+| GIF export | ✅ export tested | — |
+| Camera bubble, click and keystroke overlays | ☑️ | — |
+| Video editor (trim, zoom, background, cursor effects) | ✅ export tested | — |
+| Audio transcription | ☑️ | — |
+
+## Sharing
+
+| Feature | Mac | Windows & Linux |
+|---|---|---|
+| Upload to your own Still Cloud server and copy the link | ☑️ | ✅ tested against a real server |
+| Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
+| Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM | ✅ 13 server tests | (same server) |
+
+## App
+
+| Feature | Mac | Windows & Linux |
+|---|---|---|
+| Lives in the menu bar / tray, no Dock icon | ✅ | ✅ |
+| Menu with icons and shortcuts | ✅ | ✅ |
+| Configurable global shortcuts | ✅ | ☑️ |
+| Settings: appearance, sounds, export folder, after-capture actions, start at login | ☑️ | ☑️ |
+| Automatic updates | ☑️ check, download, verify, relaunch | ☑️ signed updates, install card, About button |
+| `still://` actions (Mac) / `still --capture=…` (Windows & Linux) | ☑️ | ✅ |
+
+## Not done yet
+
+- **Windows and Linux:** scrolling capture, the video editor, GIF export, the camera bubble, click and keystroke
+  overlays, QR codes, extra arrow and text styles, rotate/flip/resize, combining images and hiding desktop icons.
+- **Mac:** Apple notarization (needs a paid Apple Developer account) and custom bitrate presets for recordings.
+- **Windows:** code-signed downloads.
+- **Everywhere:** recording hasn't been checked on real hardware yet, and the ☑️ items above need a hands-on pass.
+
+## How it's checked
+
+- `swift test`: 21 Mac tests covering image processing, redaction, projects, backgrounds, text recognition,
+  scrolling stitching and real MP4/GIF exports.
+- `cd Desktop && npm test`: JavaScript and Rust tests for selection geometry, the library, settings and image encoding.
+- `still --self-test`: runs on real Windows and Linux machines in GitHub Actions and checks capture, the Floating Preview,
+  copying, History, the editor, text recognition and uploading to a Still Cloud server.
+- `python3 -m unittest discover -s Cloud/tests`: 13 sharing-server tests.

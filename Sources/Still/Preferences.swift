@@ -35,7 +35,7 @@ import StillCore
     @AppStorage("previewSwipeLeft") var previewSwipeLeft = "dismiss"
     @AppStorage("previewSwipeRight") var previewSwipeRight = "copy"
     @AppStorage("previewPosition") var previewPosition = "bottomLeft"
-    @AppStorage("previewWidth") var previewWidth: Double = 260
+    @AppStorage("previewWidth") var previewWidth: Double = 280
     @AppStorage("previewTimeout") var previewTimeout: Double = 15
     @AppStorage("saveAfterCapture") var saveAfterCapture = false
     @AppStorage("annotateAfterCapture") var annotateAfterCapture = false
@@ -100,7 +100,7 @@ struct Shortcut: Codable, Identifiable, Equatable {
     var modifiers: UInt32
     var label: String
     static let defaults: [Shortcut] = [
-        .init(id: 5, title: "All-In-One", keyCode: 0x01, modifiers: UInt32(cmdKey|shiftKey|controlKey), label: "⌃⇧⌘S"),
+        .init(id: 5, title: "Capture Bar", keyCode: 0x01, modifiers: UInt32(cmdKey|shiftKey|controlKey), label: "⌃⇧⌘S"),
         .init(id: 1, title: "Capture Area", keyCode: UInt32(kVK_ANSI_4), modifiers: UInt32(cmdKey|shiftKey), label: "⇧⌘4"),
         .init(id: 2, title: "Capture Window", keyCode: UInt32(kVK_ANSI_4), modifiers: UInt32(cmdKey|shiftKey|controlKey), label: "⌃⇧⌘4"),
         .init(id: 3, title: "Capture Fullscreen", keyCode: UInt32(kVK_ANSI_5), modifiers: UInt32(cmdKey|shiftKey|controlKey), label: "⌃⇧⌘5"),

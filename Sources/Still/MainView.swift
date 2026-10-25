@@ -15,7 +15,7 @@ struct MainView: View {
     @State private var shortcuts = Shortcut.load()
     @State private var loginError: String?
     private let categories: [(String, String, Color)] = [
-        ("General", "gearshape.fill", .gray), ("Shortcuts", "command", .gray), ("Quick Access", "rectangle.bottomthird.inset.filled", .green),
+        ("General", "gearshape.fill", .gray), ("Shortcuts", "command", .gray), ("Floating Preview", "rectangle.bottomthird.inset.filled", .green),
         ("Wallpaper", "photo.fill", .cyan), ("Screenshots", "camera.fill", .blue), ("Screen Recording", "video.fill", .pink),
         ("Annotate", "pencil.tip", .orange), ("Cloud", "icloud.fill", .blue), ("Advanced", "wand.and.stars", .purple)
     ]
@@ -47,7 +47,7 @@ struct MainView: View {
         switch selected {
         case "General": general
         case "Shortcuts": shortcutPage
-        case "Quick Access": quickAccess
+        case "Floating Preview": quickAccess
         case "Wallpaper": wallpaper
         case "Screenshots": screenshots
         case "Screen Recording": recording
@@ -69,11 +69,11 @@ struct MainView: View {
             section("Sounds") { Toggle("Play sounds", isOn: $library.captureSound) }
             section("Export") {
                 HStack { Text("Export location"); Spacer(); Text(library.exportFolder.isEmpty ? "Desktop" : URL(fileURLWithPath: library.exportFolder).lastPathComponent).foregroundStyle(.secondary); Button("Choose…") { chooseFolder() } }
-                Text("Set the default save location used by the Quick Access Overlay, After Capture and Save actions.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Set the default save location used by the Floating Preview, After Capture and Save actions.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             section("After Capture") {
                 HStack { Text("Action").foregroundStyle(.secondary); Spacer(); Text("Screenshot").foregroundStyle(.secondary).frame(width: 85); Text("Recording").foregroundStyle(.secondary).frame(width: 75) }
-                afterRow("Show Quick Access Overlay", image: $library.showPreview, video: $prefs.recordingPreview)
+                afterRow("Show Floating Preview", image: $library.showPreview, video: $prefs.recordingPreview)
                 afterRow("Copy file to clipboard", image: $library.autoCopy, video: $prefs.copyRecording)
                 afterRow("Save", image: $prefs.saveAfterCapture)
                 afterRow("Upload to Cloud & copy link", image: $prefs.autoUploadImages, video: $prefs.autoUploadVideos)
@@ -84,7 +84,7 @@ struct MainView: View {
             if !library.permissionGranted {
                 section("Permissions") { HStack { Text("Screen recording access is required.").foregroundStyle(.secondary); Spacer(); Button("Enable Capture…") { AppController.shared.requestPermission() } }; if let error = library.permissionError { Text(error).font(.system(size: 10)).foregroundStyle(.secondary).textSelection(.enabled) }; Button("Refresh Permission Status") { AppController.shared.requestPermission() }.buttonStyle(.link) }
             }
-            HStack { Button("All-In-One") { AppController.shared.showAllInOne() }; Button("Capture History") { AppController.shared.showHistory() }; Spacer(); Button("Try Annotate") { AppController.shared.demo() } }
+            HStack { Button("Capture Bar") { AppController.shared.showAllInOne() }; Button("Capture History") { AppController.shared.showHistory() }; Spacer(); Button("Try Annotate") { AppController.shared.demo() } }
         }
     }
     private var shortcutPage: some View {
@@ -97,7 +97,7 @@ struct MainView: View {
     }
     private var quickAccess: some View {
         Group {
-            section("Quick Access Overlay") {
+            section("Floating Preview") {
                 Toggle("Show after screenshot", isOn: $library.showPreview)
                 Toggle("Show after recording", isOn: $prefs.recordingPreview)
                 choice("Position", selection: $prefs.previewPosition) { Text("Bottom Left").tag("bottomLeft"); Text("Bottom Right").tag("bottomRight"); Text("Top Left").tag("topLeft"); Text("Top Right").tag("topRight") }
@@ -199,7 +199,7 @@ struct MainView: View {
                 choice("Language", selection: $prefs.ocrLanguage) { Text("Automatically Detect Language").tag("auto"); Text("English").tag("en-US"); Text("Chinese, Simplified").tag("zh-Hans"); Text("Chinese, Traditional").tag("zh-Hant"); Text("French").tag("fr-FR"); Text("German").tag("de-DE"); Text("Japanese").tag("ja-JP"); Text("Korean").tag("ko-KR"); Text("Spanish").tag("es-ES"); Text("Portuguese").tag("pt-BR") }
                 Toggle("Keep line breaks", isOn: $prefs.ocrLineBreaks)
             }
-            section("All-In-One") { Toggle("Remember last selection", isOn: $prefs.rememberSelection) }
+            section("Capture Bar") { Toggle("Remember last selection", isOn: $prefs.rememberSelection) }
             section("Pinned Screenshots") { Toggle("Rounded corners", isOn: $prefs.pinRounded); Toggle("Shadow", isOn: $prefs.pinShadow); Toggle("Border", isOn: $prefs.pinBorder) }
             section("API") { Toggle("Allow URL scheme API", isOn: $prefs.allowURLScheme) }
             section("Permissions") { Button("Screen Recording Settings…") { AppController.shared.openPermissionSettings() }; Button("Refresh Permissions") { AppController.shared.requestPermission() } }

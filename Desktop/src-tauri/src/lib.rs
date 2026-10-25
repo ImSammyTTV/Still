@@ -79,10 +79,10 @@ fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
         .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false).center().build().ok());
 }
 
-// ---- Quick Access -------------------------------------------------------------------------------
+// ---- Floating Preview -------------------------------------------------------------------------------
 
 fn preview_size(app: &AppHandle) -> (f64, f64) {
-    match setting(app, "quickAccess.size").as_str() { Some("small") => (200.0, 136.0), Some("large") => (320.0, 216.0), _ => (252.0, 172.0) }
+    match setting(app, "quickAccess.size").as_str() { Some("small") => (250.0, 160.0), Some("large") => (340.0, 236.0), _ => (290.0, 196.0) }
 }
 
 fn layout_previews(app: &AppHandle) {
@@ -110,7 +110,7 @@ fn show_preview(app: &AppHandle, item: &Item, sound: bool) {
     let (w, h) = preview_size(app);
     let sound = sound && setting(app, "playSounds").as_bool().unwrap_or(true);
     let built = builder(app, &label, "quick.html", json!({ "id": item.id, "sound": if sound { "1" } else { "0" } }))
-        .title("Quick Access").inner_size(w, h).decorations(false).transparent(true).shadow(false).resizable(false)
+        .title("Floating Preview").inner_size(w, h).decorations(false).transparent(true).shadow(false).resizable(false)
         .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).visible_on_all_workspaces(true).build();
     let Ok(win) = built else { return };
     {
@@ -322,7 +322,7 @@ fn stop_recording_state(app: &AppHandle) {
 
 // ---- Tray, shortcuts ----------------------------------------------------------------------------
 
-const ACTIONS: [(&str, &str); 8] = [("allInOne", "All-In-One"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Fullscreen"),
+const ACTIONS: [(&str, &str); 8] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Fullscreen"),
     ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture")];
 
 fn run_action(app: &AppHandle, action: &str) {
@@ -392,7 +392,9 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     };
     let recording = st(app).session.lock().unwrap().recording.is_some();
     let update = st(app).session.lock().unwrap().update.clone();
-    let timers = SubmenuBuilder::new(app, "Timed Capture")
+    let mut timers = SubmenuBuilder::new(app, "Timed Capture");
+    if let Some(icon) = menu_icon("timer") { timers = timers.submenu_icon(icon); }
+    let timers = timers
         .item(&item("timer-3", "Capture Area in 3 Seconds", "timer", None, true)?)
         .item(&item("timer-5", "Capture Area in 5 Seconds", "timer", None, true)?)
         .item(&item("timer-10", "Capture Area in 10 Seconds", "timer", None, true)?).build()?;
@@ -402,7 +404,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         _ => item("update-check", "Check for Updates…", "update", None, true)?,
     };
     MenuBuilder::new(app)
-        .item(&item("allInOne", "All-In-One", "allInOne", accel("allInOne"), true)?).separator()
+        .item(&item("allInOne", "Capture Bar", "allInOne", accel("allInOne"), true)?).separator()
         .item(&item("area", "Capture Area", "area", accel("area"), true)?)
         .item(&item("window", "Capture Window", "window", accel("window"), true)?)
         .item(&item("fullscreen", "Capture Fullscreen", "fullscreen", accel("fullscreen"), true)?)

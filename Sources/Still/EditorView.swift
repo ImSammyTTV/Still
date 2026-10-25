@@ -9,6 +9,8 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+            HStack(spacing: 0) {
+            toolRail
             GeometryReader { geometry in
                 let layout = model.canvasLayout
                 let fit = min(max(100, geometry.size.width-60)/layout.size.width, max(100, geometry.size.height-60)/layout.size.height)
@@ -26,6 +28,7 @@ struct EditorView: View {
                         .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                 }
                 .background(Color(nsColor: .underPageBackgroundColor))
+            }
             }
             bottomBar
         }
@@ -69,15 +72,6 @@ struct EditorView: View {
                 } label: { Image(systemName: "rectangle.and.arrow.up.right.and.arrow.down.left").frame(width: 25, height: 26) }.menuStyle(.borderlessButton).fixedSize().help("Resize, rotate & flip")
                 roundButton("photo", "Background") { model.activeSheet = .background }
             }
-            HStack(spacing: 1) {
-                ForEach(tools) { tool in
-                    Button { model.tool = tool; model.selectedID = nil } label: {
-                        Image(systemName: tool.symbol).font(.system(size: 13, weight: .medium)).frame(width: 29, height: 27)
-                            .foregroundStyle(model.tool == tool ? Color.white : Color.primary)
-                            .background(model.tool == tool ? Color.accentColor : .clear, in: Capsule())
-                    }.buttonStyle(.plain).help("\(tool.title) (\(tool.key.uppercased()))").accessibilityLabel(tool.title).accessibilityAddTraits(model.tool == tool ? .isSelected : [])
-                }
-            }.padding(3).background(Color.primary.opacity(0.06), in: Capsule())
             Menu {
                 ForEach(palette.colors, id: \.self) { hex in
                     Button { model.setColor(hex) } label: { Label(colorName(hex), systemImage: model.color == hex ? "checkmark.circle.fill" : "circle.fill") }
@@ -112,6 +106,21 @@ struct EditorView: View {
         .padding(.leading, 79).padding(.trailing, 14).frame(height: 48)
         .background(NativeMaterial(material: .titlebar)).overlay(alignment: .bottom) { Divider() }
     }
+    /// Still's tool rail: drawing tools stacked down the left edge of the editor.
+    private var toolRail: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 3) {
+                ForEach(tools) { tool in
+                    Button { model.tool = tool; model.selectedID = nil } label: {
+                        Image(systemName: tool.symbol).font(.system(size: 14, weight: .medium)).frame(width: 34, height: 32)
+                            .foregroundStyle(model.tool == tool ? Color.black.opacity(0.85) : Color.primary)
+                            .background(model.tool == tool ? Color(red: 0.85, green: 0.91, blue: 0.68) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).help("\(tool.title) (\(tool.key.uppercased()))").accessibilityLabel(tool.title).accessibilityAddTraits(model.tool == tool ? .isSelected : [])
+                }
+            }.padding(.vertical, 10).padding(.horizontal, 7)
+        }.frame(width: 48).background(NativeMaterial(material: .titlebar)).overlay(alignment: .trailing) { Divider() }
+    }
     private var bottomBar: some View {
         HStack(spacing: 9) {
             Menu(model.zoom == 0 ? "Fit" : "\(Int(model.zoom*100))%") { Button("Fit to Window") { model.zoom = 0 }; ForEach([0.25, 0.5, 1.0, 1.5, 2.0, 3, 4], id: \.self) { value in Button("\(Int(value*100))%") { model.zoom = value } } }.menuStyle(.borderlessButton).fixedSize().padding(7).background(Color.primary.opacity(0.06), in: Capsule())
@@ -119,7 +128,7 @@ struct EditorView: View {
             Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.buttonStyle(.plain).disabled(!model.canRedo).help("Redo (⇧⌘Z)").accessibilityLabel("Redo").keyboardShortcut("z", modifiers: [.command, .shift])
             Text("\(model.source.width) × \(model.source.height)\(model.dirty ? " •" : "")").font(.system(size: 10)).foregroundStyle(.secondary)
             Spacer()
-            Text("≡   Drag Me   ≡").padding(.horizontal, 13).padding(.vertical, 7).background(Color.primary.opacity(0.07), in: Capsule())
+            Text("Drag to share").padding(.horizontal, 13).padding(.vertical, 7).background(Color.primary.opacity(0.07), in: Capsule())
                 .overlay(DragSource(file: { model.dragFile() }).accessibilityLabel("Drag the edited image to another app"))
             Spacer()
             EditorStatus(library: model.library).frame(maxWidth: 170)

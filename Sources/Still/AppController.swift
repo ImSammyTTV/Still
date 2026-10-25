@@ -186,7 +186,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         edit.submenu = editMenu; main.addItem(edit)
         let captureItem = NSMenuItem(); let captureMenu = NSMenu(title: "Capture")
-        for (title, action) in [("All-In-One", #selector(allInOne)), ("Capture Area", #selector(captureArea)), ("Capture Window", #selector(captureWindow)), ("Capture Full Screen", #selector(captureScreen)), ("Capture Text", #selector(captureText)), ("Scrolling Capture", #selector(scrollingCapture)), ("Record / Stop Recording", #selector(record)), ("Capture Previous Area", #selector(capturePrevious))] {
+        for (title, action) in [("Capture Bar", #selector(allInOne)), ("Capture Area", #selector(captureArea)), ("Capture Window", #selector(captureWindow)), ("Capture Full Screen", #selector(captureScreen)), ("Capture Text", #selector(captureText)), ("Scrolling Capture", #selector(scrollingCapture)), ("Record / Stop Recording", #selector(record)), ("Capture Previous Area", #selector(capturePrevious))] {
             let entry = NSMenuItem(title: title,action: action,keyEquivalent: ""); entry.target = self; captureMenu.addItem(entry)
         }
         captureMenu.addItem(.separator())
@@ -204,7 +204,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Still capture menu")
         menu = NSMenu()
-        menu.addItem(withTitle: "All-In-One", action: #selector(allInOne), keyEquivalent: "")
+        menu.addItem(withTitle: "Capture Bar", action: #selector(allInOne), keyEquivalent: "")
         menu.addItem(.separator())
         let shortcuts = Shortcut.load()
         for (id, title, action) in [(UInt32(1), "Capture Area", #selector(captureArea)), (2, "Capture Window", #selector(captureWindow)), (3, "Capture Full Screen", #selector(captureScreen)), (4, "Record / Stop Recording", #selector(record)), (8, "Capture Text", #selector(captureText))] {
@@ -466,7 +466,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let screen else { return }
         let prefs = Preferences.shared, width = prefs.previewWidth
         let ratio = item.width > 0 && item.height > 0 ? Double(item.height)/Double(item.width) : 0.65
-        let height = max(110, min(280, width*ratio))
+        let height = max(110, min(280, width*ratio)) + 34 // image plus the action bar
         let left = prefs.previewPosition.contains("Left"), top = prefs.previewPosition.contains("top")
         for id in previewOrder { if let old = previewPanels[id] { old.setFrameOrigin(CGPoint(x: old.frame.minX, y: old.frame.minY+(top ? -1 : 1)*(height+14))) } }
         let x = left ? screen.visibleFrame.minX+22 : screen.visibleFrame.maxX-width-22
@@ -516,14 +516,14 @@ extension AppController {
     }
     /// Gives the menu bar menu its icons and shows each capture's shortcut in the native right-hand column.
     private func decorateMenu() {
-        let symbols = ["All-In-One": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
+        let symbols = ["Capture Bar": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
                        "Record / Stop Recording": "record.circle", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
                        "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
                        "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {
             if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
-            let id = item.title == "All-In-One" ? 5 : item.tag
+            let id = item.title == "Capture Bar" ? 5 : item.tag
             guard id > 0, let shortcut = shortcuts.first(where: { $0.id == UInt32(id) }), let code = shortcut.keyCode, let key = Shortcut.keyCharacters[code] else { item.keyEquivalent = ""; continue }
             item.keyEquivalent = key
             var flags: NSEvent.ModifierFlags = []

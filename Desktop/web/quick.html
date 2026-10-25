@@ -2,39 +2,39 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Quick Access</title>
+<title>Floating Preview</title>
 <link rel="stylesheet" href="style.css">
 <style>
   html, body { background: transparent; }
-  .card { position: absolute; inset: 6px; border-radius: 12px; overflow: hidden; background: #111; box-shadow: 0 6px 22px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.12);
-    animation: slide .28s cubic-bezier(.2,.9,.3,1.1); }
+  /* Still's floating preview: the capture on top, a permanent action bar underneath. */
+  .card { position: absolute; inset: 6px; border-radius: 14px; overflow: hidden; display: grid; grid-template-rows: 1fr 36px; background: #1f2021;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.12); animation: slide .28s cubic-bezier(.2,.9,.3,1.1); cursor: grab; }
   body.right .card { animation-name: slide-right; }
   @keyframes slide { from { transform: translateX(-120%); } }
   @keyframes slide-right { from { transform: translateX(120%); } }
   .card.leaving { transition: transform .22s ease-in, opacity .22s; transform: translateX(-120%); opacity: 0; }
   body.right .card.leaving { transform: translateX(120%); }
-  #media { position: absolute; inset: 0; }
+  #media { position: relative; overflow: hidden; background: #111; border-bottom: 2px solid #d9e8ad; }
   .media { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; }
-  .hover { position: absolute; inset: 0; background: rgba(0,0,0,.42); opacity: 0; transition: opacity .15s; display: grid; place-items: center; }
-  .card:hover .hover { opacity: 1; }
-  .center { display: flex; flex-direction: column; gap: 6px; }
-  .center .btn { min-width: 86px; height: 28px; background: rgba(255,255,255,.92); color: #1d1d1f; font-weight: 600; }
-  .corner { position: absolute; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); color: #1d1d1f; display: grid; place-items: center; }
-  .corner svg { width: 14px; height: 14px; }
-  .tl { left: 7px; top: 7px; } .tr { right: 7px; top: 7px; } .bl { left: 7px; bottom: 7px; } .br { right: 7px; bottom: 7px; }
   .badge { position: absolute; right: 8px; bottom: 8px; padding: 2px 7px; border-radius: 999px; font-size: 11px; background: rgba(0,0,0,.6); color: #fff; }
-  .card:hover .badge { display: none; }
+  .actions { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; cursor: default; }
+  .actions button { width: 30px; height: 26px; border: 0; border-radius: 8px; background: transparent; color: #e8e8ea; display: grid; place-items: center; }
+  .actions button:hover { background: rgba(255,255,255,.1); }
+  .actions button.primary { width: auto; padding: 0 10px; background: #d9e8ad; color: #1b211d; font-size: 12px; font-weight: 600; gap: 5px; display: inline-flex; align-items: center; }
+  .actions svg { width: 15px; height: 15px; }
 </style>
 </head>
 <body>
 <div class="card" id="card">
   <div id="media"></div>
-  <div class="hover">
-    <div class="center"><button class="btn" id="copy">Copy</button><button class="btn" id="save">Save</button><button class="btn" id="upload">Upload</button></div>
-    <button class="corner tl" id="close" title="Close"><i data-lucide="x"></i></button>
-    <button class="corner tr" id="edit" title="Annotate"><i data-lucide="pencil"></i></button>
-    <button class="corner bl" id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
-    <button class="corner br" id="trash" title="Delete"><i data-lucide="trash-2"></i></button>
+  <div class="actions">
+    <button class="primary" id="copy" title="Copy"><i data-lucide="copy"></i>Copy</button>
+    <button id="save" title="Save"><i data-lucide="download"></i></button>
+    <button id="edit" title="Annotate"><i data-lucide="pencil"></i></button>
+    <button id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
+    <button id="upload" title="Upload and copy link"><i data-lucide="cloud-upload"></i></button>
+    <button id="trash" title="Delete"><i data-lucide="trash-2"></i></button>
+    <button id="close" title="Close"><i data-lucide="x"></i></button>
   </div>
 </div>
 <script src="bridge.js"></script>
