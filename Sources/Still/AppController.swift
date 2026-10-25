@@ -207,7 +207,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let shortcuts = Shortcut.load()
         for (id, title, action) in [(UInt32(1), "Capture Area", #selector(captureArea)), (2, "Capture Window", #selector(captureWindow)), (3, "Capture Full Screen", #selector(captureScreen)), (4, "Record / Stop Recording", #selector(record)), (8, "Capture Text", #selector(captureText))] {
             let label = shortcuts.first(where: { $0.id == id })?.label ?? ""
-            let item = NSMenuItem(title: label.isEmpty ? title : "\(title)     \(label)", action: action, keyEquivalent: ""); item.target = self; item.tag = Int(id); menu.addItem(item)
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; item.tag = Int(id); menu.addItem(item)
+            _ = label
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Image…", action: #selector(importImage), keyEquivalent: "")
@@ -223,6 +224,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let quit = NSMenuItem(title: "Quit Still", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         quit.target = NSApp; menu.addItem(quit)
         for item in menu.items where item.target == nil { item.target = self }
+        decorateMenu()
         statusItem.menu = menu
     }
     @objc func openMain() { showMain() }
@@ -506,8 +508,36 @@ extension AppController {
     func setMenuBarVisible(_ visible: Bool) { statusItem?.isVisible = visible || recorder.recording }
     func reloadShortcuts() {
         hotkeys.register(); if !hotkeys.unavailable.isEmpty { library.toast("A shortcut is already in use. Choose a different combination.") }
-        for shortcut in Shortcut.load() { if let item = menu.items.first(where: { $0.tag == Int(shortcut.id) && $0.tag > 0 }) { item.title = shortcut.menuLabel() } }
+        decorateMenu()
     }
+    /// Gives the menu bar menu its icons and shows each capture's shortcut in the native right-hand column.
+    private func decorateMenu() {
+        let symbols = ["All-In-One": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
+                       "Record / Stop Recording": "record.circle", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
+                       "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
+                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Quit Still": "power"]
+        let shortcuts = Shortcut.load()
+        for item in menu.items where !item.isSeparatorItem {
+            if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
+            let id = item.title == "All-In-One" ? 5 : item.tag
+            guard id > 0, let shortcut = shortcuts.first(where: { $0.id == UInt32(id) }), let code = shortcut.keyCode, let key = Self.keyCharacters[code] else { item.keyEquivalent = ""; continue }
+            item.keyEquivalent = key
+            var flags: NSEvent.ModifierFlags = []
+            if shortcut.modifiers & UInt32(cmdKey) != 0 { flags.insert(.command) }
+            if shortcut.modifiers & UInt32(shiftKey) != 0 { flags.insert(.shift) }
+            if shortcut.modifiers & UInt32(optionKey) != 0 { flags.insert(.option) }
+            if shortcut.modifiers & UInt32(controlKey) != 0 { flags.insert(.control) }
+            item.keyEquivalentModifierMask = flags
+        }
+    }
+    private static let keyCharacters: [UInt32: String] = {
+        var map: [UInt32: String] = [:]
+        let digits: [Int] = [kVK_ANSI_0, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
+        for (n, code) in digits.enumerated() { map[UInt32(code)] = String(n) }
+        let letters: [(Int, String)] = [(kVK_ANSI_A, "a"), (kVK_ANSI_S, "s"), (kVK_ANSI_D, "d"), (kVK_ANSI_F, "f"), (kVK_ANSI_H, "h"), (kVK_ANSI_G, "g"), (kVK_ANSI_Z, "z"), (kVK_ANSI_X, "x"), (kVK_ANSI_C, "c"), (kVK_ANSI_V, "v"), (kVK_ANSI_B, "b"), (kVK_ANSI_Q, "q"), (kVK_ANSI_W, "w"), (kVK_ANSI_E, "e"), (kVK_ANSI_R, "r"), (kVK_ANSI_Y, "y"), (kVK_ANSI_T, "t"), (kVK_ANSI_O, "o"), (kVK_ANSI_U, "u"), (kVK_ANSI_I, "i"), (kVK_ANSI_P, "p"), (kVK_ANSI_L, "l"), (kVK_ANSI_J, "j"), (kVK_ANSI_K, "k"), (kVK_ANSI_N, "n"), (kVK_ANSI_M, "m")]
+        for (code, key) in letters { map[UInt32(code)] = key }
+        return map
+    }()
     /// macOS keeps ⇧⌘4 for its own screenshot tool (symbolic hotkey 30) unless it is turned off in Keyboard settings.
     func checkSystemScreenshotShortcut() {
         guard let area = Shortcut.load().first(where: { $0.id == 1 }), area.keyCode == UInt32(kVK_ANSI_4), area.modifiers == UInt32(cmdKey|shiftKey) else { return }
@@ -544,7 +574,8 @@ extension AppController {
         library.busy = true
         let previous = NSWorkspace.shared.frontmostApplication
         if previous?.bundleIdentifier != Bundle.main.bundleIdentifier { lastExternalApp = previous }
-        hideForCapture(); lastExternalApp?.activate(); DesktopCover.shared.beginCapture()
+        // Don't activate anything before the screen is grabbed: that would close open menus and Spotlight.
+        DesktopCover.shared.beginCapture()
         Task {
             if delay > 0 { library.toast("Capture starts in \(delay) seconds") }
             if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay)*1_000_000_000) }

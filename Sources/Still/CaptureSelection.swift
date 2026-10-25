@@ -45,25 +45,31 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     func begin(_ purpose: SelectionPurpose) {
         guard !active else { return }
         self.purpose = purpose; active = true; windowMode = false; windows = OverlayWindow.onScreen()
-        // Show the overlay straight away over the live screen; the still image arrives a moment later
-        // for the magnifier, freeze-screen and recording/scrolling crops.
-        for screen in NSScreen.screens {
-            let panel = SelectionPanel(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            panel.title = "Capture Selection"
-            panel.level = .screenSaver; panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = false
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
-            let view = SelectionSurface(screen: screen, coordinator: self)
-            view.frame = CGRect(origin: .zero, size: screen.frame.size)
-            panel.contentView = view; panels.append(panel); views.append(view)
-            panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(view)
-        }
-        showBar(); NSApp.activate(ignoringOtherApps: true)
-        for screen in NSScreen.screens {
-            Task {
-                guard let image = try? await ScreenCaptureAPI.image(screen: screen), active else { return }
-                images[ObjectIdentifier(screen)] = image
-                views.first(where: { $0.display === screen })?.setSnapshot(image)
+        // Grab every display first, before Still takes focus, so open menus, Spotlight and hover states
+        // are in the picture. The overlay then sits on that frozen image, like the system tool.
+        Task {
+            var shots: [ObjectIdentifier: CGImage] = [:]
+            await withTaskGroup(of: (ObjectIdentifier, CGImage?).self) { group in
+                for screen in NSScreen.screens { group.addTask { @MainActor in (ObjectIdentifier(screen), try? await ScreenCaptureAPI.image(screen: screen)) } }
+                for await (id, image) in group { if let image { shots[id] = image } }
             }
+            guard active else { return }
+            guard !shots.isEmpty else { close(); onError?(NSError(domain: "Still", code: 2, userInfo: [NSLocalizedDescriptionKey: "Still couldn’t read the screen. Check Screen Recording permission."])); return }
+            images = shots
+            for screen in NSScreen.screens {
+                let panel = SelectionPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                panel.title = "Capture Selection"
+                panel.level = .screenSaver; panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = false
+                panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
+                let view = SelectionSurface(screen: screen, coordinator: self)
+                view.frame = CGRect(origin: .zero, size: screen.frame.size)
+                if let shot = shots[ObjectIdentifier(screen)] { view.setSnapshot(shot) }
+                panel.contentView = view; panels.append(panel); views.append(view)
+                panel.orderFrontRegardless()
+            }
+            showBar()
+            NSApp.activate(ignoringOtherApps: true)
+            if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil) }
         }
     }
     private func showBar() {
@@ -88,11 +94,10 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         Task {
             do {
                 let image: CGImage
-                if let source, Preferences.shared.freezeScreen || purpose == .scroll || purpose == .recording {
+                if let source {
                     let scaleX = CGFloat(source.width)/screen.frame.width, scaleY = CGFloat(source.height)/screen.frame.height
                     image = try ImageRenderer.crop(source, to: CGRect(x: rect.minX*scaleX, y: rect.minY*scaleY, width: rect.width*scaleX, height: rect.height*scaleY))
                 } else {
-                    // Still's own windows are excluded from the capture, so there is no need to wait for the overlay to fade.
                     image = try await ScreenCaptureAPI.image(screen: screen, rect: rect)
                 }
                 onSelected?(image, screen, rect, purpose)
@@ -200,7 +205,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         snapshot = image
         CATransaction.begin(); CATransaction.setDisableActions(true)
         magnifier.contents = image
-        if Preferences.shared.freezeScreen { frozen.contents = image; frozen.isHidden = false }
+        frozen.contents = image; frozen.isHidden = false
         CATransaction.commit()
         refresh()
     }

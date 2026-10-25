@@ -126,7 +126,6 @@ struct MainView: View {
                 TextField("File name", text: $prefs.filenamePattern)
                 Text("Available tokens: {date}, {time}, {width}, {height}").font(.system(size: 10)).foregroundStyle(.secondary)
                 Toggle("Capture mouse cursor", isOn: $prefs.includeCursor)
-                Toggle("Freeze screen when taking a screenshot", isOn: $prefs.freezeScreen)
             }
             section("Window Screenshots") {
                 Toggle("Include background", isOn: $prefs.windowBackground)
