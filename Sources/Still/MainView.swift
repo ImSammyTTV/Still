@@ -209,7 +209,7 @@ struct MainView: View {
         VStack(spacing: 18) {
             Image(systemName: "viewfinder").font(.system(size: 60, weight: .light)).foregroundStyle(Color.accentColor)
             Text("Still").font(.system(size: 25, weight: .bold)); Text("Native capture for your Mac").foregroundStyle(.secondary)
-            Text("Version 1.0 · Independent implementation").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")").font(.system(size: 11)).foregroundStyle(.secondary)
             Button("Open Feature Coverage") { if let path = Bundle.main.resourceURL?.appendingPathComponent("Documentation/FEATURES.md") { NSWorkspace.shared.open(path) } }
             Button("Quit Still") { NSApp.terminate(nil) }
         }.frame(maxWidth: .infinity).padding(.top, 55)

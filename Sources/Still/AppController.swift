@@ -522,7 +522,7 @@ extension AppController {
                        "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {
-            if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
+            if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); Self.keepImageVisible(item) }
             let id = item.title == "Capture Bar" ? 5 : item.tag
             guard id > 0, let shortcut = shortcuts.first(where: { $0.id == UInt32(id) }), let code = shortcut.keyCode, let key = Shortcut.keyCharacters[code] else { item.keyEquivalent = ""; continue }
             item.keyEquivalent = key
@@ -533,6 +533,11 @@ extension AppController {
             if shortcut.modifiers & UInt32(controlKey) != 0 { flags.insert(.control) }
             item.keyEquivalentModifierMask = flags
         }
+    }
+    /// macOS 27 hides menu item images unless the item asks to keep them. Set it by key so the
+    /// app still builds with older SDKs that don't have `preferredImageVisibility`.
+    static func keepImageVisible(_ item: NSMenuItem) {
+        if item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) { item.setValue(1, forKey: "preferredImageVisibility") }
     }
     /// macOS keeps ⇧⌘4 for its own screenshot tool (symbolic hotkey 30) unless it is turned off in Keyboard settings.
     func checkSystemScreenshotShortcut() {
