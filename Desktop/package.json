@@ -1,7 +1,7 @@
 {
   "name": "still-desktop",
   "productName": "Still",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Capture, annotate and record your screen on Windows and Linux.",
   "author": "ImSammyTTV",
   "homepage": "https://github.com/ImSammyTTV/Still",
@@ -29,7 +29,7 @@
   "build": {
     "appId": "app.still.desktop",
     "productName": "Still",
-    "copyright": "\u00a9 ImSammyTTV",
+    "copyright": "© ImSammyTTV",
     "directories": {
       "output": "dist",
       "buildResources": "build"
