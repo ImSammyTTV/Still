@@ -11,6 +11,7 @@ struct MainView: View {
     @State private var shortcutSearch = ""
     @State private var cameraDevices: [AVCaptureDevice] = []
     @State private var audioDevices: [AVCaptureDevice] = []
+    @AppStorage("autoUpdate") private var autoUpdate = true
     @State private var shortcuts = Shortcut.load()
     @State private var loginError: String?
     private let categories: [(String, String, Color)] = [
@@ -60,6 +61,7 @@ struct MainView: View {
         Group {
             section("App") {
                 Toggle("Launch at login", isOn: Binding(get: { SMAppService.mainApp.status == .enabled }, set: { do { try prefs.setLaunchAtLogin($0) } catch { loginError = error.localizedDescription } }))
+                Toggle("Check for updates automatically", isOn: $autoUpdate)
                 Toggle("Show menu bar icon", isOn: $prefs.showMenuBar).onChange(of: prefs.showMenuBar) { _, value in AppController.shared.setMenuBarVisible(value) }
                 choice("Appearance", selection: $prefs.appearance) { Text("System Default").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.onChange(of: prefs.appearance) { _, _ in AppController.shared.applyAppearance() }
             }

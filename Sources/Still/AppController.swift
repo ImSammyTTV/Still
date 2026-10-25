@@ -147,6 +147,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !UserDefaults.standard.bool(forKey: "welcomed") { UserDefaults.standard.set(true, forKey: "welcomed"); showMain() }
         if CommandLine.arguments.contains("--editor-demo") { demo() }
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
+        Updater.shared.start()
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -173,6 +174,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let main = NSMenu()
         let app = NSMenuItem(); let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Still", action: #selector(about), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         appMenu.addItem(withTitle: "Settings…", action: #selector(settings), keyEquivalent: ",")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Still", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -219,6 +221,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: "Hide / Show Overlays", action: #selector(toggleOverlays), keyEquivalent: "")
         menu.addItem(withTitle: "Toggle Desktop Icons", action: #selector(toggleDesktop), keyEquivalent: "")
         menu.addItem(withTitle: "Unlock Pinned Screenshots", action: #selector(unlockPins), keyEquivalent: "")
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         menu.addItem(withTitle: "Settings…", action: #selector(settings), keyEquivalent: "")
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Still", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
@@ -246,6 +249,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func captureScreen() { capture(.screen) }
     @objc func captureText() { capture(.text) }
     @objc func record() { toggleRecording() }
+    @objc func checkForUpdates() { Updater.shared.check(manual: true) }
     @objc func about() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Still", .applicationVersion: "1.0", .credits: NSAttributedString(string: "A personal capture studio for your Mac.\nBuilt with Swift, AppKit & SwiftUI.\nAll captures and text recognition stay on your Mac.")])
     }
@@ -515,7 +519,7 @@ extension AppController {
         let symbols = ["All-In-One": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
                        "Record / Stop Recording": "record.circle", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
                        "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
-                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Quit Still": "power"]
+                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {
             if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
