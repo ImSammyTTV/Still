@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Capture Selection</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: #000; cursor: crosshair; }
+  body.window-mode { cursor: none; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  .bar { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); display: none; align-items: center; height: 62px; padding: 0 10px;
+    border-radius: 16px; background: rgba(36, 36, 38, 0.92); color: #f5f5f7; border: 1px solid rgba(255,255,255,.1); box-shadow: 0 12px 40px rgba(0,0,0,.45); cursor: default; backdrop-filter: blur(30px); }
+  body.primary .bar { display: flex; }
+  .mode { width: 66px; height: 51px; border: 0; border-radius: 12px; background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: #f5f5f7; }
+  .mode span { font-size: 10px; color: rgba(245,245,247,.6); }
+  .mode:hover { background: rgba(255,255,255,.06); }
+  .mode.active { background: rgba(255,255,255,.12); }
+  .mode svg { width: 17px; height: 17px; }
+  .divider { width: 1px; height: 34px; background: rgba(255,255,255,.12); margin: 0 7px; }
+  .dim { width: 52px; height: 28px; border: 0; border-radius: 6px; text-align: center; background: rgba(255,255,255,.07); outline: none; color: #f5f5f7; }
+  .times { margin: 0 6px; color: rgba(245,245,247,.5); }
+  .camera { position: fixed; pointer-events: none; display: none; color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,.9)); transform: translate(-50%, -50%); }
+  body.window-mode .camera { display: block; }
+  .menu { color: #f5f5f7; background: #2a2a2d; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="camera" id="camera"><i data-lucide="camera" style="width:24px;height:24px"></i></div>
+<div class="bar" id="bar">
+  <button class="mode active" data-mode="area" title="Area (A)"><i data-lucide="scan"></i><span>Area</span></button>
+  <button class="mode" data-mode="fullscreen" title="Fullscreen (F)"><i data-lucide="monitor"></i><span>Fullscreen</span></button>
+  <button class="mode" data-mode="window" title="Window (Space)"><i data-lucide="app-window"></i><span>Window</span></button>
+  <button class="mode" data-mode="timer" title="Timer (T)"><i data-lucide="timer"></i><span>Timer</span></button>
+  <div class="divider"></div>
+  <button class="mode" data-mode="text" title="Capture Text (O)"><i data-lucide="scan-text"></i><span>OCR</span></button>
+  <button class="mode" data-mode="record" title="Record (V)"><i data-lucide="video"></i><span>Recording</span></button>
+  <div class="divider"></div>
+  <input class="dim" id="width" placeholder="W" aria-label="Capture width">
+  <span class="times">×</span>
+  <input class="dim" id="height" placeholder="H" aria-label="Capture height">
+  <button class="mode" id="aspect" title="Aspect ratio" style="width:40px"><i data-lucide="ratio"></i></button>
+</div>
+<script src="bridge.js"></script>
+<script src="vendor/lucide.min.js"></script>
+<script src="shared/geometry.js"></script>
+<script src="common.js"></script>
+<script src="overlay.js"></script>
+</body>
+</html>

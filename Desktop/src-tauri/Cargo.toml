@@ -1,0 +1,39 @@
+[package]
+name = "still"
+version = "1.0.1"
+description = "Capture, annotate and record your screen"
+authors = ["ImSammyTTV"]
+edition = "2021"
+
+[lib]
+name = "still_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.3", features = ["tray-icon", "image-png", "protocol-asset"] }
+tauri-plugin-global-shortcut = "=2.4.1"
+tauri-plugin-clipboard-manager = "=2.4.2"
+tauri-plugin-dialog = "=2.8.2"
+tauri-plugin-notification = "=2.6.0"
+tauri-plugin-autostart = "=2.7.0"
+tauri-plugin-updater = "=2.13.3"
+tauri-plugin-process = "=2.4.0"
+tauri-plugin-single-instance = "=2.5.3"
+drag = "=2.1.1"
+xcap = "=0.9.8"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "=0.23.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

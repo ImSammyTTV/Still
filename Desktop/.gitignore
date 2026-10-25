@@ -1,1 +1,5 @@
+node_modules/
+dist/
 selftest-out/
+src-tauri/target/
+src-tauri/gen/

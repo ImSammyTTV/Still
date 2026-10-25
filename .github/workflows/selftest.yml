@@ -5,39 +5,45 @@ on:
     paths: ['Desktop/**']
 permissions:
   contents: read
+env:
+  LINUX_DEPS: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libpipewire-0.3-dev libclang-dev libxcb1-dev libxcb-randr0-dev libdbus-1-dev libgbm-dev libegl-dev libwayland-dev xvfb openbox dbus-x11
 jobs:
   selftest:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: Desktop
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
-        with:
-          node-version: 22
+        with: { node-version: 22 }
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
       - run: npm ci
-      - name: Download the Electron binary
-        run: node node_modules/electron/install.js
-      - name: Run the app's self-test (Windows)
+      - run: npm test
+      - name: Build
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+      - name: Self-test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath node_modules/electron/dist/electron.exe -ArgumentList '.','--self-test=selftest-out' -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
-          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error 'Self-test timed out' }
+          $p = Start-Process -FilePath src-tauri/target/debug/still.exe -ArgumentList '--self-test=selftest-out' -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); Write-Error 'Self-test timed out' }
           Get-Content out.txt, err.txt -ErrorAction SilentlyContinue
           Get-Content selftest-out/results.json
-      - name: Run the app's self-test (Linux)
+      - name: Self-test (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y xvfb openbox x11-utils
           Xvfb :99 -screen 0 1440x900x24 & sleep 2
-          export DISPLAY=:99; openbox & sleep 1
-          timeout 120 node_modules/electron/dist/electron . --no-sandbox --self-test=selftest-out || true
+          export DISPLAY=:99 XDG_SESSION_TYPE=x11
+          openbox & sleep 1
+          dbus-run-session -- timeout 180 src-tauri/target/debug/still --self-test=selftest-out || true
           cat selftest-out/results.json
       - uses: actions/upload-artifact@v7
         if: always()

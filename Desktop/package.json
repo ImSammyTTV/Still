@@ -6,133 +6,19 @@
   "author": "ImSammyTTV",
   "homepage": "https://github.com/ImSammyTTV/Still",
   "desktopName": "still.desktop",
-  "main": "src/main/main.js",
   "private": true,
   "scripts": {
-    "start": "electron .",
-    "demo": "electron . --editor-demo",
-    "test": "node --test test/*.test.js",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux",
-    "dist": "electron-builder --win --linux"
+    "tauri": "tauri",
+    "start": "tauri dev",
+    "demo": "tauri dev -- -- --editor-demo",
+    "test": "node --test test/*.test.js && cargo test --manifest-path src-tauri/Cargo.toml",
+    "build": "tauri build"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
     "@tesseract.js-data/eng": "1.0.0",
-    "electron-updater": "6.8.10",
     "lucide": "1.61.0",
     "tesseract.js": "7.0.0"
-  },
-  "devDependencies": {
-    "electron": "45.0.0",
-    "electron-builder": "26.18.0"
-  },
-  "build": {
-    "appId": "app.still.desktop",
-    "productName": "Still",
-    "copyright": "\u00a9 ImSammyTTV",
-    "directories": {
-      "output": "dist",
-      "buildResources": "build"
-    },
-    "files": [
-      "src/**",
-      "build/tray*.png",
-      "build/icon.png",
-      "package.json",
-      "!node_modules/tesseract.js-core/*.wasm.js",
-      "!node_modules/@tesseract.js-data/eng/4.0.0/**",
-      "!**/*.{md,map,ts}",
-      "!**/{test,tests,docs,example,examples}/**"
-    ],
-    "asarUnpack": [
-      "node_modules/tesseract.js/**",
-      "node_modules/tesseract.js-core/**",
-      "node_modules/@tesseract.js-data/**"
-    ],
-    "artifactName": "Still-${version}-${os}-${arch}.${ext}",
-    "win": {
-      "icon": "build/icon.png",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Still"
-    },
-    "linux": {
-      "icon": "build/icon.png",
-      "category": "Graphics",
-      "synopsis": "Screenshots, annotation and screen recording",
-      "maintainer": "ImSammyTTV",
-      "executableName": "still",
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "rpm",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "tar.gz",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "desktop": {
-        "entry": {
-          "StartupWMClass": "Still"
-        }
-      }
-    },
-    "deb": {
-      "depends": [
-        "x11-utils"
-      ],
-      "recommends": [
-        "xdg-desktop-portal"
-      ]
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "ImSammyTTV",
-        "repo": "Still"
-      }
-    ],
-    "electronLanguages": [
-      "en-US"
-    ]
   }
 }

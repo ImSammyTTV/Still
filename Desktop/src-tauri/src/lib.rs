@@ -1,0 +1,859 @@
+mod capture;
+mod library;
+mod settings;
+
+use capture::Grab;
+use image::RgbaImage;
+use library::{Item, Library};
+use serde_json::{json, Value};
+use settings::Settings;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
+
+// ---- State ------------------------------------------------------------------------------------
+
+#[derive(Default)]
+struct Session {
+    busy: bool,
+    purpose: String,
+    grabs: Vec<Grab>,
+    overlays: Vec<String>,
+    previews: Vec<(String, String)>,
+    recording: Option<Value>,
+    failed_shortcuts: Vec<String>,
+    update: Value,
+    pending_update: Option<Arc<tauri_plugin_updater::Update>>,
+    selftest: Option<PathBuf>,
+}
+
+struct State { settings: Mutex<Settings>, library: Mutex<Library>, session: Mutex<Session> }
+
+fn st(app: &AppHandle) -> &State { app.state::<State>().inner() }
+fn setting(app: &AppHandle, path: &str) -> Value { st(app).settings.lock().unwrap().get(path).clone() }
+fn notify(app: &AppHandle, title: &str, body: &str) { let _ = app.notification().builder().title(title).body(body).show(); }
+fn broadcast(app: &AppHandle, event: &str, payload: Value) { let _ = app.emit(event, payload); }
+fn platform() -> &'static str { if cfg!(windows) { "win32" } else if cfg!(target_os = "macos") { "darwin" } else { "linux" } }
+fn is_wayland() -> bool { cfg!(target_os = "linux") && std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false) && std::env::var("DISPLAY").is_err() }
+
+// ---- Windows ----------------------------------------------------------------------------------
+
+fn builder<'a>(app: &'a AppHandle, label: &str, page: &str, params: Value) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    let script = format!("window.__STILL_PARAMS__ = {}; window.__STILL_PLATFORM__ = {:?};", params, platform());
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into())).initialization_script(script).visible(false)
+}
+
+fn focus_or<F: FnOnce() -> Option<WebviewWindow>>(app: &AppHandle, label: &str, make: F) -> Option<WebviewWindow> {
+    if let Some(w) = app.get_webview_window(label) { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); return Some(w); }
+    let w = make()?;
+    let _ = w.show(); let _ = w.set_focus();
+    Some(w)
+}
+
+fn open_settings(app: &AppHandle, page: Option<&str>) {
+    let params = json!({ "page": page.unwrap_or("") });
+    if let Some(w) = focus_or(app, "settings", || builder(app, "settings", "settings.html", params).title("Still Settings").inner_size(760.0, 600.0).min_inner_size(700.0, 540.0).decorations(false).build().ok()) {
+        if let Some(p) = page { let _ = w.emit("settings:page", p); }
+    }
+}
+fn open_history(app: &AppHandle) {
+    focus_or(app, "history", || builder(app, "history", "history.html", json!({})).title("Capture History").inner_size(980.0, 660.0).min_inner_size(640.0, 420.0).decorations(false).build().ok());
+}
+fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
+    let label = format!("editor-{}", id.unwrap_or("demo"));
+    let title = id.and_then(|i| st(app).library.lock().unwrap().get(i)).map(|i| i.title).unwrap_or_else(|| "Still — Annotate".into());
+    close_preview(app, id.unwrap_or(""));
+    focus_or(app, &label, || builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" } }))
+        .title(title).inner_size(1180.0, 800.0).min_inner_size(900.0, 520.0).decorations(false).center().build().ok());
+}
+
+// ---- Quick Access -------------------------------------------------------------------------------
+
+fn preview_size(app: &AppHandle) -> (f64, f64) {
+    match setting(app, "quickAccess.size").as_str() { Some("small") => (200.0, 136.0), Some("large") => (320.0, 216.0), _ => (252.0, 172.0) }
+}
+
+fn layout_previews(app: &AppHandle) {
+    let Ok(pos) = app.cursor_position() else { return };
+    let Some(monitor) = app.monitor_from_point(pos.x, pos.y).ok().flatten().or_else(|| app.primary_monitor().ok().flatten()) else { return };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let (w, h) = preview_size(app);
+    let (pw, ph) = ((w * scale) as i32, (h * scale) as i32);
+    let left = setting(app, "quickAccess.side").as_str() != Some("right");
+    let mut y = area.position.y + area.size.height as i32 - ph - (16.0 * scale) as i32;
+    let previews = st(app).session.lock().unwrap().previews.clone();
+    for (label, _) in previews {
+        if let Some(win) = app.get_webview_window(&label) {
+            let x = if left { area.position.x + (16.0 * scale) as i32 } else { area.position.x + area.size.width as i32 - pw - (16.0 * scale) as i32 };
+            let _ = win.set_size(PhysicalSize::new(pw as u32, ph as u32));
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+            y -= ph + (12.0 * scale) as i32;
+        }
+    }
+}
+
+fn show_preview(app: &AppHandle, item: &Item, sound: bool) {
+    let label = format!("quick-{}", uuid::Uuid::new_v4().simple());
+    let (w, h) = preview_size(app);
+    let sound = sound && setting(app, "playSounds").as_bool().unwrap_or(true);
+    let built = builder(app, &label, "quick.html", json!({ "id": item.id, "sound": if sound { "1" } else { "0" } }))
+        .title("Quick Access").inner_size(w, h).decorations(false).transparent(true).shadow(false).resizable(false)
+        .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).visible_on_all_workspaces(true).build();
+    let Ok(win) = built else { return };
+    {
+        let mut s = st(app).session.lock().unwrap();
+        s.previews.insert(0, (label.clone(), item.id.clone()));
+        while s.previews.len() > 5 { if let Some((old, _)) = s.previews.pop() { if let Some(w) = app.get_webview_window(&old) { let _ = w.close(); } } }
+    }
+    layout_previews(app);
+    let _ = win.show();
+    let handle = app.clone();
+    win.on_window_event(move |e| if let tauri::WindowEvent::Destroyed = e {
+        handle.state::<State>().session.lock().unwrap().previews.retain(|(l, _)| l != &label);
+        layout_previews(&handle);
+    });
+}
+
+fn close_preview(app: &AppHandle, id: &str) {
+    let labels: Vec<String> = st(app).session.lock().unwrap().previews.iter().filter(|(_, i)| i == id).map(|(l, _)| l.clone()).collect();
+    for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.close(); } }
+}
+
+fn hide_floating(app: &AppHandle, hidden: bool) {
+    for (label, win) in app.webview_windows() {
+        if label.starts_with("quick-") || label.starts_with("pin-") { let _ = if hidden { win.hide() } else { win.show() }; }
+    }
+}
+
+// ---- Capture ------------------------------------------------------------------------------------
+
+fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool) {
+    {
+        let mut s = st(app).session.lock().unwrap();
+        if s.busy || s.recording.is_some() { drop(s); notify(app, "Still", "Finish the current capture or recording first."); return; }
+        s.busy = true; s.purpose = purpose.to_string();
+    }
+    let app = app.clone();
+    let purpose = purpose.to_string();
+    std::thread::spawn(move || {
+        if delay > 0 { notify(&app, "Still", &format!("Capture starts in {delay} seconds")); std::thread::sleep(Duration::from_secs(delay)); }
+        hide_floating(&app, true);
+        std::thread::sleep(Duration::from_millis(80));
+        let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
+        let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
+        let windows = if purpose == "screenshot" { capture::list_windows(std::process::id(), factor) } else { vec![] };
+        let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+        let last = setting(&app, "lastSelection");
+        let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
+        let temp = std::env::temp_dir();
+        let mut labels = Vec::new();
+        for (i, g) in grabs.iter().enumerate() {
+            let file = temp.join(format!("still-overlay-{}-{}.jpg", std::process::id(), i));
+            let _ = std::fs::write(&file, capture::jpeg(&g.image, 90));
+            let (w, h) = g.image.dimensions();
+            let mine: Vec<Value> = windows.iter().filter(|r| r.x < (g.x + w as i32) as f64 && r.y < (g.y + h as i32) as f64 && r.x + r.w > g.x as f64 && r.y + r.h > g.y as f64)
+                .map(|r| json!({ "id": r.id, "x": r.x - g.x as f64, "y": r.y - g.y as f64, "w": r.w, "h": r.h })).collect();
+            let under_cursor = cursor.x >= g.x as f64 && cursor.x < (g.x + w as i32) as f64 && cursor.y >= g.y as f64 && cursor.y < (g.y + h as i32) as f64;
+            let init = json!({
+                "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(),
+                "imagePath": file, "imageWidth": w, "imageHeight": h, "windows": mine,
+                "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"),
+                "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
+                "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
+            });
+            let label = format!("overlay-{i}");
+            if let Some(old) = app.get_webview_window(&label) { let _ = old.destroy(); }
+            let built = builder(&app, &label, "overlay.html", json!({ "init": init })).title("Capture Selection").decorations(false).resizable(false)
+                .always_on_top(true).skip_taskbar(true).shadow(false).visible_on_all_workspaces(true).build();
+            if let Ok(win) = built {
+                let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
+                let _ = win.set_size(PhysicalSize::new(w, h));
+                let _ = win.show();
+                if under_cursor { let _ = win.set_focus(); }
+                labels.push(label);
+            }
+        }
+        let mut s = st(&app).session.lock().unwrap();
+        s.grabs = grabs; s.overlays = labels;
+    });
+}
+
+fn end_selection(app: &AppHandle) {
+    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; std::mem::take(&mut s.overlays) };
+    for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
+    hide_floating(app, false);
+}
+
+fn finish_selection(app: &AppHandle, payload: Value) {
+    let display = payload["displayId"].as_u64().unwrap_or(0) as u32;
+    let purpose = payload["purpose"].as_str().unwrap_or("screenshot").to_string();
+    let px = &payload["px"];
+    let (x, y, w, h) = (px["x"].as_f64().unwrap_or(0.0), px["y"].as_f64().unwrap_or(0.0), px["w"].as_f64().unwrap_or(0.0), px["h"].as_f64().unwrap_or(0.0));
+    let grab = {
+        let mut s = st(app).session.lock().unwrap();
+        let grabs = std::mem::take(&mut s.grabs);
+        grabs.into_iter().find(|g| g.id == display)
+    };
+    end_selection(app);
+    let Some(grab) = grab else { return };
+    if w < 2.0 || h < 2.0 { return; }
+    if setting(app, "rememberSelection").as_bool().unwrap_or(false) && payload["windowId"].is_null() {
+        st(app).settings.lock().unwrap().update(&json!({ "lastSelection": { "displayId": display, "rect": payload["rect"] } }));
+    }
+    if purpose == "record" { start_recording(app, &grab, x, y, w, h); return; }
+    let image = capture::crop(&grab.image, x, y, w, h);
+    complete_image(app, image, purpose == "text");
+}
+
+fn capture_fullscreen(app: &AppHandle) {
+    {
+        let mut s = st(app).session.lock().unwrap();
+        if s.busy || s.recording.is_some() { return; }
+        s.busy = true;
+    }
+    hide_floating(app, true);
+    std::thread::sleep(Duration::from_millis(120));
+    let result = capture::grab_all();
+    { st(app).session.lock().unwrap().busy = false; }
+    hide_floating(app, false);
+    match result {
+        Ok(grabs) => {
+            let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+            let mut chosen = None;
+            for g in grabs { let (w, h) = g.image.dimensions(); let hit = cursor.x >= g.x as f64 && cursor.x < (g.x + w as i32) as f64 && cursor.y >= g.y as f64 && cursor.y < (g.y + h as i32) as f64; if hit || chosen.is_none() { chosen = Some(g.image); if hit { break; } } }
+            if let Some(image) = chosen { complete_image(app, image, false); }
+        }
+        Err(e) => notify(app, "Capture failed", &e),
+    }
+}
+
+fn encode(app: &AppHandle, image: &RgbaImage) -> (Vec<u8>, &'static str) {
+    if setting(app, "imageFormat").as_str() == Some("jpg") { (capture::jpeg(image, setting(app, "jpegQuality").as_u64().unwrap_or(90) as u8), "jpg") } else { (capture::png(image), "png") }
+}
+
+fn copy_image(app: &AppHandle, image: &RgbaImage) -> Result<(), String> {
+    let (w, h) = image.dimensions();
+    app.clipboard().write_image(&tauri::image::Image::new_owned(image.as_raw().clone(), w, h)).map_err(|e| e.to_string())
+}
+
+fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
+    if text { recognize_file(app, &image); return; }
+    let (bytes, ext) = encode(app, &image);
+    let (w, h) = image.dimensions();
+    let item = st(app).library.lock().unwrap().add(&bytes, "screenshot", ext, None, w, h);
+    if setting(app, "afterCapture.copy").as_bool().unwrap_or(true) {
+        if let Err(e) = copy_image(app, &image) { notify(app, "Couldn’t copy the screenshot", &e); }
+    }
+    if setting(app, "afterCapture.save").as_bool().unwrap_or(false) { let _ = export_item(app, &item.id, None); }
+    if setting(app, "afterCapture.annotate").as_bool().unwrap_or(false) { open_editor(app, Some(&item.id), false); }
+    else if setting(app, "afterCapture.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, true); }
+    broadcast(app, "library:changed", Value::Null);
+}
+
+/// OCR runs in a hidden page (the engine is WebAssembly); it reports back through `ocr_result`.
+fn recognize_file(app: &AppHandle, image: &RgbaImage) {
+    let file = std::env::temp_dir().join(format!("still-ocr-{}.png", uuid::Uuid::new_v4().simple()));
+    let _ = std::fs::write(&file, capture::png(image));
+    let label = format!("ocr-{}", uuid::Uuid::new_v4().simple());
+    let _ = builder(app, &label, "ocr.html", json!({ "file": file })).title("Still OCR").inner_size(200.0, 100.0).skip_taskbar(true).build();
+}
+
+fn export_folder(app: &AppHandle) -> PathBuf {
+    let custom = st(app).settings.lock().unwrap().str("exportFolder");
+    let folder = if custom.is_empty() { app.path().desktop_dir().unwrap_or_else(|_| std::env::temp_dir()) } else { PathBuf::from(custom) };
+    let _ = std::fs::create_dir_all(&folder);
+    folder
+}
+fn unique_path(folder: &Path, name: &str, ext: &str) -> PathBuf {
+    let clean: String = name.chars().map(|c| if "\\/:*?\"<>|".contains(c) { '-' } else { c }).collect();
+    let mut file = folder.join(format!("{clean}.{ext}"));
+    let mut n = 2;
+    while file.exists() { file = folder.join(format!("{clean} ({n}).{ext}")); n += 1; }
+    file
+}
+fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Option<PathBuf> {
+    let lib = st(app).library.lock().unwrap();
+    let item = lib.get(id)?;
+    let src = lib.file(&item);
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+    drop(lib);
+    let file = target.unwrap_or_else(|| unique_path(&export_folder(app), &item.title, &ext));
+    std::fs::copy(src, &file).ok()?;
+    Some(file)
+}
+
+// ---- Recording ----------------------------------------------------------------------------------
+
+/// The HUD records with the system web engine's screen capture, crops to the selection and sends the file back.
+fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64) {
+    let (iw, ih) = grab.image.dimensions();
+    let rec = setting(app, "recording");
+    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "options": rec });
+    st(app).session.lock().unwrap().recording = Some(params.clone());
+    let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    let built = builder(app, "hud", "hud.html", params).title("Recording").inner_size(300.0, 52.0).decorations(false).transparent(true).shadow(false)
+        .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).build();
+    if let Ok(hud) = built {
+        let _ = hud.set_position(PhysicalPosition::new(grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32));
+        let _ = hud.show(); let _ = hud.set_focus();
+    }
+    build_tray_menu(app);
+}
+
+fn stop_recording_state(app: &AppHandle) {
+    st(app).session.lock().unwrap().recording = None;
+    if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
+    build_tray_menu(app);
+}
+
+// ---- Tray, shortcuts ----------------------------------------------------------------------------
+
+const ACTIONS: [(&str, &str); 8] = [("allInOne", "All-In-One"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Fullscreen"),
+    ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture")];
+
+fn run_action(app: &AppHandle, action: &str) {
+    match action {
+        "area" | "allInOne" => start_selection(app, "screenshot", 0, false),
+        "window" => start_selection(app, "screenshot", 0, true),
+        "fullscreen" => { let a = app.clone(); std::thread::spawn(move || capture_fullscreen(&a)); }
+        "text" => start_selection(app, "text", 0, false),
+        "record" => {
+            if st(app).session.lock().unwrap().recording.is_some() { let _ = app.emit_to("hud", "hud:stop", ()); }
+            else { start_selection(app, "record", 0, false) }
+        }
+        "history" => open_history(app),
+        "restore" => { let item = st(app).library.lock().unwrap().items.iter().find(|i| i.kind != "recording").cloned(); if let Some(i) = item { show_preview(app, &i, false); } }
+        _ => {}
+    }
+}
+
+fn register_shortcuts(app: &AppHandle) {
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let shortcuts = setting(app, "shortcuts");
+    let mut failed = Vec::new();
+    for (action, _) in ACTIONS {
+        let Some(accel) = shortcuts[action].as_str().filter(|s| !s.is_empty()) else { continue };
+        let action = action.to_string();
+        let ok = gs.on_shortcut(accel, move |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed { run_action(app, &action); }
+        });
+        if ok.is_err() { failed.push(action_key(accel, &shortcuts)); }
+    }
+    st(app).session.lock().unwrap().failed_shortcuts = failed.clone();
+    broadcast(app, "shortcuts:status", json!(failed));
+}
+fn action_key(accel: &str, shortcuts: &Value) -> String {
+    ACTIONS.iter().find(|(a, _)| shortcuts[*a].as_str() == Some(accel)).map(|(a, _)| a.to_string()).unwrap_or_default()
+}
+
+fn build_tray_menu(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("still") else { return };
+    if let Ok(menu) = tray_menu(app) { let _ = tray.set_menu(Some(menu)); }
+}
+
+fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let s = setting(app, "shortcuts");
+    let accel = |a: &str| s[a].as_str().filter(|x| !x.is_empty()).map(|x| x.to_string());
+    let item = |id: &str, title: &str| { let mut b = MenuItemBuilder::with_id(id, title); if let Some(a) = accel(id) { b = b.accelerator(a); } b.build(app) };
+    let recording = st(app).session.lock().unwrap().recording.is_some();
+    let update = st(app).session.lock().unwrap().update.clone();
+    let timers = SubmenuBuilder::new(app, "Timed Capture")
+        .item(&MenuItemBuilder::with_id("timer-3", "Capture Area in 3 Seconds").build(app)?)
+        .item(&MenuItemBuilder::with_id("timer-5", "Capture Area in 5 Seconds").build(app)?)
+        .item(&MenuItemBuilder::with_id("timer-10", "Capture Area in 10 Seconds").build(app)?).build()?;
+    let update_item = match update["state"].as_str() {
+        Some("available") => MenuItemBuilder::with_id("update-install", format!("Update to {}…", update["version"].as_str().unwrap_or(""))).build(app)?,
+        Some("downloading") => MenuItemBuilder::with_id("update-busy", "Downloading Update…").enabled(false).build(app)?,
+        _ => MenuItemBuilder::with_id("update-check", "Check for Updates…").build(app)?,
+    };
+    MenuBuilder::new(app)
+        .item(&item("allInOne", "All-In-One")?).separator()
+        .item(&item("area", "Capture Area")?).item(&item("window", "Capture Window")?).item(&item("fullscreen", "Capture Fullscreen")?)
+        .item(&timers).item(&item("text", "Capture Text (OCR)")?)
+        .item(&{ let mut b = MenuItemBuilder::with_id("record", if recording { "Stop Recording" } else { "Record Screen" }); if let Some(a) = accel("record") { b = b.accelerator(a); } b.build(app)? })
+        .separator()
+        .item(&MenuItemBuilder::with_id("open-image", "Open Image…").build(app)?)
+        .item(&MenuItemBuilder::with_id("history", "Capture History").build(app)?)
+        .item(&MenuItemBuilder::with_id("restore", "Restore Last Capture").build(app)?)
+        .item(&MenuItemBuilder::with_id("unlock-pins", "Unlock Pinned Screenshots").build(app)?)
+        .item(&MenuItemBuilder::with_id("close-overlays", "Close All Overlays").build(app)?)
+        .separator().item(&update_item)
+        .item(&MenuItemBuilder::with_id("settings", "Settings…").build(app)?)
+        .item(&MenuItemBuilder::with_id("quit", "Quit Still").build(app)?)
+        .build()
+}
+
+fn on_menu(app: &AppHandle, id: &str) {
+    match id {
+        "settings" => open_settings(app, None),
+        "quit" => app.exit(0),
+        "open-image" => import_image(app),
+        "unlock-pins" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") { let _ = w.set_ignore_cursor_events(false); } },
+        "close-overlays" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") || l.starts_with("quick-") { let _ = w.close(); } },
+        "update-check" => check_update(app, true),
+        "update-install" => install_update(app),
+        t if t.starts_with("timer-") => start_selection(app, "screenshot", t[6..].parse().unwrap_or(5), false),
+        action => run_action(app, action),
+    }
+}
+
+fn import_image(app: &AppHandle) {
+    let app = app.clone();
+    app.clone().dialog().file().add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"]).pick_file(move |file| {
+        let Some(path) = file.and_then(|f| f.into_path().ok()) else { return };
+        let Some(image) = std::fs::read(&path).ok().and_then(|b| capture::decode(&b)) else { notify(&app, "Still", "That file could not be opened as an image."); return };
+        let (w, h) = image.dimensions();
+        let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
+        let item = st(&app).library.lock().unwrap().add(&capture::png(&image), "screenshot", "png", title, w, h);
+        open_editor(&app, Some(&item.id), false);
+        broadcast(&app, "library:changed", Value::Null);
+    });
+}
+
+fn apply_login_item(app: &AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    let enabled = setting(app, "launchAtLogin").as_bool().unwrap_or(false);
+    let _ = if enabled { app.autolaunch().enable() } else { app.autolaunch().disable() };
+}
+
+// ---- Updates ------------------------------------------------------------------------------------
+
+fn set_update(app: &AppHandle, status: Value) {
+    st(app).session.lock().unwrap().update = status.clone();
+    broadcast(app, "update:status", status);
+    build_tray_menu(app);
+}
+
+fn check_update(app: &AppHandle, manual: bool) {
+    use tauri_plugin_updater::UpdaterExt;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        set_update(&app, json!({ "state": "checking" }));
+        let result = match app.updater() { Ok(u) => u.check().await.map_err(|e| e.to_string()), Err(e) => Err(e.to_string()) };
+        match result {
+            Ok(Some(update)) => {
+                let version = update.version.clone();
+                st(&app).session.lock().unwrap().pending_update = Some(Arc::new(update));
+                set_update(&app, json!({ "state": "available", "version": version }));
+                notify(&app, &format!("Still {version} is available"), "Choose “Update” in the Still menu to install it.");
+            }
+            Ok(None) => { set_update(&app, json!({ "state": "current" })); if manual { notify(&app, "Still", &format!("You’re up to date (version {}).", app.package_info().version)); } }
+            Err(e) => { set_update(&app, json!({ "state": "error", "error": e })); if manual { notify(&app, "Couldn’t check for updates", &e); } }
+        }
+    });
+}
+
+fn install_update(app: &AppHandle) {
+    let Some(update) = st(app).session.lock().unwrap().pending_update.clone() else { return };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        set_update(&app, json!({ "state": "downloading", "version": update.version }));
+        match update.download_and_install(|_, _| {}, || {}).await {
+            Ok(()) => app.restart(),
+            Err(e) => { set_update(&app, json!({ "state": "error", "error": e.to_string() })); notify(&app, "Update failed", &e.to_string()); }
+        }
+    });
+}
+
+// ---- Commands -----------------------------------------------------------------------------------
+
+#[tauri::command]
+fn settings_get(app: AppHandle) -> Value {
+    let mut v = st(&app).settings.lock().unwrap().values.clone();
+    let s = st(&app).session.lock().unwrap();
+    v["platform"] = json!(platform());
+    v["version"] = json!(app.package_info().version.to_string());
+    v["failedShortcuts"] = json!(s.failed_shortcuts);
+    v["wayland"] = json!(is_wayland());
+    v
+}
+#[tauri::command]
+fn settings_set(app: AppHandle, patch: Value) -> Value {
+    let values = st(&app).settings.lock().unwrap().update(&patch);
+    after_settings(&app, &patch);
+    values
+}
+#[tauri::command]
+fn settings_reset(app: AppHandle, key: String) -> Value {
+    let values = st(&app).settings.lock().unwrap().reset(&key);
+    after_settings(&app, &json!({ key: true }));
+    values
+}
+fn after_settings(app: &AppHandle, patch: &Value) {
+    if patch.get("shortcuts").is_some() { register_shortcuts(app); }
+    if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
+    if patch.get("quickAccess").is_some() { layout_previews(app); }
+    build_tray_menu(app);
+    let values = st(app).settings.lock().unwrap().values.clone();
+    broadcast(app, "settings:changed", values);
+}
+#[tauri::command]
+fn settings_choose_folder(app: AppHandle) -> Option<String> {
+    let folder = app.dialog().file().blocking_pick_folder()?.into_path().ok()?;
+    let path = folder.to_string_lossy().to_string();
+    settings_set(app, json!({ "exportFolder": path }));
+    Some(path)
+}
+#[tauri::command]
+fn shortcuts_pause(app: AppHandle, paused: bool) { if paused { let _ = app.global_shortcut().unregister_all(); } else { register_shortcuts(&app); } }
+
+#[tauri::command]
+fn overlay_done(app: AppHandle, payload: Value) { let a = app.clone(); std::thread::spawn(move || finish_selection(&a, payload)); }
+#[tauri::command]
+fn overlay_cancel(app: AppHandle) { end_selection(&app); }
+#[tauri::command]
+fn overlay_fullscreen(app: AppHandle, display_id: u32) {
+    let grab = { let mut s = st(&app).session.lock().unwrap(); std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id) };
+    end_selection(&app);
+    if let Some(g) = grab { complete_image(&app, g.image, false); }
+}
+#[tauri::command]
+fn overlay_timer(app: AppHandle, delay: u64) {
+    let purpose = st(&app).session.lock().unwrap().purpose.clone();
+    end_selection(&app);
+    start_selection(&app, &purpose, delay, false);
+}
+#[tauri::command]
+fn overlay_purpose(app: AppHandle, purpose: String) {
+    st(&app).session.lock().unwrap().purpose = purpose.clone();
+    broadcast(&app, "overlay:purpose", json!(purpose));
+}
+#[tauri::command]
+fn overlay_window_mode(app: AppHandle, on: bool) { broadcast(&app, "overlay:windowMode", json!(on)); }
+#[tauri::command]
+fn overlay_pointer(app: AppHandle, window: tauri::Window) {
+    for l in st(&app).session.lock().unwrap().overlays.iter() { if l != window.label() { let _ = app.emit_to(l.as_str(), "overlay:clear", ()); } }
+}
+
+fn item_json(lib: &Library, item: &Item) -> Value {
+    let mut v = serde_json::to_value(item).unwrap_or(Value::Null);
+    v["path"] = json!(lib.file(item));
+    v["original"] = json!(lib.original(item));
+    v
+}
+#[tauri::command]
+fn library_list(app: AppHandle, query: Value) -> Vec<Value> {
+    let lib = st(&app).library.lock().unwrap();
+    lib.search(query["query"].as_str().unwrap_or(""), query["kind"].as_str().unwrap_or("all")).iter().map(|i| item_json(&lib, i)).collect()
+}
+#[tauri::command]
+fn library_get(app: AppHandle, id: String) -> Value {
+    let lib = st(&app).library.lock().unwrap();
+    match lib.get(&id) { Some(item) => { let mut v = item_json(&lib, &item); v["project"] = lib.project(&id).unwrap_or(Value::Null); v } None => Value::Null }
+}
+#[tauri::command]
+fn library_rename(app: AppHandle, id: String, title: String) { st(&app).library.lock().unwrap().update(&id, |i| i.title = title); broadcast(&app, "library:changed", Value::Null); }
+#[tauri::command]
+fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
+#[tauri::command]
+fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
+    let (file, kind) = { let lib = st(&app).library.lock().unwrap(); let item = lib.get(&id).ok_or("Missing capture")?; (lib.file(&item), item.kind) };
+    if kind == "recording" { return app.clipboard().write_text(file.to_string_lossy().to_string()).map_err(|e| e.to_string()); }
+    let image = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).ok_or("Couldn’t read the capture")?;
+    copy_image(&app, &image)
+}
+#[tauri::command]
+fn library_save(app: AppHandle, id: String) -> Option<String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
+#[tauri::command]
+fn library_save_as(app: AppHandle, id: String) -> Option<String> {
+    let item = st(&app).library.lock().unwrap().get(&id)?;
+    let ext = Path::new(&item.file_name).extension()?.to_string_lossy().to_string();
+    let target = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{}.{ext}", item.title)).blocking_save_file()?.into_path().ok()?;
+    export_item(&app, &id, Some(target)).map(|p| p.to_string_lossy().to_string())
+}
+#[tauri::command]
+fn library_reveal(app: AppHandle, id: String) {
+    let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
+    if let Some(f) = file { reveal(&f); }
+}
+fn reveal(file: &Path) {
+    #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(format!("/select,{}", file.display())).spawn(); }
+    #[cfg(target_os = "linux")] { if let Some(dir) = file.parent() { let _ = std::process::Command::new("xdg-open").arg(dir).spawn(); } }
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg("-R").arg(file).spawn(); }
+}
+fn open_path(file: &Path) {
+    #[cfg(windows)] { let _ = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(file).spawn(); }
+    #[cfg(target_os = "linux")] { let _ = std::process::Command::new("xdg-open").arg(file).spawn(); }
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(file).spawn(); }
+}
+#[tauri::command]
+fn library_open(app: AppHandle, id: String) {
+    let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (i.kind.clone(), lib.file(&i))) };
+    match found { Some((kind, file)) if kind == "recording" => open_path(&file), Some(_) => open_editor(&app, Some(&id), false), None => {} }
+}
+#[tauri::command]
+fn library_pin(app: AppHandle, id: String) {
+    let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
+    if let Some(bytes) = file.and_then(|f| std::fs::read(f).ok()) { if let Some(img) = capture::decode(&bytes) { pin_image(&app, &img); } }
+}
+#[tauri::command]
+fn library_drag(app: AppHandle, window: tauri::Window, id: String) {
+    let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
+    if let Some(f) = file { start_drag(&app, window, f); }
+}
+
+fn start_drag(app: &AppHandle, window: tauri::Window, file: PathBuf) {
+    let icon = std::fs::read(&file).ok().and_then(|b| capture::decode(&b))
+        .map(|i| capture::png(&image::imageops::thumbnail(&i, 160, (160 * i.height() / i.width().max(1)).max(1))))
+        .unwrap_or_default();
+    let _ = app.run_on_main_thread(move || {
+        #[cfg(target_os = "linux")]
+        let handle = window.gtk_window();
+        #[cfg(not(target_os = "linux"))]
+        let handle: tauri::Result<tauri::Window> = Ok(window.clone());
+        if let Ok(h) = handle {
+            let _ = drag::start_drag(&h, drag::DragItem::Files(vec![file]), drag::Image::Raw(icon), |_, _| {}, drag::Options::default());
+        }
+    });
+}
+
+#[tauri::command]
+fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
+    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+    let image = capture::decode(&bytes).ok_or("Bad image")?;
+    let (encoded, ext) = encode(&app, &image);
+    let mut lib = st(&app).library.lock().unwrap();
+    let id = if !id.is_empty() && lib.get(&id).is_some() { lib.replace_file(&id, &encoded, ext); id }
+        else { let (w, h) = image.dimensions(); lib.add(&encoded, "screenshot", ext, None, w, h).id };
+    lib.save_project(&id, &project);
+    drop(lib);
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(id)
+}
+#[tauri::command]
+fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> {
+    let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
+    copy_image(&app, &image)
+}
+#[tauri::command]
+fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Option<String> {
+    let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b))?;
+    let (bytes, ext) = encode(&app, &image);
+    let name = if name.is_empty() { library::capture_name("Still") } else { name };
+    let mut file = unique_path(&export_folder(&app), &name, ext);
+    if save_as {
+        file = app.dialog().file().set_directory(export_folder(&app)).set_file_name(file.file_name()?.to_string_lossy().to_string())
+            .add_filter("PNG", &["png"]).add_filter("JPEG", &["jpg"]).blocking_save_file()?.into_path().ok()?;
+        let jpg = file.extension().map(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")).unwrap_or(false);
+        std::fs::write(&file, if jpg { capture::jpeg(&image, 92) } else { capture::png(&image) }).ok()?;
+    } else { std::fs::write(&file, bytes).ok()?; }
+    Some(file.to_string_lossy().to_string())
+}
+#[tauri::command]
+fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
+    let Some(bytes) = capture::data_url_bytes(&data_url) else { return };
+    let file = std::env::temp_dir().join(format!("{}.png", library::capture_name("Still")));
+    if std::fs::write(&file, bytes).is_ok() { start_drag(&app, window, file); }
+}
+#[tauri::command]
+fn editor_pin(app: AppHandle, data_url: String) {
+    if let Some(img) = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)) { pin_image(&app, &img); }
+}
+#[tauri::command]
+fn editor_open_image(app: AppHandle) -> Option<String> {
+    use base64::Engine;
+    let path = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]).blocking_pick_file()?.into_path().ok()?;
+    let image = capture::decode(&std::fs::read(path).ok()?)?;
+    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(capture::png(&image))))
+}
+
+fn pin_image(app: &AppHandle, image: &RgbaImage) {
+    let file = std::env::temp_dir().join(format!("still-pin-{}.png", uuid::Uuid::new_v4().simple()));
+    if std::fs::write(&file, capture::png(image)).is_err() { return; }
+    let (w, h) = image.dimensions();
+    let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+    let monitor = app.monitor_from_point(cursor.x, cursor.y).ok().flatten().or_else(|| app.primary_monitor().ok().flatten());
+    let (scale, area) = monitor.map(|m| (m.scale_factor(), *m.work_area())).unwrap_or((1.0, tauri::PhysicalRect { position: PhysicalPosition::new(0, 0), size: PhysicalSize::new(1920, 1080) }));
+    let fit = (area.size.width as f64 * 0.6 / w as f64).min(area.size.height as f64 * 0.6 / h as f64).min(1.0);
+    let (pw, ph) = ((w as f64 * fit) as u32, (h as f64 * fit) as u32);
+    let label = format!("pin-{}", uuid::Uuid::new_v4().simple());
+    if let Ok(win) = builder(app, &label, "pin.html", json!({ "file": file })).title("Pinned Screenshot").decorations(false).always_on_top(true).skip_taskbar(true)
+        .inner_size(pw as f64 / scale, ph as f64 / scale).min_inner_size(60.0, 40.0).build() {
+        let _ = win.set_position(PhysicalPosition::new(area.position.x + (area.size.width as i32 - pw as i32) / 2, area.position.y + (area.size.height as i32 - ph as i32) / 2));
+        let _ = win.show();
+        win.on_window_event(move |e| if let tauri::WindowEvent::Destroyed = e { let _ = std::fs::remove_file(&file); });
+    }
+}
+
+#[tauri::command]
+fn preview_edit(app: AppHandle, window: tauri::Window, id: String) { let _ = window.close(); open_editor(&app, Some(&id), false); }
+#[tauri::command]
+fn open_settings_cmd(app: AppHandle, page: Option<String>) { open_settings(&app, page.as_deref()); }
+#[tauri::command]
+fn open_history_cmd(app: AppHandle) { open_history(&app); }
+#[tauri::command]
+fn open_demo(app: AppHandle) { open_editor(&app, None, false); }
+#[tauri::command]
+fn capture_action(app: AppHandle, action: String) { run_action(&app, &action); }
+
+#[tauri::command]
+fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
+    let _ = window.close();
+    if let Some(dir) = st(&app).session.lock().unwrap().selftest.clone() { let _ = std::fs::write(dir.join("ocr.txt"), &text); return; }
+    if let Some(e) = error { notify(&app, "Text recognition failed", &e); return; }
+    let text = text.trim().to_string();
+    if text.is_empty() { notify(&app, "No text found", "Try selecting a larger area with clearer text."); return; }
+    let _ = app.clipboard().write_text(text.clone());
+    notify(&app, "Text copied", &text.chars().take(120).collect::<String>());
+}
+
+#[tauri::command]
+fn recording_started(app: AppHandle) { build_tray_menu(&app); }
+#[tauri::command]
+fn recording_cancel(app: AppHandle) { stop_recording_state(&app); }
+#[tauri::command]
+fn recording_error(app: AppHandle, message: String) { stop_recording_state(&app); notify(&app, "Recording couldn’t start", &message); }
+#[tauri::command]
+fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected video bytes".into()) };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let ext = if header("x-ext") == "mp4" { "mp4" } else { "webm" };
+    let duration: f64 = header("x-duration").parse().unwrap_or(0.0);
+    stop_recording_state(&app);
+    let item = st(&app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
+    st(&app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
+    if setting(&app, "afterRecording.save").as_bool().unwrap_or(true) { let _ = export_item(&app, &item.id, None); }
+    if setting(&app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(&app, &item, false); }
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(())
+}
+
+#[tauri::command]
+fn update_status(app: AppHandle) -> Value { st(&app).session.lock().unwrap().update.clone() }
+#[tauri::command]
+fn update_check(app: AppHandle) { check_update(&app, true); }
+#[tauri::command]
+fn update_install(app: AppHandle) { install_update(&app); }
+
+// ---- Self-test (run by CI on real Windows / Linux machines) -------------------------------------
+
+fn self_test(app: AppHandle, dir: PathBuf) {
+    std::thread::spawn(move || {
+        let _ = std::fs::create_dir_all(&dir);
+        let mut results = serde_json::Map::new();
+        let mut log = |k: &str, v: Value| { println!("[self-test] {k}: {v}"); results.insert(k.into(), v); };
+        let wait = |ms| std::thread::sleep(Duration::from_millis(ms));
+        let snap = |name: &str| { if let Ok(g) = capture::grab_all() { let _ = std::fs::write(dir.join(format!("{name}.png")), capture::png(&g[0].image)); } };
+        let count = || st(&app).library.lock().unwrap().items.len();
+        let has_image = || app.clipboard().read_image().map(|i| i.width() > 0).unwrap_or(false);
+        let before = count();
+        capture_fullscreen(&app);
+        wait(2500);
+        log("fullscreenAdded", json!(count() == before + 1));
+        let preview = st(&app).session.lock().unwrap().previews.first().cloned();
+        let preview_win = preview.as_ref().and_then(|(l, _)| app.get_webview_window(l));
+        log("previewCreated", json!(preview.is_some()));
+        log("previewVisible", json!(preview_win.as_ref().map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false)));
+        log("afterCaptureCopy", json!(has_image()));
+        snap("1-after-capture");
+        let _ = app.clipboard().clear();
+        if let Some(w) = &preview_win { let _ = w.eval("document.querySelector('#copy').click()"); }
+        wait(1500);
+        log("quickAccessCopy", json!(has_image()));
+        start_selection(&app, "screenshot", 0, false);
+        wait(3000);
+        let overlays = st(&app).session.lock().unwrap().overlays.clone();
+        log("overlayWindows", json!(overlays.len()));
+        log("windowList", json!(capture::list_windows(std::process::id(), 1.0).len()));
+        snap("2-overlay");
+        let display = st(&app).session.lock().unwrap().grabs.first().map(|g| g.id).unwrap_or(0);
+        finish_selection(&app, json!({ "displayId": display, "purpose": "screenshot", "px": { "x": 50, "y": 50, "w": 300, "h": 200 }, "rect": Value::Null }));
+        wait(2500);
+        let first = st(&app).library.lock().unwrap().items.first().cloned();
+        log("areaSize", json!(first.as_ref().map(|i| format!("{}x{}", i.width, i.height))));
+        snap("3-after-area");
+        if let Some(item) = first {
+            let label = format!("editor-{}", item.id);
+            let a = app.clone(); let id = item.id.clone();
+            let _ = app.run_on_main_thread(move || open_editor(&a, Some(&id), false));
+            wait(4000);
+            let _ = app.clipboard().clear();
+            if let Some(w) = app.get_webview_window(&label) { let _ = w.eval("document.querySelector('#copy').click()"); }
+            wait(2000);
+            log("editorCopy", json!(has_image()));
+            snap("4-editor");
+        }
+        let _ = app.run_on_main_thread({ let a = app.clone(); move || { let _ = builder(&a, "ocr-probe", "ocr.html", json!({ "probe": "1" })).build(); } });
+        for _ in 0..60 { if dir.join("ocr.txt").exists() { break; } wait(1000); }
+        log("ocr", json!(std::fs::read_to_string(dir.join("ocr.txt")).unwrap_or_default().trim()));
+        let _ = std::fs::write(dir.join("results.json"), serde_json::to_string_pretty(&Value::Object(results)).unwrap_or_default());
+        app.exit(0);
+    });
+}
+
+// ---- Startup ------------------------------------------------------------------------------------
+
+fn run_args(app: &AppHandle, args: &[String]) -> bool {
+    let action = args.iter().find_map(|a| a.strip_prefix("--capture=").map(|s| s.to_string()))
+        .or_else(|| if args.iter().any(|a| a == "--capture") { args.iter().find(|a| ACTIONS.iter().any(|(k, _)| k == a)).cloned() } else { None });
+    match action { Some(a) if ACTIONS.iter().any(|(k, _)| *k == a) => { run_action(app, &a); true } _ => false }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| { if !run_args(app, &args) { open_settings(app, None); } }))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let config = app.path().app_config_dir()?;
+            let data = app.path().app_data_dir()?;
+            app.manage(State {
+                settings: Mutex::new(Settings::load(config)),
+                library: Mutex::new(Library::open(data.join("Library"))),
+                session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
+            });
+            let menu = tray_menu(&handle)?;
+            TrayIconBuilder::with_id("still").icon(app.default_window_icon().cloned().unwrap()).tooltip("Still").menu(&menu)
+                .show_menu_on_left_click(!cfg!(windows))
+                .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))
+                .on_tray_icon_event(|tray, e| if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e { run_action(tray.app_handle(), "area"); })
+                .build(app)?;
+            register_shortcuts(&handle);
+            apply_login_item(&handle);
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--self-test=")) {
+                let dir = PathBuf::from(dir);
+                st(&handle).session.lock().unwrap().selftest = Some(dir.clone());
+                std::thread::spawn({ let h = handle.clone(); move || { std::thread::sleep(Duration::from_secs(2)); self_test(h, dir) } });
+                return Ok(());
+            }
+            if setting(&handle, "autoUpdate").as_bool().unwrap_or(true) {
+                let h = handle.clone();
+                std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(10)); check_update(&h, false); std::thread::sleep(Duration::from_secs(6 * 3600)); });
+            }
+            if run_args(&handle, &args) {}
+            else if args.iter().any(|a| a == "--editor-demo") { open_editor(&handle, None, false); }
+            else if !args.iter().any(|a| a == "--hidden") && !setting(&handle, "welcomed").as_bool().unwrap_or(false) {
+                st(&handle).settings.lock().unwrap().update(&json!({ "welcomed": true }));
+                open_settings(&handle, None);
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
+            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_pin, library_drag,
+            editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
+            preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
+            recording_started, recording_cancel, recording_error, recording_save, update_status, update_check, update_install
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building Still")
+        .run(|_app, event| if let tauri::RunEvent::ExitRequested { api, code, .. } = event { if code.is_none() { api.prevent_exit(); } });
+}

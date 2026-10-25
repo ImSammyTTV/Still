@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const G = require('../src/shared/geometry');
+const G = require('../web/shared/geometry');
 
 test('drag selection works in every direction and clamps to the display', () => {
   const bounds = { x: 0, y: 0, w: 100, h: 100 };
