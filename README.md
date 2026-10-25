@@ -337,6 +337,30 @@ Windows and Linux downloads, writes checksums and publishes the release.
 
 ---
 
+## 🔏 Code signing policy
+
+<details>
+<summary>How downloads are signed</summary>
+
+**Windows** releases will be signed once the project's application to SignPath Foundation is approved. When they are:
+
+- Free code signing is provided by [SignPath.io](https://about.signpath.io), with the certificate by [SignPath Foundation](https://signpath.org).
+- Only builds made by this repository's [GitHub Actions release workflow](.github/workflows/release.yml) from its public source code are signed.
+- **Committers and reviewers:** [ImSammyTTV](https://github.com/ImSammyTTV)
+- **Approver:** [ImSammyTTV](https://github.com/ImSammyTTV). Every signing request is approved manually.
+
+**Mac** releases are signed with the project's own certificate, so macOS treats each update as the same app and keeps
+its Screen Recording permission. They aren't notarized by Apple, so the first launch needs **Open Anyway** (or use the
+[one-line installer](#-mac), which skips that step).
+
+**Updates** on Windows and Linux are verified with the project's update signing key before they install.
+
+Privacy: Still doesn't collect or send any data. It only contacts GitHub to check for updates and, if you set one up,
+your own Still Cloud server when you upload.
+</details>
+
+---
+
 <p align="center">
   Made with 💚 by <a href="https://github.com/ImSammyTTV">ImSammyTTV</a> · <a href="FEATURES.md">Feature details</a>
 </p>
