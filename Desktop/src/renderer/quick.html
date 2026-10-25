@@ -14,6 +14,7 @@
   @keyframes slide-right { from { transform: translateX(120%); } }
   .card.leaving { transition: transform .22s ease-in, opacity .22s; transform: translateX(-120%); opacity: 0; }
   body.right .card.leaving { transform: translateX(120%); }
+  #media { position: absolute; inset: 0; }
   .media { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; }
   .hover { position: absolute; inset: 0; background: rgba(0,0,0,.42); opacity: 0; transition: opacity .15s; display: grid; place-items: center; }
   .card:hover .hover { opacity: 1; }
