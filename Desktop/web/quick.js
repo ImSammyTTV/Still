@@ -34,6 +34,7 @@ $('#card').addEventListener('mouseleave', () => { hovering = false; schedule(); 
 $('#close').onclick = () => leave();
 $('#copy').onclick = async () => { await still.invoke('library:copy', id); leave(); };
 $('#save').onclick = async () => { await still.invoke('library:save', id); leave(); };
+$('#upload').onclick = async () => { $('#upload').textContent = 'Uploading…'; try { await still.invoke('cloud:upload', id); leave(); } catch { $('#upload').textContent = 'Upload'; } };
 $('#edit').onclick = () => item.kind === 'recording' ? (still.invoke('library:open', id), leave()) : still.send('preview:edit', id);
 $('#pin').onclick = () => { still.invoke('library:pin', id); leave(); };
 $('#trash').onclick = () => leave(() => still.invoke('library:delete', id));

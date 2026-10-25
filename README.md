@@ -89,7 +89,7 @@ searchable by title and recognised text.
 
 ### 🔒 Private by design
 No accounts, no tracking. Captures stay on your computer. Sharing is optional and goes to a server
-**you** run (Mac).
+**you** run, on Mac, Windows and Linux.
 
 </td>
 </tr>
@@ -199,6 +199,8 @@ It's a small download (about 10 MB) because Still uses the Edge WebView2 engine 
 - **Updates install themselves**: Still checks in the background and offers **Update** in the tray menu.
 - **Recording:** choose an area, then pick the screen in Windows' share dialog. Computer audio can be recorded
   alongside your microphone (Settings → Recording), and the recording controls are hidden from your recordings.
+- **Share links:** connect your own Still Cloud server in Settings → Cloud, then press **Upload** in Quick Access,
+  the editor or Capture History. The link is copied for you.
 - Switch on **Launch at login** in Settings → General.
 
 ---

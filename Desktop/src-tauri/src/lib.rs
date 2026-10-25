@@ -1,4 +1,5 @@
 mod capture;
+mod cloud;
 mod library;
 mod settings;
 
@@ -257,6 +258,7 @@ fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
         if let Err(e) = copy_image(app, &image) { notify(app, "Couldn’t copy the screenshot", &e); }
     }
     if setting(app, "afterCapture.save").as_bool().unwrap_or(false) { let _ = export_item(app, &item.id, None); }
+    if setting(app, "cloud.autoUpload").as_bool().unwrap_or(false) { let (a, id) = (app.clone(), item.id.clone()); tauri::async_runtime::spawn(async move { let _ = upload_item(&a, &id).await; }); }
     if setting(app, "afterCapture.annotate").as_bool().unwrap_or(false) { open_editor(app, Some(&item.id), false); }
     else if setting(app, "afterCapture.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, true); }
     broadcast(app, "library:changed", Value::Null);
@@ -754,6 +756,68 @@ fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<()
     Ok(())
 }
 
+// ---- Sharing (self-hosted Still Cloud) -----------------------------------------------------------
+
+fn token_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("cloud-token")) }
+fn cloud_token(app: &AppHandle) -> String { token_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
+fn save_token(app: &AppHandle, token: &str) -> Result<(), String> {
+    let file = token_file(app).ok_or("No settings folder")?;
+    if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
+    std::fs::write(&file, token).map_err(|e| e.to_string())?;
+    // Only your account can read the token.
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)); }
+    Ok(())
+}
+fn cloud_client(app: &AppHandle) -> Result<cloud::Cloud, String> {
+    let endpoint = setting(app, "cloud.endpoint").as_str().unwrap_or("").to_string();
+    if endpoint.is_empty() { return Err("Connect a Still Cloud server in Settings → Cloud first.".into()); }
+    cloud::Cloud::new(&endpoint, &cloud_token(app))
+}
+fn cloud_options(app: &AppHandle, title: String, text: String) -> cloud::Options {
+    cloud::Options { title, text, password: String::new(), expiry_days: setting(app, "cloud.expiryDays").as_i64().unwrap_or(7),
+        visibility: setting(app, "cloud.visibility").as_str().unwrap_or("link").to_string() }
+}
+async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> Result<String, String> {
+    let result = match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) };
+    match &result {
+        Ok(link) => { let _ = app.clipboard().write_text(link.clone()); notify(app, "Link copied", link); }
+        Err(e) => notify(app, "Upload failed", e),
+    }
+    result
+}
+async fn upload_item(app: &AppHandle, id: &str) -> Result<String, String> {
+    let (file, title, text) = { let lib = st(app).library.lock().unwrap(); let i = lib.get(id).ok_or("Missing capture")?; (lib.file(&i), i.title.clone(), i.text.clone()) };
+    share(app, file, title, text).await
+}
+
+#[tauri::command]
+async fn cloud_get(app: AppHandle) -> Value { json!({ "endpoint": setting(&app, "cloud.endpoint"), "hasToken": !cloud_token(&app).is_empty() }) }
+#[tauri::command]
+async fn cloud_connect(app: AppHandle, endpoint: String, token: String) -> Result<String, String> {
+    let token = if token.trim().is_empty() { cloud_token(&app) } else { token };
+    let name = cloud::Cloud::new(&endpoint, &token)?.test().await?;
+    save_token(&app, token.trim())?;
+    let endpoint = endpoint.trim().trim_end_matches('/').to_string();
+    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": endpoint } }));
+    Ok(name)
+}
+#[tauri::command]
+async fn cloud_disconnect(app: AppHandle) {
+    if let Some(f) = token_file(&app) { let _ = std::fs::remove_file(f); }
+    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": "", "autoUpload": false } }));
+}
+#[tauri::command]
+async fn cloud_upload(app: AppHandle, id: String) -> Result<String, String> { upload_item(&app, &id).await }
+#[tauri::command]
+async fn cloud_upload_data(app: AppHandle, data_url: String, title: String) -> Result<String, String> {
+    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+    let file = std::env::temp_dir().join(format!("still-share-{}.png", uuid::Uuid::new_v4().simple()));
+    std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
+    let result = share(&app, file.clone(), if title.is_empty() { library::capture_name("Still") } else { title }, String::new()).await;
+    let _ = std::fs::remove_file(file);
+    result
+}
+
 #[tauri::command]
 async fn update_status(app: AppHandle) -> Value { st(&app).session.lock().unwrap().update.clone() }
 #[tauri::command]
@@ -824,6 +888,19 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             log("editorCopy", json!(has_image()));
             snap("4-editor");
         }
+        // Sharing: upload to a local Still Cloud server when CI provides one.
+        if let (Ok(endpoint), Ok(token)) = (std::env::var("STILL_TEST_CLOUD"), std::env::var("STILL_TEST_CLOUD_TOKEN")) {
+            let id = st(&app).library.lock().unwrap().items.first().map(|i| i.id.clone()).unwrap_or_default();
+            let result = tauri::async_runtime::block_on(async {
+                let name = cloud::Cloud::new(&endpoint, &token)?.test().await?;
+                save_token(&app, &token)?;
+                st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": endpoint } }));
+                let link = upload_item(&app, &id).await?;
+                Ok::<_, String>(format!("{name} {link}"))
+            });
+            log("cloudUpload", json!(result.map_err(|e| format!("error: {e}")).unwrap_or_else(|e| e)));
+            log("cloudLinkCopied", json!(app.clipboard().read_text().map(|t| t.starts_with("http")).unwrap_or(false)));
+        }
         let _ = app.run_on_main_thread({ let a = app.clone(); move || { let _ = builder(&a, "ocr-probe", "ocr.html", json!({ "probe": "1" })).build(); } });
         for _ in 0..60 { if dir.join("ocr.txt").exists() { break; } wait(1000); }
         log("ocr", json!(std::fs::read_to_string(dir.join("ocr.txt")).unwrap_or_default().trim()));
@@ -893,7 +970,8 @@ pub fn run() {
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
-            recording_started, recording_cancel, recording_error, recording_save, update_status, update_check, update_install
+            recording_started, recording_cancel, recording_error, recording_save, update_status, update_check, update_install,
+            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")

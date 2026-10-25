@@ -1,12 +1,12 @@
 const PAGES = [
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Quick Access', 'panel-bottom', '#30b0c7'],
-  ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['About', 'info', '#0a84ff']
+  ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
   ['allInOne', 'All-In-One'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Fullscreen'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
-let prefs, current = 'General', recordingKey = null;
+let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false };
 
 const set = async (patch) => { prefs = { ...prefs, ...(await still.invoke('settings:set', patch)) }; };
 const group = (title, rows, hint) => [title ? el('div', { class: 'group-title' }, title) : null, el('div', { class: 'group' }, rows), hint ? el('div', { class: 'hint' }, hint) : null];
@@ -90,6 +90,26 @@ const pages = {
       select('Text size', 'annotate.font', [[20, 'Small'], [28, 'Medium'], [40, 'Large']], true)
     ], 'Tool keys: V select · A arrow · R rectangle · O ellipse · L line · P pen · H highlight · T text · N counter · B redact · U blur · X pixelate · S spotlight · C crop')
   ],
+  Cloud: () => {
+    const status = el('span', { style: 'color:var(--text-2)' }, cloudState.connected ? 'Connected' : 'Not connected');
+    const endpoint = el('input', { class: 'field', style: 'width:300px', placeholder: 'https://captures.example.com', value: prefs.cloud.endpoint || '' });
+    const token = el('input', { class: 'field', style: 'width:300px', type: 'password', placeholder: cloudState.hasToken ? 'Saved — leave empty to keep it' : 'Personal access token' });
+    const connect = el('button', { class: 'btn primary', onclick: async () => {
+      status.textContent = 'Connecting…';
+      try { const name = await still.invoke('cloud:connect', endpoint.value, token.value); cloudState = { connected: true, hasToken: true }; prefs = await still.invoke('settings:get'); render(); toast(`Connected as ${name}`); }
+      catch (error) { status.textContent = String(error); status.style.color = 'var(--red)'; }
+    } }, 'Connect');
+    const disconnect = el('button', { class: 'btn', onclick: async () => { await still.invoke('cloud:disconnect'); cloudState = { connected: false, hasToken: false }; prefs = await still.invoke('settings:get'); render(); } }, 'Disconnect');
+    return [
+      group('Server', [row('Server address', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
+        'Run your own Still Cloud server (see Cloud/README.md in the project). Uploads only happen when you press Upload or turn on automatic upload. The token is stored in your user profile, readable only by you.'),
+      group('Uploads', [
+        select('Links expire after', 'cloud.expiryDays', [[1, '1 day'], [7, '7 days'], [30, '30 days'], [0, 'Never']], true),
+        select('Who can open links', 'cloud.visibility', [['link', 'Anyone with the link'], ['team', 'My team'], ['private', 'Only me']]),
+        toggle('Upload every screenshot automatically', 'cloud.autoUpload')
+      ], 'After an upload, the share link is copied to your clipboard.')
+    ];
+  },
   About: () => [el('div', { class: 'about' }, [
     el('img', { src: 'icon.png', alt: '' }), el('b', { style: 'font-size:18px' }, 'Still'),
     el('span', { style: 'color:var(--text-2)' }, `Version ${prefs.version} for ${prefs.platform === 'win32' ? 'Windows' : 'Linux'}`),
@@ -158,6 +178,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
 (async () => {
   prefs = await applyTheme();
   updateStatus = await still.invoke('update:status');
+  const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   $('#nav').append(...PAGES.map(([name, iconName, color]) => el('button', { 'data-page': name, html: `<span class="tile" style="background:${color}">${icon(iconName)}</span>${name}`, onclick: () => { current = name; render(); } })));
   $('#nav').append(el('div', { class: 'spacer' }));
   if (prefs.platform !== 'darwin') { const header = $('header'); header.classList.add('titlebar'); addWindowControls(); header.querySelector('.segmented').style.marginLeft = 'auto'; }

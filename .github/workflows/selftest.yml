@@ -29,6 +29,14 @@ jobs:
       - run: npm test
       - name: Build
         run: cargo build --manifest-path src-tauri/Cargo.toml
+      - uses: actions/setup-python@v7
+        with: { python-version: '3.13' }
+      - name: Start a local Still Cloud server
+        run: |
+          STILL_ADMIN_TOKEN=selftest-token-0123456789abcdef nohup python ../Cloud/server.py --data "$RUNNER_TEMP/cloud" --port 7843 > "$RUNNER_TEMP/cloud.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7843/ >/dev/null && break; sleep 1; done
+          echo "STILL_TEST_CLOUD=http://127.0.0.1:7843" >> "$GITHUB_ENV"
+          echo "STILL_TEST_CLOUD_TOKEN=selftest-token-0123456789abcdef" >> "$GITHUB_ENV"
       - name: Self-test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -19,6 +19,7 @@ pub fn defaults() -> Value {
         "rememberSelection": false,
         "recording": { "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3 },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
+        "cloud": { "endpoint": "", "expiryDays": 7, "visibility": "link", "autoUpload": false },
         "shortcuts": {
             "area": "CommandOrControl+Shift+4",
             "allInOne": "CommandOrControl+Shift+5",

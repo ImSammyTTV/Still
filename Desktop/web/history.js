@@ -35,6 +35,7 @@ async function load() {
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },
         { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved')) },
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id) },
+        { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then(() => toast('Link copied')).catch((error) => toast(String(error))) },
         ...(item.kind === 'recording' ? [] : [{ label: 'Pin to Screen', icon: 'pin', action: () => still.invoke('library:pin', item.id) }]),
         { label: 'Show in Folder', icon: 'folder-open', action: () => still.invoke('library:reveal', item.id) },
         '-',
