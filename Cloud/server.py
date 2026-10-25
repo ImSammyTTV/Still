@@ -42,6 +42,7 @@ def password_hash(password: str, salt: str) -> str:
 
 class Store:
     def __init__(self, directory: Path, public_url: str, admin_token: str | None = None):
+        self.open_connections = threading.local()
         self.directory = directory.resolve()
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.directory.chmod(0o700)
@@ -100,9 +101,14 @@ class Store:
             path.chmod(0o600)
         return path.read_bytes()
 
+    def commit_open(self):
+        for db in getattr(self.open_connections, "connections", []):
+            if db.in_transaction: db.commit()
+
     @contextmanager
     def db(self):
         db = sqlite3.connect(self.directory / "still.sqlite3", timeout=30)
+        self.open_connections.connections = getattr(self.open_connections, "connections", []) + [db]
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA journal_mode=WAL")
@@ -113,6 +119,7 @@ class Store:
             db.rollback()
             raise
         finally:
+            self.open_connections.connections.remove(db)
             db.close()
 
     def sign(self, data: dict) -> str:
@@ -182,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.store.secure:
             self.send_header("Strict-Transport-Security", "max-age=31536000")
     def respond(self, status, body=b"", content_type="application/json; charset=utf-8", cookies=(), extra=None):
+        # Handlers often respond inside `with store.db()`; commit first so the next request sees the change.
+        if status < 400: self.store.commit_open()
         if isinstance(body, dict) or isinstance(body, list):
             body = json.dumps(body, ensure_ascii=False).encode()
         elif isinstance(body, str):

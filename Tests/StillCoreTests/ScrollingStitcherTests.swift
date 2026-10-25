@@ -7,7 +7,7 @@ final class ScrollingStitcherTests: XCTestCase {
         let ctx = CGContext(data: nil, width: 160, height: 720, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         for y in 0..<720 {
             for x in stride(from: 0, to: 160, by: 8) {
-                let v = CGFloat((y*17+x*13+y*y*3)%251)/255
+                let level: Int = (y * 17 + x * 13 + y * y * 3) % 251; let v = CGFloat(level) / 255
                 ctx.setFillColor(NSColor(white: v, alpha: 1).cgColor); ctx.fill(CGRect(x: x, y: y, width: 8, height: 1))
             }
         }
@@ -24,7 +24,14 @@ final class ScrollingStitcherTests: XCTestCase {
     }
     func testReverseScrollingPrependsAndRevisitingDoesNotDuplicate() throws {
         let ctx = CGContext(data: nil, width: 160, height: 900, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        for y in 0..<900 { for x in stride(from: 0, to: 160, by: 8) { ctx.setFillColor(NSColor(white: CGFloat((y*17+x*13+y*y*3)%251)/255,alpha: 1).cgColor); ctx.fill(CGRect(x: x,y: y,width: 8,height: 1)) } }
+        for y in 0..<900 {
+            for x in stride(from: 0, to: 160, by: 8) {
+                let level: Int = (y * 17 + x * 13 + y * y * 3) % 251
+                let white = CGFloat(level) / 255
+                ctx.setFillColor(NSColor(white: white, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: x, y: y, width: 8, height: 1))
+            }
+        }
         let full = ctx.makeImage()!
         func frame(_ y: Int) throws -> CGImage { try ImageRenderer.crop(full,to: CGRect(x: 0,y: y,width: 160,height: 280)) }
         let stitcher = try ScrollingStitcher(frame(120))
@@ -39,7 +46,7 @@ final class ScrollingStitcherTests: XCTestCase {
     }
     func testHorizontalFramesAndChangedSizes() throws {
         let ctx = CGContext(data: nil, width: 600, height: 120, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        for x in 0..<600 { ctx.setFillColor(NSColor(white: CGFloat((x*37+x*x*7)%251)/255, alpha: 1).cgColor); ctx.fill(CGRect(x: x, y: 0, width: 1, height: 120)) }
+        for x in 0..<600 { let level: Int = (x * 37 + x * x * 7) % 251; ctx.setFillColor(NSColor(white: CGFloat(level) / 255, alpha: 1).cgColor); ctx.fill(CGRect(x: x, y: 0, width: 1, height: 120)) }
         let full = ctx.makeImage()!
         let a = try ImageRenderer.crop(full, to: CGRect(x: 0, y: 0, width: 280, height: 120)), b = try ImageRenderer.crop(full, to: CGRect(x: 100, y: 0, width: 280, height: 120))
         let stitcher = try ScrollingStitcher(a, axis: .horizontal)
