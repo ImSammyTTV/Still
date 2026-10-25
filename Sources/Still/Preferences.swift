@@ -36,7 +36,7 @@ import StillCore
     @AppStorage("previewSwipeRight") var previewSwipeRight = "copy"
     @AppStorage("previewPosition") var previewPosition = "bottomLeft"
     @AppStorage("previewWidth") var previewWidth: Double = 260
-    @AppStorage("previewTimeout") var previewTimeout: Double = 0
+    @AppStorage("previewTimeout") var previewTimeout: Double = 15
     @AppStorage("saveAfterCapture") var saveAfterCapture = false
     @AppStorage("annotateAfterCapture") var annotateAfterCapture = false
     @AppStorage("pinAfterCapture") var pinAfterCapture = false

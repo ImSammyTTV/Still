@@ -14,7 +14,7 @@ final class Library: ObservableObject {
     @Published var page = "General"
     @Published var permissionGranted = CGPreflightScreenCaptureAccess()
     @Published var permissionError: String?
-    @AppStorage("autoCopy") var autoCopy = false
+    @AppStorage("autoCopy") var autoCopy = true
     @AppStorage("showPreview") var showPreview = true
     @AppStorage("captureSound") var captureSound = false
     @AppStorage("systemAudio") var systemAudio = false

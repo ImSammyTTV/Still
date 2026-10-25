@@ -8,7 +8,7 @@ const defaults = {
   exportFolder: '',
   imageFormat: 'png',
   jpegQuality: 90,
-  afterCapture: { quickAccess: true, copy: false, save: false, annotate: false },
+  afterCapture: { quickAccess: true, copy: true, save: false, annotate: false },
   afterRecording: { quickAccess: true, copy: false, save: true },
   quickAccess: { side: 'left', size: 'medium', autoClose: true, closeAfter: 15 },
   crosshair: 'partial',

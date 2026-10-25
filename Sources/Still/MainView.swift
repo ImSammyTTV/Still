@@ -100,7 +100,7 @@ struct MainView: View {
                 Toggle("Show after recording", isOn: $prefs.recordingPreview)
                 choice("Position", selection: $prefs.previewPosition) { Text("Bottom Left").tag("bottomLeft"); Text("Bottom Right").tag("bottomRight"); Text("Top Left").tag("topLeft"); Text("Top Right").tag("topRight") }
                 HStack { Text("Size"); Slider(value: $prefs.previewWidth, in: 180...400, step: 10); Text("\(Int(prefs.previewWidth)) px").foregroundStyle(.secondary).frame(width: 48) }
-                choice("Automatically close", selection: $prefs.previewTimeout) { Text("Never").tag(0.0); Text("5 seconds").tag(5.0); Text("10 seconds").tag(10.0); Text("30 seconds").tag(30.0); Text("60 seconds").tag(60.0) }
+                choice("Automatically close", selection: $prefs.previewTimeout) { Text("Never").tag(0.0); Text("5 seconds").tag(5.0); Text("10 seconds").tag(10.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0); Text("60 seconds").tag(60.0) }
             }
             section("Swipe Gestures") {
                 choice("Swipe left", selection: $prefs.previewSwipeLeft) { ForEach(["dismiss", "copy", "save", "edit", "upload"], id: \.self) { Text($0.capitalized).tag($0) } }
