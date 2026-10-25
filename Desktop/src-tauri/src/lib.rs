@@ -10,7 +10,7 @@ use settings::Settings;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{IconMenuItemBuilder, Menu, MenuBuilder, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -364,35 +364,58 @@ fn build_tray_menu(app: &AppHandle) {
     if let Ok(menu) = tray_menu(app) { let _ = tray.set_menu(Some(menu)); }
 }
 
+/// Small grey icons for the tray menu, drawn from the same Lucide set the windows use.
+fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
+    let bytes: &'static [u8] = match name {
+        "allInOne" => include_bytes!("../icons/menu/allInOne.png"), "area" => include_bytes!("../icons/menu/area.png"),
+        "window" => include_bytes!("../icons/menu/window.png"), "fullscreen" => include_bytes!("../icons/menu/fullscreen.png"),
+        "timer" => include_bytes!("../icons/menu/timer.png"), "text" => include_bytes!("../icons/menu/text.png"),
+        "record" => include_bytes!("../icons/menu/record.png"), "open" => include_bytes!("../icons/menu/open.png"),
+        "history" => include_bytes!("../icons/menu/history.png"), "restore" => include_bytes!("../icons/menu/restore.png"),
+        "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
+        "update" => include_bytes!("../icons/menu/update.png"), "settings" => include_bytes!("../icons/menu/settings.png"),
+        "quit" => include_bytes!("../icons/menu/quit.png"), _ => return None,
+    };
+    tauri::image::Image::from_bytes(bytes).ok()
+}
+
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let s = setting(app, "shortcuts");
     let accel = |a: &str| s[a].as_str().filter(|x| !x.is_empty()).map(|x| x.to_string());
-    let item = |id: &str, title: &str| { let mut b = MenuItemBuilder::with_id(id, title); if let Some(a) = accel(id) { b = b.accelerator(a); } b.build(app) };
+    let item = |id: &str, title: &str, icon: &str, shortcut: Option<String>, enabled: bool| {
+        let mut b = IconMenuItemBuilder::with_id(id, title).enabled(enabled);
+        if let Some(i) = menu_icon(icon) { b = b.icon(i); }
+        if let Some(a) = shortcut { b = b.accelerator(a); }
+        b.build(app)
+    };
     let recording = st(app).session.lock().unwrap().recording.is_some();
     let update = st(app).session.lock().unwrap().update.clone();
     let timers = SubmenuBuilder::new(app, "Timed Capture")
-        .item(&MenuItemBuilder::with_id("timer-3", "Capture Area in 3 Seconds").build(app)?)
-        .item(&MenuItemBuilder::with_id("timer-5", "Capture Area in 5 Seconds").build(app)?)
-        .item(&MenuItemBuilder::with_id("timer-10", "Capture Area in 10 Seconds").build(app)?).build()?;
+        .item(&item("timer-3", "Capture Area in 3 Seconds", "timer", None, true)?)
+        .item(&item("timer-5", "Capture Area in 5 Seconds", "timer", None, true)?)
+        .item(&item("timer-10", "Capture Area in 10 Seconds", "timer", None, true)?).build()?;
     let update_item = match update["state"].as_str() {
-        Some("available") => MenuItemBuilder::with_id("update-install", format!("Update to {}…", update["version"].as_str().unwrap_or(""))).build(app)?,
-        Some("downloading") => MenuItemBuilder::with_id("update-busy", "Downloading Update…").enabled(false).build(app)?,
-        _ => MenuItemBuilder::with_id("update-check", "Check for Updates…").build(app)?,
+        Some("available") => item("update-install", &format!("Update to {}…", update["version"].as_str().unwrap_or("")), "update", None, true)?,
+        Some("downloading") => item("update-busy", "Downloading Update…", "update", None, false)?,
+        _ => item("update-check", "Check for Updates…", "update", None, true)?,
     };
     MenuBuilder::new(app)
-        .item(&item("allInOne", "All-In-One")?).separator()
-        .item(&item("area", "Capture Area")?).item(&item("window", "Capture Window")?).item(&item("fullscreen", "Capture Fullscreen")?)
-        .item(&timers).item(&item("text", "Capture Text (OCR)")?)
-        .item(&{ let mut b = MenuItemBuilder::with_id("record", if recording { "Stop Recording" } else { "Record Screen" }); if let Some(a) = accel("record") { b = b.accelerator(a); } b.build(app)? })
+        .item(&item("allInOne", "All-In-One", "allInOne", accel("allInOne"), true)?).separator()
+        .item(&item("area", "Capture Area", "area", accel("area"), true)?)
+        .item(&item("window", "Capture Window", "window", accel("window"), true)?)
+        .item(&item("fullscreen", "Capture Fullscreen", "fullscreen", accel("fullscreen"), true)?)
+        .item(&timers)
+        .item(&item("text", "Capture Text (OCR)", "text", accel("text"), true)?)
+        .item(&item("record", if recording { "Stop Recording" } else { "Record Screen" }, "record", accel("record"), true)?)
         .separator()
-        .item(&MenuItemBuilder::with_id("open-image", "Open Image…").build(app)?)
-        .item(&MenuItemBuilder::with_id("history", "Capture History").build(app)?)
-        .item(&MenuItemBuilder::with_id("restore", "Restore Last Capture").build(app)?)
-        .item(&MenuItemBuilder::with_id("unlock-pins", "Unlock Pinned Screenshots").build(app)?)
-        .item(&MenuItemBuilder::with_id("close-overlays", "Close All Overlays").build(app)?)
+        .item(&item("open-image", "Open Image…", "open", None, true)?)
+        .item(&item("history", "Capture History", "history", accel("history"), true)?)
+        .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
+        .item(&item("unlock-pins", "Unlock Pinned Screenshots", "unlock", None, true)?)
+        .item(&item("close-overlays", "Close All Overlays", "close", None, true)?)
         .separator().item(&update_item)
-        .item(&MenuItemBuilder::with_id("settings", "Settings…").build(app)?)
-        .item(&MenuItemBuilder::with_id("quit", "Quit Still").build(app)?)
+        .item(&item("settings", "Settings…", "settings", None, true)?)
+        .item(&item("quit", "Quit Still", "quit", None, true)?)
         .build()
 }
 
@@ -504,7 +527,7 @@ fn after_settings(app: &AppHandle, patch: &Value) {
 async fn settings_choose_folder(app: AppHandle) -> Option<String> {
     let folder = app.dialog().file().blocking_pick_folder()?.into_path().ok()?;
     let path = folder.to_string_lossy().to_string();
-    settings_set(app, json!({ "exportFolder": path }));
+    settings_set(app, json!({ "exportFolder": path })).await;
     Some(path)
 }
 #[tauri::command]
