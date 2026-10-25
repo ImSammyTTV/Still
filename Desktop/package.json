@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@tesseract.js-data/eng": "1.0.0",
+    "electron-updater": "6.8.10",
     "lucide": "1.61.0",
     "tesseract.js": "7.0.0"
   },
@@ -28,19 +29,48 @@
   "build": {
     "appId": "app.still.desktop",
     "productName": "Still",
-    "copyright": "© ImSammyTTV",
-    "directories": { "output": "dist", "buildResources": "build" },
-    "files": ["src/**", "build/tray*.png", "build/icon.png", "package.json"],
-    "asarUnpack": ["node_modules/tesseract.js/**", "node_modules/tesseract.js-core/**", "node_modules/@tesseract.js-data/**"],
+    "copyright": "\u00a9 ImSammyTTV",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "build/tray*.png",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**",
+      "node_modules/@tesseract.js-data/**"
+    ],
     "artifactName": "Still-${version}-${os}-${arch}.${ext}",
     "win": {
       "icon": "build/icon.png",
       "target": [
-        { "target": "nsis", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
-    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Still" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Still"
+    },
     "linux": {
       "icon": "build/icon.png",
       "category": "Graphics",
@@ -48,13 +78,54 @@
       "maintainer": "ImSammyTTV",
       "executableName": "still",
       "target": [
-        { "target": "AppImage", "arch": ["x64", "arm64"] },
-        { "target": "deb", "arch": ["x64", "arm64"] },
-        { "target": "rpm", "arch": ["x64"] },
-        { "target": "tar.gz", "arch": ["x64", "arm64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
-      "desktop": { "entry": { "StartupWMClass": "Still" } }
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "Still"
+        }
+      }
     },
-    "deb": { "depends": ["x11-utils"], "recommends": ["xdg-desktop-portal"] }
+    "deb": {
+      "depends": [
+        "x11-utils"
+      ],
+      "recommends": [
+        "xdg-desktop-portal"
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ImSammyTTV",
+        "repo": "Still"
+      }
+    ]
   }
 }

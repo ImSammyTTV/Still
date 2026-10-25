@@ -30,6 +30,7 @@ const pages = {
   General: () => [
     group('App', [
       toggle('Launch at login', 'launchAtLogin'),
+      toggle('Check for updates automatically', 'autoUpdate'),
       select('Appearance', 'theme', [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']])
     ]),
     group('Sounds', [toggle('Play sounds', 'playSounds')]),
@@ -93,9 +94,25 @@ const pages = {
     el('img', { src: '../../build/icon.png', alt: '' }), el('b', { style: 'font-size:18px' }, 'Still'),
     el('span', { style: 'color:var(--text-2)' }, `Version ${prefs.version} for ${prefs.platform === 'win32' ? 'Windows' : 'Linux'}`),
     el('span', { style: 'color:var(--text-2);max-width:380px' }, 'Captures and text recognition stay on your computer.'),
+    updateBox(),
     el('button', { class: 'btn', onclick: () => still.send('open:history') }, 'Open Capture History')
   ])]
 };
+
+let updateStatus = { state: 'idle' };
+function updateText(status) {
+  return ({ checking: 'Checking for updates…', downloading: `Downloading Still ${status.version || ''}… ${status.progress || 0}%`, ready: `Still ${status.version} is ready to install.`,
+    current: 'Still is up to date.', error: `Couldn’t check for updates: ${status.error}`, unavailable: status.error || 'Updates are unavailable.', idle: '' })[status.state] || '';
+}
+function updateBox() {
+  const ready = updateStatus.state === 'ready';
+  return el('div', { style: 'display:grid;gap:8px;justify-items:center' }, [
+    el('span', { style: 'color:var(--text-2)' }, updateText(updateStatus)),
+    el('button', { class: `btn${ready ? ' primary' : ''}`, disabled: ['checking', 'downloading', 'unavailable'].includes(updateStatus.state),
+      onclick: () => still.send(ready ? 'update:install' : 'update:check') }, ready ? 'Restart to Update' : 'Check for Updates')
+  ]);
+}
+still.on('update:status', (status) => { updateStatus = status; if (current === 'About') render(); });
 
 function shortcutField(key) {
   const failed = (prefs.failedShortcuts || []).includes(key);
@@ -140,6 +157,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
 
 (async () => {
   prefs = await applyTheme();
+  updateStatus = await still.invoke('update:status');
   $('#nav').append(...PAGES.map(([name, iconName, color]) => el('button', { 'data-page': name, html: `<span class="tile" style="background:${color}">${icon(iconName)}</span>${name}`, onclick: () => { current = name; render(); } })));
   $('#nav').append(el('div', { class: 'spacer' }));
   if (prefs.platform === 'linux') { const header = $('header'); header.classList.add('titlebar'); addWindowControls(); header.querySelector('.segmented').style.marginLeft = 'auto'; }

@@ -5,6 +5,8 @@ const path = require('path');
 const { Settings } = require('./settings');
 const { Library } = require('./library');
 const { grabDisplays, WindowLister, isWayland } = require('./capture');
+const { Updater } = require('./updater');
+const clip = require('./clip');
 const { toPixels, intersect, captureName, shortcutLabel } = require('../shared/geometry');
 
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
@@ -15,7 +17,7 @@ if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features'
 const root = path.join(__dirname, '..');
 const page = (name) => path.join(root, 'renderer', `${name}.html`);
 const asset = (name) => path.join(root, '..', 'build', name);
-let settings, library, tray;
+let settings, library, tray, updater;
 const windowLister = new WindowLister();
 const state = { busy: false, overlays: [], grabs: [], purpose: 'screenshot', previews: [], editors: new Map(), pins: new Set(), recorder: null, hud: null, recording: null };
 const singletons = {};
@@ -197,7 +199,7 @@ async function completeImage(image, { text = false } = {}) {
   const { buffer, ext } = encode(image);
   const item = library.add(buffer, { ext, width: size.width, height: size.height });
   const after = settings.all.afterCapture;
-  if (after.copy) clipboard.writeImage(image);
+  if (after.copy) await clip.copyImage(image).catch((error) => notify('Couldn’t copy the screenshot', error.message));
   if (after.save) exportItem(item.id);
   if (after.annotate) openEditor(item.id);
   else if (after.quickAccess) showPreview(item);
@@ -209,7 +211,7 @@ async function recognizeText(image) {
   try {
     const text = await ocr(image.toPNG());
     if (!text.trim()) { notify('No text found', 'Try selecting a larger area with clearer text.'); return; }
-    clipboard.writeText(text.trim());
+    await clip.copyText(text.trim());
     notify('Text copied', text.trim().slice(0, 120));
   } catch (error) { notify('Text recognition failed', error.message); }
 }
@@ -286,7 +288,7 @@ function finishRecording(buffer, ext, duration) {
   library.update(item.id, { duration });
   const after = settings.all.afterRecording;
   if (after.save) exportItem(item.id);
-  if (after.copy) clipboard.writeBuffer?.('FileNameW', Buffer.from(`${library.file(item)}\0`, 'ucs2'));
+  if (after.copy) clip.copyFile(library.file(item)).catch(() => {});
   if (after.quickAccess) showPreview(item);
   broadcast('library:changed');
 }
@@ -343,11 +345,20 @@ function buildTray() {
     { label: 'Unlock Pinned Screenshots', click: () => state.pins.forEach((p) => p.setIgnoreMouseEvents(false)) },
     { label: 'Close All Overlays', click: () => { state.previews.forEach((p) => p.win.close()); state.pins.forEach((p) => p.close()); } },
     { type: 'separator' },
+    ...updateMenuItems(),
     { label: 'Settings…', click: () => openSettings() },
     { label: 'Quit Still', role: 'quit' }
   ]);
   tray.setContextMenu(menu);
 }
+
+function updateMenuItems() {
+  const status = updater?.status || { state: 'idle' };
+  if (status.state === 'ready') return [{ label: `Restart to Update to ${status.version}`, click: () => updater.install() }];
+  if (status.state === 'downloading') return [{ label: `Downloading Update… ${status.progress}%`, enabled: false }];
+  return [{ label: 'Check for Updates…', enabled: status.state !== 'checking' && status.state !== 'unavailable', click: () => { manualCheck = true; updater.check(); } }];
+}
+let manualCheck = false;
 
 function updateTrayRecording(active) {
   if (!tray) return;
@@ -389,6 +400,9 @@ function applyTheme() { nativeTheme.themeSource = settings.all.theme === 'dark' 
 // ---- IPC -------------------------------------------------------------------------------------
 
 function registerIpc() {
+  ipcMain.handle('update:status', () => updater.status);
+  ipcMain.on('update:check', () => { manualCheck = true; updater.check(); });
+  ipcMain.on('update:install', () => updater.install());
   ipcMain.handle('settings:get', () => ({ ...settings.all, platform: process.platform, version: app.getVersion(), failedShortcuts: state.failedShortcuts || [], wayland: isWayland() }));
   ipcMain.handle('settings:set', (_e, patch) => settings.update(patch));
   ipcMain.handle('settings:reset', (_e, key) => settings.reset(key));
@@ -412,10 +426,10 @@ function registerIpc() {
   ipcMain.handle('library:get', (_e, id) => { const item = library.get(id); return item && { ...item, path: library.file(item), original: library.original(item), project: library.project(id) }; });
   ipcMain.handle('library:rename', (_e, id, title) => { const item = library.update(id, { title }); broadcast('library:changed'); return item; });
   ipcMain.handle('library:delete', (_e, id) => { closePreview(id); library.remove(id); broadcast('library:changed'); });
-  ipcMain.handle('library:copy', (_e, id) => {
+  ipcMain.handle('library:copy', async (_e, id) => {
     const item = library.get(id); if (!item) return;
-    if (item.kind === 'recording') clipboard.writeBuffer('FileNameW', Buffer.from(`${library.file(item)}\0`, 'ucs2'));
-    else clipboard.writeImage(nativeImage.createFromPath(library.file(item)));
+    if (item.kind === 'recording') await clip.copyFile(library.file(item));
+    else await clip.copyImage(nativeImage.createFromPath(library.file(item)));
   });
   ipcMain.handle('library:save', (_e, id) => exportItem(id));
   ipcMain.handle('library:saveAs', async (_e, id) => {
@@ -443,7 +457,7 @@ function registerIpc() {
     broadcast('library:changed');
     return item.id;
   });
-  ipcMain.handle('editor:copy', (_e, dataUrl) => clipboard.writeImage(dataToImage(dataUrl)));
+  ipcMain.handle('editor:copy', (_e, dataUrl) => clip.copyImage(dataToImage(dataUrl)));
   ipcMain.handle('editor:export', async (_e, dataUrl, name, saveAs) => {
     const image = dataToImage(dataUrl);
     const { buffer, ext } = encode(image);
@@ -552,16 +566,16 @@ async function selfTest(outDir) {
     log('previewVisible', !!preview && !preview.win.isDestroyed() && preview.win.isVisible());
     log('previewBounds', preview && preview.win.getBounds());
     await snap('1-after-capture');
+    log('afterCaptureCopy', await clip.hasImage());
     clipboard.clear();
     if (preview) {
       await preview.win.webContents.executeJavaScript("document.querySelector('#copy').click()");
       await wait(800);
     }
-    const copied = clipboard.readImage();
-    log('quickAccessCopy', !copied.isEmpty() && copied.getSize());
+    log('quickAccessCopy', await clip.hasImage());
     clipboard.clear();
-    clipboard.writeImage(nativeImage.createFromPath(library.file(item)));
-    log('directCopy', !clipboard.readImage().isEmpty());
+    await clip.copyImage(nativeImage.createFromPath(library.file(item)));
+    log('directCopy', await clip.hasImage());
     // Area capture through the overlay pipeline
     await startSelection('screenshot');
     await wait(1500);
@@ -579,13 +593,15 @@ async function selfTest(outDir) {
     const editor = state.editors.get(library.items[0].id);
     clipboard.clear();
     if (editor) { await editor.webContents.executeJavaScript("document.querySelector('#copy').click()"); await wait(800); }
-    log('editorCopy', !clipboard.readImage().isEmpty());
+    log('editorCopy', await clip.hasImage());
     await snap('4-editor');
     log('windowList', (await windowLister.list()).length);
   } catch (error) { log('error', error.stack || error.message); }
   fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify(results, null, 2));
   app.exit(0);
 }
+
+const selfTestMode = () => process.argv.some((arg) => arg.startsWith('--self-test='));
 
 app.on('second-instance', (_event, argv) => { if (!runArgs(argv)) openSettings(); });
 app.on('window-all-closed', (event) => event.preventDefault?.());
@@ -605,7 +621,12 @@ app.whenReady().then(() => {
   tray = new Tray(nativeImage.createFromPath(asset(process.platform === 'win32' ? 'tray-small.png' : 'tray.png')).resize({ width: process.platform === 'win32' ? 16 : 22 }));
   tray.setToolTip('Still');
   tray.on('click', () => process.platform === 'win32' ? startSelection('screenshot') : tray.popUpContextMenu());
+  updater = new Updater({ settings, onChange: (status) => {
+    buildTray(); broadcast('update:status', status);
+    if (manualCheck && ['current', 'error'].includes(status.state)) { manualCheck = false; notify('Still', status.state === 'current' ? `You’re up to date (version ${app.getVersion()}).` : `Couldn’t check for updates: ${status.error}`); }
+  } });
   buildTray();
+  if (!selfTestMode()) updater.start();
   const failed = registerShortcuts();
   windowLister.start();
   applyLoginItem();

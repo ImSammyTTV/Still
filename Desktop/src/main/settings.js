@@ -4,6 +4,7 @@ const path = require('path');
 const defaults = {
   theme: 'system',
   launchAtLogin: false,
+  autoUpdate: true,
   playSounds: true,
   exportFolder: '',
   imageFormat: 'png',
