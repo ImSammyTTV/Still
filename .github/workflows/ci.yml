@@ -30,7 +30,7 @@ jobs:
       - name: Test sharing service
         run: python3 -m unittest discover -s Cloud/tests -v
   desktop:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: Desktop

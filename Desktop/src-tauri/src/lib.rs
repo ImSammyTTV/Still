@@ -70,8 +70,12 @@ fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
     let label = format!("editor-{}", id.unwrap_or("demo"));
     let title = id.and_then(|i| st(app).library.lock().unwrap().get(i)).map(|i| i.title).unwrap_or_else(|| "Still — Annotate".into());
     close_preview(app, id.unwrap_or(""));
+    // Fit the editor inside the work area of the screen the pointer is on.
+    let (w, h) = app.cursor_position().ok().and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())
+        .map(|m| { let a = m.work_area(); let s = m.scale_factor(); ((a.size.width as f64 / s - 40.0).min(1180.0), (a.size.height as f64 / s - 40.0).min(800.0)) })
+        .unwrap_or((1180.0, 800.0));
     focus_or(app, &label, || builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" } }))
-        .title(title).inner_size(1180.0, 800.0).min_inner_size(900.0, 520.0).decorations(false).center().build().ok());
+        .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false).center().build().ok());
 }
 
 // ---- Quick Access -------------------------------------------------------------------------------
