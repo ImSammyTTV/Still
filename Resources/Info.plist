@@ -35,6 +35,8 @@
 	<string>Still</string>
 	<key>CFBundleIconFile</key>
 	<string>Still.icns</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>CFBundleIdentifier</key>
 	<string>local.sam.Still</string>
 	<key>CFBundleName</key>

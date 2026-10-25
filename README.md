@@ -33,7 +33,7 @@
 <td width="50%" valign="top">
 
 ### 📸 Capture anything
-Area, window or full screen from one shortcut. Press **Space** while selecting to switch to a whole window,
+Area, window or full screen from one shortcut. **Hold Space** while selecting to grab a whole window,
 just like the built-in Mac screenshot tool. Crosshair, magnifier, exact sizes and aspect-ratio lock included.
 
 </td>
@@ -129,7 +129,7 @@ No accounts, no tracking. Captures stay on your computer. Sharing is optional an
 
 | Action | Mac | Windows & Linux |
 |---|---|---|
-| Capture area (**Space** for window) | `⇧⌘4` | `Ctrl + Shift + 4` |
+| Capture area (**hold Space** for window) | `⇧⌘4` | `Ctrl + Shift + 4` |
 | All-In-One capture bar | `⌃⇧⌘S` | `Ctrl + Shift + 5` |
 | Capture window | `⌃⇧⌘4` | `Ctrl + Alt + Shift + 4` |
 | Capture full screen | `⌃⇧⌘5` | `Ctrl + Shift + 3` |
@@ -138,7 +138,7 @@ No accounts, no tracking. Captures stay on your computer. Sharing is optional an
 
 Every shortcut can be changed in **Settings → Shortcuts**.
 
-**While selecting:** `Space` switches between area and window · `Shift` keeps it square · arrow keys nudge
+**While selecting:** hold `Space` and click to capture a window, let go to go back to area · `Shift` keeps it square · arrow keys nudge
 (`Shift` for 10 px, `Alt` / `Option` to resize) · `Enter` captures · `Esc` cancels.
 `A` area · `W` window · `F` full screen · `O` text · `V` record · `T` timer.
 
@@ -218,7 +218,7 @@ Install a package from the [latest release](https://github.com/ImSammyTTV/Still/
 </p>
 
 > [!WARNING]
-> **Wayland:** screenshots work through your desktop's screen-sharing prompt, but picking a single window with
+> **Wayland:** screenshots work through your desktop's screen-sharing prompt, but picking a single window by holding
 > **Space** needs an **X11** session, and some desktops don't let apps register global shortcuts. Add a custom
 > keyboard shortcut in your desktop settings that runs `still --capture=area` (or `fullscreen`, `window`,
 > `record`, `text`, `allInOne`, `history`).

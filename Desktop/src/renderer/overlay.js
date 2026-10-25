@@ -2,7 +2,7 @@ const G = StillGeometry;
 const canvas = $('#canvas'), ctx = canvas.getContext('2d');
 const image = new Image();
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
-let windowMode = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
+let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
 const bounds = () => ({ x: 0, y: 0, w: config.width, h: config.height });
 
 still.on('overlay:init', (data) => {
@@ -80,7 +80,7 @@ function draw() {
     ctx.stroke();
   }
   if (pointer.x < 0) return;
-  const hint = purpose === 'record' ? 'Drag to choose what to record' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · Space for window';
+  const hint = purpose === 'record' ? 'Drag to choose what to record' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
   label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : hint, pointer.x, pointer.y);
   if (config.magnifier && !anchor) drawMagnifier();
 }
@@ -105,7 +105,7 @@ function drawWindowMode() {
     ctx.strokeStyle = 'rgba(10,132,255,.85)'; ctx.lineWidth = 1; ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
   }
   const cam = $('#camera'); cam.style.left = `${pointer.x}px`; cam.style.top = `${pointer.y}px`;
-  if (pointer.x >= 0) label(hovered ? 'Click to capture window · Space for area' : 'Move over a window · Space for area · Esc to cancel', pointer.x + 6, pointer.y + 6);
+  if (pointer.x >= 0) label(hovered ? 'Click to capture window' : 'Hold Space and move over a window', pointer.x + 6, pointer.y + 6);
 }
 
 // ---- Interaction ---------------------------------------------------------------------------
@@ -143,13 +143,16 @@ addEventListener('mouseup', (e) => {
   else draw();
 });
 
+addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
+
 addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
 
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') applyDimensions(); if (e.key === 'Escape') e.target.blur(); return; }
   shift = e.shiftKey;
   if (e.key === 'Escape') return cancel();
-  if (e.code === 'Space') { e.preventDefault(); if (!anchor) setWindowMode(!windowMode); return; }
+  // Hold Space to pick a window; releasing it returns to area selection.
+  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat && !anchor && !windowMode) { spaceHeld = true; setWindowMode(true); } return; }
   if (e.key === 'Enter' && region && region.w > 2) return finish(region);
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   if (arrows[e.key] && !windowMode) {

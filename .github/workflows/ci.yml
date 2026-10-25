@@ -19,7 +19,7 @@ jobs:
           STILL_SIGN_IDENTITY: '-'
         run: ./scripts/build.sh "$RUNNER_TEMP/Still.app"
       - name: Check both architectures
-        run: lipo -verify_arch arm64 x86_64 "$RUNNER_TEMP/Still.app/Contents/MacOS/Still"
+        run: lipo -archs "$RUNNER_TEMP/Still.app/Contents/MacOS/Still" | grep -q "x86_64 arm64\|arm64 x86_64"
   sharing:
     runs-on: ubuntu-latest
     steps:

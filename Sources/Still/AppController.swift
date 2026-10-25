@@ -43,7 +43,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppController.shared = self
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         applyAppearance()
         setupMenu()
         hotkeys.handler = { [weak self] id in
@@ -143,7 +143,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         scrolling.onComplete = { [weak self] image in self?.library.busy = false; self?.completeScreenshot(image); DesktopCover.shared.endCapture(); self?.restoreOverlays() }
         scrolling.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays() }
-        showMain()
+        // A menu bar app: only open Settings the first time, so launches at login stay out of the way.
+        if !UserDefaults.standard.bool(forKey: "welcomed") { UserDefaults.standard.set(true, forKey: "welcomed"); showMain() }
         if CommandLine.arguments.contains("--editor-demo") { demo() }
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
     }
@@ -546,7 +547,7 @@ extension AppController {
         hideForCapture(); lastExternalApp?.activate(); DesktopCover.shared.beginCapture()
         Task {
             if delay > 0 { library.toast("Capture starts in \(delay) seconds") }
-            try? await Task.sleep(nanoseconds: UInt64(max(0, delay))*1_000_000_000+180_000_000)
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay)*1_000_000_000) }
             selection.begin(purpose)
         }
     }

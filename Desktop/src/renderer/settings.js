@@ -51,7 +51,7 @@ const pages = {
   ],
   Shortcuts: () => [
     group(null, SHORTCUTS.map(([key, label]) => row(label, shortcutField(key)))),
-    el('div', { class: 'hint' }, 'Click a shortcut, then press the new keys. Backspace clears it, Esc cancels. In the capture overlay, press Space to switch between an area and a window.'),
+    el('div', { class: 'hint' }, 'Click a shortcut, then press the new keys. Backspace clears it, Esc cancels. In the capture overlay, hold Space to capture a window.'),
     prefs.wayland ? el('div', { class: 'hint warning' }, 'On Wayland, global shortcuts may need to be added in your desktop’s keyboard settings (run “still --capture=area”).') : null,
     el('div', { style: 'display:flex;justify-content:flex-end;margin-top:14px' }, [el('button', { class: 'btn', onclick: async () => { await still.invoke('settings:reset', 'shortcuts'); prefs = await still.invoke('settings:get'); render(); } }, 'Reset Defaults')])
   ],
@@ -71,7 +71,7 @@ const pages = {
     group('Selection', [
       select('Crosshair', 'crosshair', [['partial', 'Partial'], ['full', 'Full screen'], ['disabled', 'Off']]),
       toggle('Show magnifier', 'magnifier'), toggle('Freeze screen while selecting', 'freezeScreen'), toggle('Remember last selection', 'rememberSelection')
-    ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Press Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it.')
+    ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it.')
   ],
   Recording: () => [
     group('Video', [
