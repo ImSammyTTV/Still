@@ -251,7 +251,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func record() { toggleRecording() }
     @objc func checkForUpdates() { Updater.shared.check(manual: true) }
     @objc func about() {
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Still", .applicationVersion: "1.0", .credits: NSAttributedString(string: "A personal capture studio for your Mac.\nBuilt with Swift, AppKit & SwiftUI.\nAll captures and text recognition stay on your Mac.")])
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Still", .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "", .credits: NSAttributedString(string: "A personal capture studio for your Mac.\nBuilt with Swift, AppKit & SwiftUI.\nAll captures and text recognition stay on your Mac.")])
     }
     func showMain() {
         if mainWindow == nil {
