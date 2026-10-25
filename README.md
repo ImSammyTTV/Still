@@ -112,7 +112,7 @@ No accounts, no tracking. Captures stay on your computer. Sharing is optional an
    | System | Download |
    |---|---|
    | <img src="assets/os-apple.svg" width="16" alt="">&nbsp;**Mac** | [one-line installer](#-mac) or `Still-…-mac-universal.zip` |
-   | <img src="assets/os-windows.svg" width="16" alt="">&nbsp;**Windows** | `Still-…-win-x64.exe` (installer) or `…-win-x64.zip` (portable) · ARM: `…-win-arm64.exe` |
+   | <img src="assets/os-windows.svg" width="16" alt="">&nbsp;**Windows** | `Still_…_x64-setup.exe` (installer) or `Still-…-windows-x64-portable.exe` · ARM: `…_arm64-setup.exe` |
    | <img src="assets/os-linux.svg" width="16" alt="">&nbsp;**Linux** | see [Linux](#-linux) below |
 
 2. **Open Still.** It lives in your menu bar / system tray and opens its settings the first time.
@@ -191,13 +191,14 @@ Uninstall: quit Still and drag it from Applications to the Bin. Your captures ar
 
 ## <img src="assets/os-windows.svg" width="26" alt=""> Windows
 
-Download `Still-…-win-x64.exe` from the [latest release](https://github.com/ImSammyTTV/Still/releases/latest) and run it
-(use `…-arm64.exe` on Snapdragon / ARM PCs). Prefer no installer? Unzip `…-win-x64.zip` and run `Still.exe`.
+Download `Still_…_x64-setup.exe` from the [latest release](https://github.com/ImSammyTTV/Still/releases/latest) and run it
+(use `…_arm64-setup.exe` on Snapdragon / ARM PCs). Prefer no installer? Run `Still-…-windows-x64-portable.exe` directly.
+It's a small download (about 10 MB) because Still uses the Edge WebView2 engine that's already part of Windows 10 and 11.
 
 - Still sits in the **system tray**. Click the icon for a quick capture, or right-click for the full menu.
-- Window selection uses Windows' real window outlines, so captures don't include invisible borders.
-- **Computer audio** can be recorded alongside your microphone (Settings → Recording).
-- The recording controls are hidden from your recordings automatically.
+- **Updates install themselves**: Still checks in the background and offers **Update** in the tray menu.
+- **Recording:** choose an area, then pick the screen in Windows' share dialog. Computer audio can be recorded
+  alongside your microphone (Settings → Recording), and the recording controls are hidden from your recordings.
 - Switch on **Launch at login** in Settings → General.
 
 ---
@@ -208,10 +209,13 @@ Install a package from the [latest release](https://github.com/ImSammyTTV/Still/
 
 | Distro | Package |
 |---|---|
-| Any distro | `.AppImage` (make it executable and run it) |
+| Any distro | `.AppImage` (make it executable and run it; updates itself) |
 | Ubuntu, Debian, Mint, Pop!_OS | `.deb` |
 | Fedora, openSUSE, Nobara | `.rpm` |
-| Anything else | `.tar.gz` |
+
+Still needs a 2024-or-newer distro (for example Ubuntu 24.04, Fedora 40, Debian 13) with WebKitGTK 4.1, which the
+packages install for you. Screen recording depends on your desktop's screen sharing support in WebKitGTK; if it isn't
+available, Still tells you instead of failing silently.
 
 <p align="center">
   <img src="assets/window-capture-linux.png" alt="Window selection on Linux: the window under the pointer is highlighted in blue with the capture bar below" width="80%">
@@ -275,7 +279,7 @@ what happened instead, and which system you're on. Ideas and "it'd be nice if…
 | Folder | What's in it |
 |---|---|
 | `Sources/`, `Tests/` | The native Mac app (Swift, AppKit, SwiftUI, ScreenCaptureKit, Vision, AVFoundation) |
-| `Desktop/` | The Windows and Linux app (Electron) |
+| `Desktop/` | The Windows and Linux app (Tauri: Rust in `src-tauri/`, pages in `web/`) |
 | `Cloud/` | The optional self-hosted sharing server (Python, standard library only) — see [Cloud/README.md](Cloud/README.md) |
 | `FEATURES.md` | Detailed feature coverage and what still needs live testing |
 </details>
@@ -297,17 +301,20 @@ survives rebuilds), otherwise ad-hoc.
 <details>
 <summary><b>Building the Windows and Linux app</b></summary>
 
-Requires Node.js 20 or later.
+Requires Node.js 20+ and Rust (`rustup`). On Linux also install the WebKitGTK and PipeWire development packages
+listed in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 ```sh
 cd Desktop
 npm install
-npm test
+npm test                      # JavaScript and Rust tests
 npm start                     # run from source
 npm run demo                  # open the editor with a sample image
-npm run dist:win              # installers in Desktop/dist
-npm run dist:linux
+npm run build                 # installers in Desktop/src-tauri/target/release/bundle
 ```
+
+`still --self-test=<folder>` runs a capture, Quick Access, copy, editor and text-recognition check and writes
+`results.json`; CI runs it on real Windows and Linux machines.
 </details>
 
 <details>
