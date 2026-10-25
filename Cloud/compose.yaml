@@ -1,0 +1,27 @@
+services:
+  still:
+    build: .
+    restart: unless-stopped
+    environment:
+      STILL_PUBLIC_URL: ${STILL_PUBLIC_URL}
+      STILL_BRAND: ${STILL_BRAND:-Still Cloud}
+    volumes:
+      - captures:/data
+    expose:
+      - "7843"
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      STILL_DOMAIN: ${STILL_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - tls:/data
+    depends_on:
+      - still
+volumes:
+  captures:
+  tls:

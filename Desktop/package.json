@@ -1,0 +1,60 @@
+{
+  "name": "still-desktop",
+  "productName": "Still",
+  "version": "1.0.0",
+  "description": "Capture, annotate and record your screen on Windows and Linux.",
+  "author": "ImSammyTTV",
+  "homepage": "https://github.com/ImSammyTTV/Still",
+  "desktopName": "still.desktop",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "demo": "electron . --editor-demo",
+    "test": "node --test test/*.test.js",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "dist": "electron-builder --win --linux"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
+    "lucide": "1.61.0",
+    "tesseract.js": "7.0.0"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "app.still.desktop",
+    "productName": "Still",
+    "copyright": "© ImSammyTTV",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["src/**", "build/tray*.png", "build/icon.png", "package.json"],
+    "asarUnpack": ["node_modules/tesseract.js/**", "node_modules/tesseract.js-core/**", "node_modules/@tesseract.js-data/**"],
+    "artifactName": "Still-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ]
+    },
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Still" },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Graphics",
+      "synopsis": "Screenshots, annotation and screen recording",
+      "maintainer": "ImSammyTTV",
+      "executableName": "still",
+      "target": [
+        { "target": "AppImage", "arch": ["x64", "arm64"] },
+        { "target": "deb", "arch": ["x64", "arm64"] },
+        { "target": "rpm", "arch": ["x64"] },
+        { "target": "tar.gz", "arch": ["x64", "arm64"] }
+      ],
+      "desktop": { "entry": { "StartupWMClass": "Still" } }
+    },
+    "deb": { "depends": ["x11-utils"], "recommends": ["xdg-desktop-portal"] }
+  }
+}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8fa"><title>Still Cloud</title>
+  <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" type="module"></script>
+</head>
+<body data-page="{{PAGE}}" data-token="{{TOKEN}}">
+<a class="skip" href="#main">Skip to content</a>
+<div id="toast" role="status" aria-live="polite"></div>
+<section id="login-page" hidden>
+  <form id="login-form" class="login-card">
+    <div class="brand-mark" aria-hidden="true">⌗</div><h1>Sign in to Still Cloud</h1>
+    <p>Your captures, ready to share.</p><label for="login-token">Personal access token</label>
+    <input id="login-token" name="token" type="password" autocomplete="current-password" required>
+    <p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">Sign In</button>
+    <a id="sso-link" class="sso" href="/auth/oidc" hidden>Sign In with SSO</a>
+    <p class="hint">For a local server, the owner token is in its private <code>data/admin-token</code> file.</p>
+  </form>
+</section>
+<div id="dashboard-page" class="app" hidden>
+  <aside class="sidebar">
+    <a class="wordmark" href="/"><span class="brand-mark small" aria-hidden="true">⌗</span><span class="brand-name">Still Cloud</span></a>
+    <nav aria-label="Library"><button class="nav active" aria-label="All Captures" data-filter="All">▦ <span>All Captures</span></button><button class="nav" aria-label="Screenshots" data-filter="Images">▧ <span>Screenshots</span></button><button class="nav" aria-label="Recordings" data-filter="Videos">▷ <span>Recordings</span></button><button class="nav" aria-label="Trash" data-filter="Trash">⌫ <span>Trash</span></button></nav>
+    <div class="sidebar-bottom"><button aria-label="Team" id="team-button" class="nav" hidden>♧ <span>Team</span></button><button aria-label="App Connection" id="token-button" class="nav">⌘ <span>App Connection</span></button><button aria-label="Sign Out" id="logout-button" class="nav">↪ <span>Sign Out</span></button><div id="account" class="account"></div></div>
+  </aside>
+  <main id="main" class="library" tabindex="-1">
+    <header class="library-header"><div><p class="eyebrow">YOUR WORKSPACE</p><h1 id="library-title">All Captures</h1></div><div class="header-actions"><label class="search"><span aria-hidden="true">⌕</span><input id="search" name="search" type="search" autocomplete="off" placeholder="Search captures…" aria-label="Search titles, tags and transcripts"></label><button id="upload-button" class="primary">＋ Upload</button></div></header>
+    <div class="library-meta"><p id="capture-count"></p><select id="sort" aria-label="Sort captures"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option></select></div>
+    <div id="captures" class="capture-grid"></div><button id="load-more" class="secondary load-more" hidden>Load More</button>
+    <div id="empty" class="empty" hidden><div aria-hidden="true">⌗</div><h2>No captures here yet</h2><p>Capture something in the Mac app, or upload a file.</p></div>
+    <p id="dashboard-error" class="error" role="alert"></p>
+  </main>
+</div>
+<div id="share-page" hidden>
+  <header class="share-header"><a class="wordmark" href="/"><span class="brand-mark small" aria-hidden="true">⌗</span><span class="brand-name">Still Cloud</span></a><h1 id="share-title">Capture</h1><a id="download" class="secondary" download>↓ Download</a></header>
+  <main id="share-main" class="share-layout" tabindex="-1">
+    <div class="media-column"><div id="media-stage" class="media-stage"></div><div class="media-tools"><button id="point-button" class="secondary" hidden>Add a Comment Pin</button><span id="share-meta"></span></div><details id="transcript-section" hidden><summary>Transcript</summary><label class="search transcript-search"><input id="transcript-search" name="transcript-search" type="search" placeholder="Search transcript…" aria-label="Search transcript"></label><div id="transcript"></div></details></div>
+    <aside class="comments-pane"><div class="comments-heading"><h2>Comments</h2><span id="comments-count" class="count">0</span></div><div id="comments" class="comments-list"></div>
+      <form id="comment-form"><div id="replying" hidden><span id="reply-label"></span><button id="clear-reply" type="button" aria-label="Cancel reply">×</button></div><label for="guest-name">Your name</label><input id="guest-name" name="name" autocomplete="nickname" maxlength="80" placeholder="Your name…"><label for="comment-text">Comment</label><textarea id="comment-text" name="comment" rows="3" maxlength="4000" placeholder="Write a comment…" required></textarea><div class="comment-actions"><label id="timestamp-label" hidden><input id="attach-time" name="attach-time" type="checkbox" checked> Include timestamp</label><button class="primary" type="submit">Comment</button></div><p id="comment-error" class="error" role="alert"></p></form>
+    </aside>
+  </main>
+  <section id="share-gate" class="gate" hidden><h2 id="gate-title">This capture is protected</h2><p id="gate-message"></p><form id="unlock-form" hidden><label for="link-password">Link password</label><input id="link-password" name="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">View Capture</button><p id="unlock-error" class="error" role="alert"></p></form><a id="gate-login" class="primary" href="/" hidden>Sign In</a></section>
+</div>
+<dialog id="upload-dialog"><form id="upload-form"><h2>Upload Capture</h2><label for="upload-file">Image or video</label><input id="upload-file" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/heic,image/tiff,video/mp4,video/quicktime" required><label for="upload-title">Name</label><input id="upload-title" name="title" maxlength="250" placeholder="Capture name…"><label for="upload-tags">Tags</label><input id="upload-tags" name="tags" placeholder="Design, feedback…"><label for="upload-visibility">Access</label><select id="upload-visibility" name="visibility"><option value="link">Anyone with the link</option><option value="team">Team members</option><option value="private">Only you</option></select><label for="upload-expiry">Expires</label><select id="upload-expiry" name="expiry"><option value="7">After 7 days</option><option value="1">After 1 day</option><option value="30">After 30 days</option><option value="0">Never</option></select><label for="upload-password">Password (optional)</label><input id="upload-password" name="password" type="password" autocomplete="new-password"><p id="upload-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="upload-dialog" class="secondary">Cancel</button><button class="primary" type="submit">Upload</button></div></form></dialog>
+<dialog id="edit-dialog"><form id="edit-form"><h2>Capture Settings</h2><input id="edit-id" name="id" type="hidden"><label for="edit-title">Name</label><input id="edit-title" name="title" maxlength="250" required><label for="edit-tags">Tags</label><input id="edit-tags" name="tags"><label for="edit-access">Access</label><select id="edit-access" name="access"><option value="link">Anyone with the link</option><option value="team">Team members</option><option value="private">Only you</option></select><label for="edit-expiry">Expires from now</label><select id="edit-expiry" name="expiry"><option value="keep">Keep current expiry</option><option value="0">Never</option><option value="1">After 1 day</option><option value="7">After 7 days</option><option value="30">After 30 days</option></select><label for="edit-views">View limit (0 for unlimited)</label><input id="edit-views" name="views" type="number" min="0" max="1000000"><label for="edit-password">Change password</label><input id="edit-password" name="password" type="password" autocomplete="new-password" placeholder="Leave unchanged…"><label class="check"><input id="remove-password" name="remove-password" type="checkbox"> Remove password</label><label for="edit-transcript">Transcript</label><textarea id="edit-transcript" name="transcript" rows="4"></textarea><p id="edit-error" class="error" role="alert"></p><div class="dialog-actions"><button class="secondary" type="button" data-close="edit-dialog">Cancel</button><button class="primary" type="submit">Save Changes</button></div></form></dialog>
+<dialog id="team-dialog"><div class="team-header"><h2>Team</h2><button data-close="team-dialog" aria-label="Close team settings">×</button></div><div id="team-list"></div><form id="team-form"><h3>Add a Member</h3><label for="team-email">Email or username</label><input id="team-email" name="email" type="text" autocomplete="off" required><label for="team-name">Display name</label><input id="team-name" name="name" required><label for="team-role">Role</label><select id="team-role" name="role"><option value="member">Member</option><option value="admin">Administrator</option></select><div class="dialog-actions"><button class="primary" type="submit">Add Member</button></div><p id="team-error" class="error" role="alert"></p></form></dialog>
+<dialog id="connection-dialog"><h2>App Connection</h2><p>Use this server URL and a personal access token in the Mac app’s Cloud settings.</p><label for="connection-url">Server URL</label><input id="connection-url" readonly><label for="connection-token">Personal token</label><input id="connection-token" readonly placeholder="Generate a token to connect…"><p class="hint">Generating a new token invalidates your previous app token.</p><button id="generate-token" class="secondary">Generate New Token</button><div class="dialog-actions"><button type="button" data-close="connection-dialog" class="primary">Done</button></div></dialog>
+</body></html>

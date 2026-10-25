@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: file:; media-src file:; style-src 'self' 'unsafe-inline'">
+<title>Quick Access</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: transparent; }
+  .card { position: absolute; inset: 6px; border-radius: 12px; overflow: hidden; background: #111; box-shadow: 0 6px 22px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.12);
+    animation: slide .28s cubic-bezier(.2,.9,.3,1.1); }
+  body.right .card { animation-name: slide-right; }
+  @keyframes slide { from { transform: translateX(-120%); } }
+  @keyframes slide-right { from { transform: translateX(120%); } }
+  .card.leaving { transition: transform .22s ease-in, opacity .22s; transform: translateX(-120%); opacity: 0; }
+  body.right .card.leaving { transform: translateX(120%); }
+  .media { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; }
+  .hover { position: absolute; inset: 0; background: rgba(0,0,0,.42); opacity: 0; transition: opacity .15s; display: grid; place-items: center; }
+  .card:hover .hover { opacity: 1; }
+  .center { display: flex; flex-direction: column; gap: 8px; }
+  .center .btn { min-width: 86px; height: 28px; background: rgba(255,255,255,.92); color: #1d1d1f; font-weight: 600; }
+  .corner { position: absolute; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); color: #1d1d1f; display: grid; place-items: center; }
+  .corner svg { width: 14px; height: 14px; }
+  .tl { left: 7px; top: 7px; } .tr { right: 7px; top: 7px; } .bl { left: 7px; bottom: 7px; } .br { right: 7px; bottom: 7px; }
+  .badge { position: absolute; right: 8px; bottom: 8px; padding: 2px 7px; border-radius: 999px; font-size: 11px; background: rgba(0,0,0,.6); color: #fff; }
+  .card:hover .badge { display: none; }
+</style>
+</head>
+<body>
+<div class="card" id="card" draggable="true">
+  <div id="media"></div>
+  <div class="hover">
+    <div class="center"><button class="btn" id="copy">Copy</button><button class="btn" id="save">Save</button></div>
+    <button class="corner tl" id="close" title="Close"><i data-lucide="x"></i></button>
+    <button class="corner tr" id="edit" title="Annotate"><i data-lucide="pencil"></i></button>
+    <button class="corner bl" id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
+    <button class="corner br" id="trash" title="Delete"><i data-lucide="trash-2"></i></button>
+  </div>
+</div>
+<script src="../../node_modules/lucide/dist/umd/lucide.min.js"></script>
+<script src="../shared/geometry.js"></script>
+<script src="common.js"></script>
+<script src="quick.js"></script>
+</body>
+</html>

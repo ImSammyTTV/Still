@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: file: blob:; style-src 'self' 'unsafe-inline'">
+<title>Still — Annotate</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-rows: 44px 1fr 45px; }
+  .titlebar { border-bottom: 1px solid var(--border); background: var(--bg); }
+  body.win32 .titlebar { padding-right: 150px; }
+  .tools { margin: 0 auto; }
+  .tools button svg { width: 15px; height: 15px; }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  main { position: relative; display: grid; grid-template-columns: 1fr auto; min-height: 0; background: var(--canvas); }
+  .scroller { overflow: auto; display: grid; place-items: center; min-height: 0; padding: 28px; }
+  #stage { display: block; box-shadow: 0 2px 20px rgba(0,0,0,.25); image-rendering: auto; }
+  #stage.tool-select { cursor: default; }
+  #stage.tool-text { cursor: text; }
+  #stage:not(.tool-select):not(.tool-text) { cursor: crosshair; }
+  #stage.moving { cursor: move; }
+  .panel { width: 0; overflow: hidden; background: var(--bg); border-left: 1px solid var(--border); transition: width .18s; }
+  .panel.open { width: 290px; }
+  .panel-inner { width: 290px; padding: 16px; display: grid; gap: 14px; }
+  .panel h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-2); }
+  .gradients { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .gradients button { height: 28px; border-radius: 6px; border: 1px solid var(--border); padding: 0; }
+  .gradients button.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .row input[type=range] { flex: 1; accent-color: var(--accent); }
+  .row .value { width: 34px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  footer { display: flex; align-items: center; gap: 8px; padding: 0 13px; border-top: 1px solid var(--border); background: var(--bg); }
+  .drag { padding: 0 13px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; background: var(--surface-strong); cursor: grab; }
+  .spacer { flex: 1; }
+  .crop-bar { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: none; gap: 8px; padding: 6px; border-radius: 999px; background: var(--hud); color: #fff; z-index: 5; }
+  .crop-bar.show { display: flex; }
+  .crop-bar .btn { background: rgba(255,255,255,.14); color: #fff; }
+  .crop-bar .btn.primary { background: var(--accent); }
+  textarea.text-edit { position: absolute; z-index: 6; border: 1px dashed var(--accent); background: transparent; outline: none; resize: none; overflow: hidden; padding: 0; margin: 0; white-space: pre; font-weight: 600; line-height: 1.2; }
+  .palette { display: grid; grid-template-columns: repeat(5, 22px); gap: 8px; padding: 6px; }
+  .palette button { width: 22px; height: 22px; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.2); }
+  .palette button.active { box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent); }
+</style>
+</head>
+<body>
+<div class="titlebar">
+  <div class="segmented tools" id="tools"></div>
+  <button class="btn plain icon no-drag" id="color" title="Color"><span class="swatch" id="swatch"></span></button>
+  <button class="btn plain icon no-drag" id="stroke" title="Stroke width"><i data-lucide="minus"></i></button>
+  <div class="segmented no-drag">
+    <button id="undo" title="Undo (Ctrl+Z)"><i data-lucide="undo-2"></i></button>
+    <button id="redo" title="Redo (Ctrl+Shift+Z)"><i data-lucide="redo-2"></i></button>
+  </div>
+  <button class="btn plain icon no-drag" id="background" title="Background"><i data-lucide="image"></i></button>
+</div>
+<main>
+  <div class="crop-bar" id="cropBar">
+    <button class="btn" id="cropReset">Reset</button>
+    <button class="btn" id="cropCancel">Cancel</button>
+    <button class="btn primary" id="cropApply">Crop</button>
+  </div>
+  <div class="scroller" id="scroller"><canvas id="stage"></canvas></div>
+  <aside class="panel" id="panel">
+    <div class="panel-inner">
+      <h3>Background</h3>
+      <div class="gradients" id="gradients"></div>
+      <button class="btn" id="customBg"><i data-lucide="image-plus"></i>Custom Image…</button>
+      <div class="row"><span>Padding</span><input type="range" id="padding" min="0" max="240"><span class="value" id="paddingValue"></span></div>
+      <div class="row"><span>Corner radius</span><input type="range" id="radius" min="0" max="80"><span class="value" id="radiusValue"></span></div>
+      <div class="row"><span>Shadow</span><input type="checkbox" class="switch" id="shadow"></div>
+      <div class="row"><span>Aspect ratio</span>
+        <select class="field" id="aspect"><option value="0">Auto</option><option value="1">1:1</option><option value="1.3333">4:3</option><option value="1.7778">16:9</option><option value="0.5625">9:16</option><option value="1.91">Twitter 1.91:1</option></select>
+      </div>
+      <div class="row"><span>Auto balance</span><input type="checkbox" class="switch" id="balance"></div>
+    </div>
+  </aside>
+</main>
+<footer>
+  <button class="btn plain" id="zoom">Fit</button>
+  <span id="size" style="color:var(--text-2)"></span>
+  <div class="spacer"></div>
+  <div class="drag" id="dragMe" draggable="true">≡&nbsp;&nbsp; Drag Me &nbsp;&nbsp;≡</div>
+  <div class="spacer"></div>
+  <button class="btn icon" id="ocr" title="Copy text (OCR)"><i data-lucide="scan-text"></i></button>
+  <button class="btn icon" id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
+  <button class="btn icon" id="saveAs" title="Save As…"><i data-lucide="folder-down"></i></button>
+  <button class="btn" id="copy"><i data-lucide="copy"></i>Copy</button>
+  <button class="btn primary" id="save"><i data-lucide="download"></i>Save</button>
+</footer>
+<script src="../../node_modules/lucide/dist/umd/lucide.min.js"></script>
+<script src="../shared/geometry.js"></script>
+<script src="common.js"></script>
+<script src="editor.js"></script>
+</body>
+</html>

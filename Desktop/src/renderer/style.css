@@ -1,0 +1,81 @@
+/* Shared look for every Still window on Windows and Linux: the same tokens as the Mac app. */
+:root {
+  color-scheme: light dark;
+  --font: "Segoe UI Variable Text", "Segoe UI", "Inter", "Cantarell", "Ubuntu", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+  --accent: #0a84ff;
+  --accent-text: #ffffff;
+  --red: #ff453a;
+  --bg: #f5f5f7;
+  --bg-elevated: #ffffff;
+  --sidebar: #ececee;
+  --surface: rgba(0, 0, 0, 0.045);
+  --surface-strong: rgba(0, 0, 0, 0.08);
+  --border: rgba(0, 0, 0, 0.1);
+  --text: #1d1d1f;
+  --text-2: rgba(29, 29, 31, 0.62);
+  --text-3: rgba(29, 29, 31, 0.4);
+  --canvas: #e4e4e8;
+  --hud: rgba(30, 30, 32, 0.86);
+  --shadow: 0 10px 40px rgba(0, 0, 0, 0.22);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1e20;
+    --bg-elevated: #2a2a2d;
+    --sidebar: #262628;
+    --surface: rgba(255, 255, 255, 0.06);
+    --surface-strong: rgba(255, 255, 255, 0.11);
+    --border: rgba(255, 255, 255, 0.1);
+    --text: #f5f5f7;
+    --text-2: rgba(245, 245, 247, 0.62);
+    --text-3: rgba(245, 245, 247, 0.38);
+    --canvas: #141416;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e1e20; --bg-elevated: #2a2a2d; --sidebar: #262628; --surface: rgba(255, 255, 255, 0.06); --surface-strong: rgba(255, 255, 255, 0.11);
+  --border: rgba(255, 255, 255, 0.1); --text: #f5f5f7; --text-2: rgba(245, 245, 247, 0.62); --text-3: rgba(245, 245, 247, 0.38); --canvas: #141416;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font: 13px/1.4 var(--font); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; user-select: none; overflow: hidden; }
+button, input, select { font: inherit; color: inherit; }
+svg.lucide { width: 16px; height: 16px; stroke-width: 1.8; flex: none; }
+
+.titlebar { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; -webkit-app-region: drag; }
+.titlebar button, .titlebar input, .titlebar select, .titlebar .no-drag { -webkit-app-region: no-drag; }
+body.linux .titlebar { padding-right: 12px; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface-strong); cursor: default; white-space: nowrap; }
+.btn:hover { filter: brightness(1.12); }
+.btn:active { filter: brightness(0.92); }
+.btn.primary { background: var(--accent); color: var(--accent-text); }
+.btn.icon { width: 32px; padding: 0; }
+.btn.plain { background: transparent; }
+.btn.plain:hover { background: var(--surface); }
+.btn[disabled] { opacity: 0.4; pointer-events: none; }
+.segmented { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface); }
+.segmented button { height: 27px; min-width: 32px; padding: 0 9px; border: 0; border-radius: 999px; background: transparent; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.segmented button:hover { background: var(--surface-strong); }
+.segmented button.active { background: var(--accent); color: var(--accent-text); }
+
+.field { height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg-elevated); outline: none; }
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+select.field { padding-right: 24px; }
+
+.switch { position: relative; width: 34px; height: 20px; flex: none; appearance: none; border-radius: 999px; background: var(--surface-strong); transition: background 0.15s; margin: 0; }
+.switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform 0.15s; }
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(14px); }
+
+.menu { position: fixed; z-index: 50; min-width: 180px; padding: 5px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border); box-shadow: var(--shadow); }
+.menu button { width: 100%; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
+.menu button:hover { background: var(--accent); color: var(--accent-text); }
+.menu hr { border: 0; height: 1px; background: var(--border); margin: 4px 2px; }
+
+.toast { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--hud); color: #fff; font-size: 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 80; }
+.toast.show { opacity: 1; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--surface-strong); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }

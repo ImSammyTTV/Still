@@ -1,0 +1,48 @@
+name: Verify Still
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test native components
+        run: swift test
+      - name: Build universal application
+        env:
+          STILL_SIGN_IDENTITY: '-'
+        run: ./scripts/build.sh "$RUNNER_TEMP/Still.app"
+      - name: Check both architectures
+        run: lipo -verify_arch arm64 x86_64 "$RUNNER_TEMP/Still.app/Contents/MacOS/Still"
+  sharing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Test sharing service
+        run: python3 -m unittest discover -s Cloud/tests -v
+  desktop:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: Desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - name: Package without installers
+        run: npx electron-builder --dir --publish never
