@@ -1,29 +1,134 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b2621"/><stop offset="1" stop-color="#26302a"/></linearGradient>
-    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#d9e8ad" stop-opacity=".18"/><stop offset="1" stop-color="#0a84ff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#18211d"/>
+      <stop offset="1" stop-color="#0f1412"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.18" cy="0.2" r="0.6">
+      <stop offset="0" stop-color="#d9e8ad" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#d9e8ad" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.85" cy="0.9" r="0.55">
+      <stop offset="0" stop-color="#0a84ff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#0a84ff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#ffffff" fill-opacity="0.05"/>
+    </pattern>
+    <linearGradient id="wall" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2d3c5a"/>
+      <stop offset="1" stop-color="#5b3c66"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+    <clipPath id="screen"><rect x="700" y="56" width="500" height="308" rx="14"/></clipPath>
   </defs>
-  <rect width="1280" height="320" rx="24" fill="url(#bg)"/>
-  <rect width="1280" height="320" rx="24" fill="url(#glow)"/>
-  <g transform="translate(120 70) scale(0.176)" fill="none" stroke="#d9e8ad" stroke-width="50" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M280 175 V280 H175"/><path d="M744 175 V280 H849" transform="translate(0 0)"/>
-    <path d="M175 744 H280 V849"/><path d="M849 744 H744 V849"/>
+
+  <!-- Background -->
+  <rect width="1280" height="420" rx="28" fill="url(#bg)"/>
+  <rect width="1280" height="420" rx="28" fill="url(#dots)"/>
+  <rect width="1280" height="420" rx="28" fill="url(#glow)"/>
+  <rect width="1280" height="420" rx="28" fill="url(#glow2)"/>
+
+  <!-- App icon: viewfinder corners around a small camera -->
+  <g transform="translate(96 118)">
+    <rect width="120" height="120" rx="30" fill="#243029" stroke="#ffffff" stroke-opacity="0.08"/>
+    <g fill="none" stroke="#d9e8ad" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M28 46 V28 H46"/>
+      <path d="M74 28 H92 V46"/>
+      <path d="M92 74 V92 H74"/>
+      <path d="M46 92 H28 V74"/>
+    </g>
+    <rect x="44" y="47" width="32" height="27" rx="5" fill="#f5f5e8"/>
+    <circle cx="60" cy="60.5" r="6.5" fill="#243029"/>
   </g>
-  <g transform="translate(120 70) scale(0.176)">
-    <rect x="393" y="413" width="238" height="198" rx="28" fill="#f5f5e8"/>
-    <circle cx="512" cy="512" r="40" fill="#24302a"/>
+
+  <!-- Name and tagline -->
+  <g font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">
+    <text x="244" y="200" font-size="88" font-weight="700" fill="#f5f5f0" letter-spacing="-2">Still</text>
+    <text x="246" y="244" font-size="25" fill="#c9d4c4">Capture, annotate and record.</text>
+    <g font-size="15" font-weight="600" fill="#d9e8ad">
+      <rect x="246" y="270" width="78" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/>
+      <text x="285" y="290" text-anchor="middle">macOS</text>
+      <rect x="334" y="270" width="96" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/>
+      <text x="382" y="290" text-anchor="middle">Windows</text>
+      <rect x="440" y="270" width="72" height="30" rx="15" fill="#d9e8ad" fill-opacity="0.1" stroke="#d9e8ad" stroke-opacity="0.35"/>
+      <text x="476" y="290" text-anchor="middle">Linux</text>
+    </g>
   </g>
-  <text x="330" y="160" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="#f5f5f0">Still</text>
-  <text x="334" y="216" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="30" fill="#c9d4c4">Capture, annotate and record your screen.</text>
-  <text x="334" y="258" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="22" fill="#8fa093">macOS · Windows · Linux</text>
-  <g transform="translate(900 70)" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif">
-    <rect width="300" height="180" rx="14" fill="#f7f7f9"/>
-    <rect width="300" height="28" rx="14" fill="#e6e6ea"/><rect y="14" width="300" height="14" fill="#e6e6ea"/>
-    <circle cx="20" cy="14" r="5" fill="#ff5f57"/><circle cx="38" cy="14" r="5" fill="#febc2e"/><circle cx="56" cy="14" r="5" fill="#28c840"/>
-    <rect x="22" y="50" width="150" height="14" rx="4" fill="#c9c9d1"/><rect x="22" y="76" width="200" height="10" rx="4" fill="#dcdce2"/>
-    <rect x="22" y="96" width="170" height="10" rx="4" fill="#dcdce2"/>
-    <rect x="20" y="124" width="96" height="30" rx="7" fill="none" stroke="#ff453a" stroke-width="3"/>
-    <path d="M240 168 L135 142" stroke="#ff453a" stroke-width="5" stroke-linecap="round"/><path d="M122 139 L144 132 L140 151 Z" fill="#ff453a"/>
-    <circle cx="250" cy="62" r="13" fill="#0a84ff"/><text x="250" y="68" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">1</text>
+
+  <!-- Product scene: a desktop with an app window being captured -->
+  <g filter="url(#shadow)">
+    <rect x="700" y="56" width="500" height="308" rx="14" fill="url(#wall)"/>
+  </g>
+  <g clip-path="url(#screen)">
+    <!-- app window -->
+    <g transform="translate(742 88)">
+      <rect width="416" height="236" rx="10" fill="#f7f7f9"/>
+      <path d="M0 10 a10 10 0 0 1 10 -10 h396 a10 10 0 0 1 10 10 v20 h-416 z" fill="#e7e7ec"/>
+      <circle cx="16" cy="15" r="4.5" fill="#ff5f57"/>
+      <circle cx="31" cy="15" r="4.5" fill="#febc2e"/>
+      <circle cx="46" cy="15" r="4.5" fill="#28c840"/>
+      <rect x="24" y="52" width="150" height="14" rx="4" fill="#2b2b33"/>
+      <rect x="24" y="78" width="210" height="8" rx="4" fill="#c9c9d3"/>
+      <rect x="24" y="94" width="186" height="8" rx="4" fill="#c9c9d3"/>
+      <rect x="24" y="110" width="198" height="8" rx="4" fill="#c9c9d3"/>
+      <rect x="24" y="140" width="96" height="30" rx="7" fill="#0a84ff"/>
+      <rect x="40" y="152" width="64" height="6" rx="3" fill="#ffffff" fill-opacity="0.9"/>
+      <rect x="262" y="52" width="130" height="34" rx="7" fill="#e3e3ea"/>
+      <rect x="262" y="96" width="130" height="34" rx="7" fill="#e3e3ea"/>
+      <rect x="262" y="140" width="130" height="34" rx="7" fill="#e3e3ea"/>
+      <rect x="262" y="184" width="130" height="34" rx="7" fill="#e3e3ea"/>
+    </g>
+    <!-- dimmed outside the selection -->
+    <path fill="#000000" fill-opacity="0.32" fill-rule="evenodd"
+      d="M700 56 h500 v308 h-500 z M752 120 h214 v160 h-214 z"/>
+    <!-- selection -->
+    <rect x="752" y="120" width="214" height="160" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+    <g fill="#ffffff">
+      <rect x="748" y="116" width="8" height="8" rx="2"/><rect x="962" y="116" width="8" height="8" rx="2"/>
+      <rect x="748" y="276" width="8" height="8" rx="2"/><rect x="962" y="276" width="8" height="8" rx="2"/>
+    </g>
+    <rect x="884" y="288" width="82" height="22" rx="6" fill="#000000" fill-opacity="0.7"/>
+    <text x="925" y="303" text-anchor="middle" font-family="'Cascadia Mono', 'SF Mono', Menlo, monospace" font-size="12" fill="#ffffff">428 × 320</text>
+    <!-- annotations inside the selection -->
+    <rect x="764" y="225" width="108" height="42" rx="8" fill="none" stroke="#ff453a" stroke-width="3"/>
+    <path d="M948 252 L884 247" stroke="#ff453a" stroke-width="4" stroke-linecap="round"/>
+    <path d="M876 246.5 L891 239 L889.5 255 Z" fill="#ff453a"/>
+    <circle cx="944" cy="146" r="13" fill="#0a84ff"/>
+    <text x="944" y="151.5" text-anchor="middle" font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="15" font-weight="700" fill="#ffffff">1</text>
+  </g>
+
+  <!-- capture bar -->
+  <g filter="url(#soft)">
+    <rect x="852" y="334" width="214" height="44" rx="12" fill="#26262a" stroke="#ffffff" stroke-opacity="0.1"/>
+  </g>
+  <g fill="none" stroke="#f5f5f7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="862" y="339" width="38" height="34" rx="9" fill="#ffffff" fill-opacity="0.12" stroke="none"/>
+    <path d="M873 350 v-4 h4 M887 346 h4 v4 M891 362 v4 h-4 M877 366 h-4 v-4"/>
+    <rect x="913" y="347" width="20" height="14" rx="2"/><path d="M919 366 h8"/>
+    <rect x="953" y="346" width="20" height="18" rx="2"/><path d="M953 351 h20"/>
+    <circle cx="1003" cy="356" r="8"/><path d="M1003 352 v4 l3 2"/>
+    <rect x="1031" y="349" width="16" height="13" rx="2"/><path d="M1047 353 l5 -3 v12 l-5 -3"/>
+  </g>
+
+  <!-- Quick Access preview -->
+  <g filter="url(#soft)">
+    <rect x="664" y="262" width="148" height="104" rx="12" fill="#1c1c1f" stroke="#ffffff" stroke-opacity="0.16"/>
+  </g>
+  <rect x="670" y="268" width="136" height="92" rx="8" fill="#f7f7f9"/>
+  <rect x="680" y="280" width="62" height="7" rx="3" fill="#2b2b33"/>
+  <rect x="680" y="294" width="88" height="5" rx="2.5" fill="#c9c9d3"/>
+  <rect x="680" y="304" width="74" height="5" rx="2.5" fill="#c9c9d3"/>
+  <rect x="680" y="326" width="48" height="20" rx="5" fill="none" stroke="#ff453a" stroke-width="2"/>
+  <g font-family="'Segoe UI', 'Inter', Arial, sans-serif" font-size="11" font-weight="600" text-anchor="middle">
+    <rect x="752" y="320" width="46" height="16" rx="8" fill="#0a84ff"/>
+    <text x="775" y="332" fill="#ffffff">Copy</text>
+    <rect x="752" y="340" width="46" height="16" rx="8" fill="#ffffff" stroke="#d0d0d8"/>
+    <text x="775" y="352" fill="#1d1d1f">Save</text>
   </g>
 </svg>
