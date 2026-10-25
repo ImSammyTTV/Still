@@ -90,7 +90,12 @@ function showPreview(item, { sound = true } = {}) {
   win.setVisibleOnAllWorkspaces(true);
   state.previews.unshift({ id: item.id, win });
   layoutPreviews();
-  win.once('ready-to-show', () => win.showInactive());
+  // Transparent windows on Windows don't always emit ready-to-show, so show once the page has loaded.
+  let shown = false;
+  const reveal = () => { if (shown || win.isDestroyed()) return; shown = true; win.showInactive(); win.moveTop(); };
+  win.once('ready-to-show', reveal);
+  win.webContents.once('did-finish-load', () => setTimeout(reveal, 30));
+  setTimeout(reveal, 800);
   win.on('closed', () => { state.previews = state.previews.filter((p) => p.win !== win); layoutPreviews(); });
   while (state.previews.length > 5) state.previews.pop().win.close();
 }
@@ -530,6 +535,58 @@ function runArgs(argv) {
   if (action && actions[action]) { actions[action](); return true; }
   return false;
 }
+// ---- Self-test (used by CI on real Windows / Linux machines) ----------------------------------
+
+async function selfTest(outDir) {
+  const results = {}, log = (key, value) => { results[key] = value; console.log(`[self-test] ${key}: ${JSON.stringify(value)}`); };
+  fs.mkdirSync(outDir, { recursive: true });
+  const snap = async (name) => { try { const [g] = await grabDisplays(); fs.writeFileSync(path.join(outDir, `${name}.png`), g.image.toPNG()); } catch (error) { log(`snap-${name}`, error.message); } };
+  try {
+    const before = library.items.length;
+    await captureFullscreen();
+    await wait(1500);
+    log('fullscreenAdded', library.items.length === before + 1);
+    const item = library.items[0];
+    const preview = state.previews[0];
+    log('previewCreated', !!preview);
+    log('previewVisible', !!preview && !preview.win.isDestroyed() && preview.win.isVisible());
+    log('previewBounds', preview && preview.win.getBounds());
+    await snap('1-after-capture');
+    clipboard.clear();
+    if (preview) {
+      await preview.win.webContents.executeJavaScript("document.querySelector('#copy').click()");
+      await wait(800);
+    }
+    const copied = clipboard.readImage();
+    log('quickAccessCopy', !copied.isEmpty() && copied.getSize());
+    clipboard.clear();
+    clipboard.writeImage(nativeImage.createFromPath(library.file(item)));
+    log('directCopy', !clipboard.readImage().isEmpty());
+    // Area capture through the overlay pipeline
+    await startSelection('screenshot');
+    await wait(1500);
+    log('overlayWindows', state.overlays.length);
+    await snap('2-overlay');
+    const display = screen.getPrimaryDisplay();
+    await finishSelection({ displayId: display.id, rect: { x: 50, y: 50, w: 300, h: 200 }, purpose: 'screenshot' });
+    await wait(1500);
+    log('areaSize', library.items[0].width + 'x' + library.items[0].height);
+    log('previewsAfterArea', state.previews.filter((p) => !p.win.isDestroyed() && p.win.isVisible()).length);
+    await snap('3-after-area');
+    // Editor copy
+    openEditor(library.items[0].id);
+    await wait(2500);
+    const editor = state.editors.get(library.items[0].id);
+    clipboard.clear();
+    if (editor) { await editor.webContents.executeJavaScript("document.querySelector('#copy').click()"); await wait(800); }
+    log('editorCopy', !clipboard.readImage().isEmpty());
+    await snap('4-editor');
+    log('windowList', (await windowLister.list()).length);
+  } catch (error) { log('error', error.stack || error.message); }
+  fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify(results, null, 2));
+  app.exit(0);
+}
+
 app.on('second-instance', (_event, argv) => { if (!runArgs(argv)) openSettings(); });
 app.on('window-all-closed', (event) => event.preventDefault?.());
 app.on('will-quit', () => { globalShortcut.unregisterAll(); windowLister.stop(); ocrWorker?.terminate(); });
@@ -561,6 +618,8 @@ app.whenReady().then(() => {
     broadcast('settings:changed', settings.all);
   });
   screen.on('display-added', buildTray); screen.on('display-removed', buildTray);
+  const selfTestArg = process.argv.find((arg) => arg.startsWith('--self-test='));
+  if (selfTestArg) { settings.update({ welcomed: true }); setTimeout(() => selfTest(selfTestArg.split('=')[1]), 1500); return; }
   if (runArgs(process.argv)) { /* launched for a single capture */ }
   else if (process.argv.includes('--editor-demo')) openEditor(null, { demo: true });
   else if (!process.argv.includes('--hidden') && !settings.all.welcomed) { settings.update({ welcomed: true }); openSettings(); }

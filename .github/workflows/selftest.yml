@@ -1,0 +1,43 @@
+name: Desktop self-test
+on:
+  workflow_dispatch:
+  push:
+    paths: ['Desktop/**']
+permissions:
+  contents: read
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: Desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Run the app's self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath node_modules/electron/dist/electron.exe -ArgumentList '.','--self-test=selftest-out' -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error 'Self-test timed out' }
+          Get-Content selftest-out/results.json
+      - name: Run the app's self-test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb openbox x11-utils
+          Xvfb :99 -screen 0 1440x900x24 & sleep 2
+          export DISPLAY=:99; openbox & sleep 1
+          timeout 120 node_modules/electron/dist/electron . --no-sandbox --self-test=selftest-out || true
+          cat selftest-out/results.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: selftest-${{ matrix.os }}
+          path: Desktop/selftest-out
