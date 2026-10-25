@@ -473,10 +473,31 @@ fn check_update(app: &AppHandle, manual: bool) {
                 let version = update.version.clone();
                 st(&app).session.lock().unwrap().pending_update = Some(Arc::new(update));
                 set_update(&app, json!({ "state": "available", "version": version }));
-                notify(&app, &format!("Still {version} is available"), "Choose “Update” in the Still menu to install it.");
+                show_update_prompt(&app, &version);
             }
             Ok(None) => { set_update(&app, json!({ "state": "current" })); if manual { notify(&app, "Still", &format!("You’re up to date (version {}).", app.package_info().version)); } }
             Err(e) => { set_update(&app, json!({ "state": "error", "error": e })); if manual { notify(&app, "Couldn’t check for updates", &e); } }
+        }
+    });
+}
+
+/// A small card in the corner (Windows notifications can't report clicks back to the app).
+fn show_update_prompt(app: &AppHandle, version: &str) {
+    if app.get_webview_window("update").is_some() { return; }
+    let (app, version) = (app.clone(), version.to_string());
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(monitor) = a.primary_monitor().ok().flatten() else { return };
+        let (scale, area) = (monitor.scale_factor(), *monitor.work_area());
+        let (w, h) = (340.0, 112.0);
+        let built = builder(&a, "update", "update.html", json!({ "version": version, "current": a.package_info().version.to_string() }))
+            .title("Still update").inner_size(w, h).decorations(false).transparent(true).shadow(false).resizable(false)
+            .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).build();
+        if let Ok(win) = built {
+            let x = area.position.x + area.size.width as i32 - ((w + 16.0) * scale) as i32;
+            let y = area.position.y + area.size.height as i32 - ((h + 16.0) * scale) as i32;
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+            let _ = win.show();
         }
     });
 }
@@ -486,7 +507,21 @@ fn install_update(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         set_update(&app, json!({ "state": "downloading", "version": update.version }));
-        match update.download_and_install(|_, _| {}, || {}).await {
+        let (progress_app, version) = (app.clone(), update.version.clone());
+        let received = std::sync::atomic::AtomicU64::new(0);
+        let last = std::sync::atomic::AtomicU64::new(0);
+        let on_chunk = move |chunk: usize, total: Option<u64>| {
+            let done = received.fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed) + chunk as u64;
+            if let Some(total) = total.filter(|t| *t > 0) {
+                let percent = done * 100 / total;
+                if percent != last.swap(percent, std::sync::atomic::Ordering::Relaxed) {
+                    let status = json!({ "state": "downloading", "version": version, "progress": percent });
+                    progress_app.state::<State>().session.lock().unwrap().update = status.clone();
+                    let _ = progress_app.emit("update:status", status);
+                }
+            }
+        };
+        match update.download_and_install(on_chunk, || {}).await {
             Ok(()) => app.restart(),
             Err(e) => { set_update(&app, json!({ "state": "error", "error": e.to_string() })); notify(&app, "Update failed", &e.to_string()); }
         }

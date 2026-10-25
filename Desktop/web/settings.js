@@ -121,15 +121,15 @@ const pages = {
 
 let updateStatus = { state: 'idle' };
 function updateText(status) {
-  return ({ checking: 'Checking for updates…', downloading: `Downloading Still ${status.version || ''}… ${status.progress || 0}%`, ready: `Still ${status.version} is ready to install.`,
+  return ({ checking: 'Checking for updates…', available: `Still ${status.version} is available.`, downloading: `Downloading Still ${status.version || ''}… ${status.progress || 0}%`,
     current: 'Still is up to date.', error: `Couldn’t check for updates: ${status.error}`, unavailable: status.error || 'Updates are unavailable.', idle: '' })[status.state] || '';
 }
 function updateBox() {
-  const ready = updateStatus.state === 'ready';
+  const available = updateStatus.state === 'available';
   return el('div', { style: 'display:grid;gap:8px;justify-items:center' }, [
     el('span', { style: 'color:var(--text-2)' }, updateText(updateStatus)),
-    el('button', { class: `btn${ready ? ' primary' : ''}`, disabled: ['checking', 'downloading', 'unavailable'].includes(updateStatus.state),
-      onclick: () => still.send(ready ? 'update:install' : 'update:check') }, ready ? 'Restart to Update' : 'Check for Updates')
+    el('button', { class: `btn${available ? ' primary' : ''}`, disabled: ['checking', 'downloading', 'unavailable'].includes(updateStatus.state),
+      onclick: () => still.send(available ? 'update:install' : 'update:check') }, available ? 'Install Update' : 'Check for Updates')
   ]);
 }
 still.on('update:status', (status) => { updateStatus = status; if (current === 'About') render(); });

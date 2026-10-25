@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Still update</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: transparent; }
+  .card { position: absolute; inset: 6px; border-radius: 14px; padding: 14px 16px; display: grid; grid-template-columns: 44px 1fr; gap: 4px 12px; align-items: center;
+    background: var(--bg-elevated); color: var(--text); box-shadow: 0 8px 26px rgba(0,0,0,.35), 0 0 0 1px var(--border); animation: rise .25s ease-out; }
+  @keyframes rise { from { transform: translateY(16px); opacity: 0; } }
+  img { width: 44px; height: 44px; grid-row: span 2; }
+  b { font-size: 13px; }
+  .sub { font-size: 12px; color: var(--text-2); }
+  .actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <img src="icon.png" alt="">
+  <b id="title"></b>
+  <span class="sub" id="sub"></span>
+  <div class="actions">
+    <button class="btn" id="later">Later</button>
+    <button class="btn primary" id="install">Install and Restart</button>
+  </div>
+</div>
+<script src="bridge.js"></script>
+<script src="shared/geometry.js"></script>
+<script src="common.js"></script>
+<script src="update-page.js"></script>
+</body>
+</html>
