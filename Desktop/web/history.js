@@ -22,12 +22,12 @@ async function load() {
       el('button', { title: 'Show in folder', html: icon('folder-open'), onclick: (e) => { e.stopPropagation(); still.invoke('library:reveal', item.id); } }),
       el('button', { title: 'Delete', html: icon('trash-2'), onclick: async (e) => { e.stopPropagation(); await still.invoke('library:delete', item.id); } })
     ]);
-    const tile = el('div', { class: 'tile', draggable: 'true' }, [
+    const tile = el('div', { class: 'tile' }, [
       el('div', { class: 'thumb' }, [media, el('span', { class: 'kind', html: `${icon(item.kind === 'recording' ? 'video' : 'image')}${item.kind === 'recording' ? 'Video' : 'Image'}` }), tools]),
       el('div', { class: 'meta' }, [title, el('div', { class: 'sub' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}`)])
     ]);
     tile.addEventListener('dblclick', () => still.invoke('library:open', item.id));
-    tile.addEventListener('dragstart', (e) => { e.preventDefault(); still.send('library:drag', item.id); });
+    dragOut(tile, () => still.send('library:drag', item.id));
     tile.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       popupMenu({ x: e.clientX, y: e.clientY }, [

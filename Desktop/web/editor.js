@@ -448,7 +448,7 @@ async function recognize() {
   try { const text = (await still.invoke('editor:ocr', flatten())).trim(); if (!text) return toast('No text found'); await navigator.clipboard.writeText(text); toast('Text copied'); }
   catch (error) { toast(`Text recognition failed: ${error.message}`); }
 }
-$('#dragMe').addEventListener('dragstart', (e) => { e.preventDefault(); finishTextEdit(); still.send('editor:drag', flatten()); });
+dragOut($('#dragMe'), () => { finishTextEdit(); still.send('editor:drag', flatten()); });
 
 // ---- Keyboard -----------------------------------------------------------------------------------
 
@@ -472,17 +472,29 @@ addEventListener('keydown', (e) => {
 
 // ---- Startup ------------------------------------------------------------------------------------
 
+// A tidy sample to try the tools on: everything is measured so it fits with any system font.
 function demoImage() {
-  const c = document.createElement('canvas'); c.width = 1400; c.height = 860; const t = c.getContext('2d');
-  const g = t.createLinearGradient(0, 0, 1400, 860); g.addColorStop(0, '#1f2a44'); g.addColorStop(1, '#3a2950'); t.fillStyle = g; t.fillRect(0, 0, 1400, 860);
-  t.fillStyle = '#f7f7f9'; t.beginPath(); t.roundRect(150, 110, 1100, 640, 18); t.fill();
-  t.fillStyle = '#e9e9ee'; t.beginPath(); t.roundRect(150, 110, 1100, 52, [18, 18, 0, 0]); t.fill();
-  [['#ff5f57', 182], ['#febc2e', 208], ['#28c840', 234]].forEach(([col, x]) => { t.fillStyle = col; t.beginPath(); t.arc(x, 136, 7, 0, Math.PI * 2); t.fill(); });
-  t.fillStyle = '#1d1d1f'; t.font = '700 44px system-ui, sans-serif'; t.fillText('Welcome to Still', 210, 250);
-  t.font = '24px system-ui, sans-serif'; t.fillStyle = '#55555c';
-  ['Draw arrows, boxes and highlights on any capture.', 'Blur or pixelate anything private before sharing.', 'Add a background, then copy, save or drag it anywhere.'].forEach((line, i) => t.fillText(line, 210, 320 + i * 46));
-  t.fillStyle = '#0a84ff'; t.beginPath(); t.roundRect(210, 500, 220, 56, 12); t.fill(); t.fillStyle = '#fff'; t.font = '600 22px system-ui, sans-serif'; t.fillText('Get started', 254, 536);
-  t.fillStyle = '#d7d7de'; for (let i = 0; i < 4; i++) { t.beginPath(); t.roundRect(780, 230 + i * 110, 400, 84, 12); t.fill(); }
+  const c = document.createElement('canvas'); c.width = 1200; c.height = 760; const t = c.getContext('2d');
+  const font = (weight, size, family = 'system-ui, "Segoe UI", sans-serif') => `${weight} ${size}px ${family}`;
+  const fit = (text, weight, size, max, family) => { let s = size; do { t.font = font(weight, s, family); } while (t.measureText(text).width > max && --s > 10); return s; };
+  t.fillStyle = '#e6e9df'; t.fillRect(0, 0, 1200, 760);
+  t.shadowColor = 'rgba(0,0,0,.12)'; t.shadowBlur = 40; t.shadowOffsetY = 12;
+  t.fillStyle = '#fafaf6'; t.beginPath(); t.roundRect(120, 96, 960, 568, 22); t.fill();
+  t.shadowColor = 'transparent';
+  [['#e0938a', 156], ['#d9c27c', 180], ['#9fbf8f', 204]].forEach(([col, x]) => { t.fillStyle = col; t.beginPath(); t.arc(x, 130, 7, 0, Math.PI * 2); t.fill(); });
+  const left = 180, max = 840;
+  t.textBaseline = 'alphabetic';
+  t.fillStyle = '#6b7565'; t.font = font(700, 15); t.fillText('A LITTLE FIELD GUIDE', left, 200);
+  t.fillStyle = '#26332b'; t.font = font(700, fit('Make your point.', 700, 64, max, 'Georgia, "Times New Roman", serif'), 'Georgia, "Times New Roman", serif'); t.fillText('Make your point.', left, 276);
+  t.fillStyle = '#7b8475'; t.font = font(400, fit('A screenshot is worth a thousand explanations.', 400, 24, max)); t.fillText('A screenshot is worth a thousand explanations.', left, 322);
+  const steps = ['Draw an arrow to the detail that matters.', 'Highlight the important part, add a note, or crop.', 'Copy it. Save it. Keep moving.'];
+  steps.forEach((line, i) => {
+    const y = 396 + i * 48;
+    t.fillStyle = '#26332b'; t.font = font(500, 22); t.fillText(String(i + 1).padStart(2, '0'), left, y);
+    t.font = font(600, fit(line, 600, 22, max - 56)); t.fillText(line, left + 56, y);
+  });
+  t.fillStyle = '#e8ecdf'; t.beginPath(); t.roundRect(left, 556, max, 54, 10); t.fill();
+  t.fillStyle = '#5d6857'; t.font = font(400, 19); t.fillText('Try redacting this:  example@still.local', left + 20, 590);
   return c.toDataURL();
 }
 

@@ -74,3 +74,18 @@ function addWindowControls() {
   $('.titlebar').append(box);
   refreshIcons();
 }
+
+// Tauri switches off the web page's own drag and drop on Windows, so start a native file drag
+// once the pointer has moved a few pixels with the button held.
+function dragOut(element, start) {
+  element.addEventListener('mousedown', (down) => {
+    if (down.button !== 0 || down.target.closest('button')) return;
+    const move = (e) => {
+      if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 4) return;
+      removeEventListener('mousemove', move); removeEventListener('mouseup', up);
+      start();
+    };
+    const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
+    addEventListener('mousemove', move); addEventListener('mouseup', up);
+  });
+}

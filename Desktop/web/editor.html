@@ -27,8 +27,8 @@
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .row input[type=range] { flex: 1; accent-color: var(--accent); }
   .row .value { width: 34px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
-  footer { display: flex; align-items: center; gap: 8px; padding: 0 13px; border-top: 1px solid var(--border); background: var(--bg); }
-  .drag { padding: 0 13px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; background: var(--surface-strong); cursor: grab; }
+  footer { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 13px; border-top: 1px solid var(--border); background: var(--bg); }
+  .drag { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 0 14px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; gap: 10px; background: var(--surface-strong); cursor: grab; }
   .spacer { flex: 1; }
   .crop-bar { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: none; gap: 8px; padding: 6px; border-radius: 999px; background: var(--hud); color: #fff; z-index: 5; }
   .crop-bar.show { display: flex; }
@@ -77,8 +77,7 @@
   <button class="btn plain" id="zoom">Fit</button>
   <span id="size" style="color:var(--text-2)"></span>
   <div class="spacer"></div>
-  <div class="drag" id="dragMe" draggable="true">≡&nbsp;&nbsp; Drag Me &nbsp;&nbsp;≡</div>
-  <div class="spacer"></div>
+  <div class="drag" id="dragMe" title="Drag the image into another app"><span>≡</span>Drag Me<span>≡</span></div>
   <button class="btn icon" id="ocr" title="Copy text (OCR)"><i data-lucide="scan-text"></i></button>
   <button class="btn icon" id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
   <button class="btn icon" id="upload" title="Upload and copy link"><i data-lucide="cloud-upload"></i></button>

@@ -39,5 +39,5 @@ $('#edit').onclick = () => item.kind === 'recording' ? (still.invoke('library:op
 $('#pin').onclick = () => { still.invoke('library:pin', id); leave(); };
 $('#trash').onclick = () => leave(() => still.invoke('library:delete', id));
 $('#card').addEventListener('dblclick', (e) => { if (e.target.closest('button')) return; $('#edit').click(); });
-$('#card').addEventListener('dragstart', (e) => { e.preventDefault(); still.send('library:drag', id); setTimeout(() => leave(), 400); });
+dragOut($('#card'), () => { still.send('library:drag', id); setTimeout(() => leave(), 400); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') leave(); });
