@@ -249,7 +249,7 @@ final class ShortcutButton: NSButton {
                 if flags.contains(.option) { carbon |= UInt32(optionKey); label += "⌥" }
                 if flags.contains(.shift) { carbon |= UInt32(shiftKey); label += "⇧" }
                 if flags.contains(.command) { carbon |= UInt32(cmdKey); label += "⌘" }
-                label += event.charactersIgnoringModifiers?.uppercased() ?? "Key \(event.keyCode)"
+                label += (event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers)?.uppercased() ?? "Key \(event.keyCode)"
                 self.received?(UInt32(event.keyCode), carbon, label); self.title = label
             }
             self.recording = false; if let monitor = self.monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }; return nil

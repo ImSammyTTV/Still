@@ -524,7 +524,7 @@ extension AppController {
         for item in menu.items where !item.isSeparatorItem {
             if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
             let id = item.title == "All-In-One" ? 5 : item.tag
-            guard id > 0, let shortcut = shortcuts.first(where: { $0.id == UInt32(id) }), let code = shortcut.keyCode, let key = Self.keyCharacters[code] else { item.keyEquivalent = ""; continue }
+            guard id > 0, let shortcut = shortcuts.first(where: { $0.id == UInt32(id) }), let code = shortcut.keyCode, let key = Shortcut.keyCharacters[code] else { item.keyEquivalent = ""; continue }
             item.keyEquivalent = key
             var flags: NSEvent.ModifierFlags = []
             if shortcut.modifiers & UInt32(cmdKey) != 0 { flags.insert(.command) }
@@ -534,14 +534,6 @@ extension AppController {
             item.keyEquivalentModifierMask = flags
         }
     }
-    private static let keyCharacters: [UInt32: String] = {
-        var map: [UInt32: String] = [:]
-        let digits: [Int] = [kVK_ANSI_0, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
-        for (n, code) in digits.enumerated() { map[UInt32(code)] = String(n) }
-        let letters: [(Int, String)] = [(kVK_ANSI_A, "a"), (kVK_ANSI_S, "s"), (kVK_ANSI_D, "d"), (kVK_ANSI_F, "f"), (kVK_ANSI_H, "h"), (kVK_ANSI_G, "g"), (kVK_ANSI_Z, "z"), (kVK_ANSI_X, "x"), (kVK_ANSI_C, "c"), (kVK_ANSI_V, "v"), (kVK_ANSI_B, "b"), (kVK_ANSI_Q, "q"), (kVK_ANSI_W, "w"), (kVK_ANSI_E, "e"), (kVK_ANSI_R, "r"), (kVK_ANSI_Y, "y"), (kVK_ANSI_T, "t"), (kVK_ANSI_O, "o"), (kVK_ANSI_U, "u"), (kVK_ANSI_I, "i"), (kVK_ANSI_P, "p"), (kVK_ANSI_L, "l"), (kVK_ANSI_J, "j"), (kVK_ANSI_K, "k"), (kVK_ANSI_N, "n"), (kVK_ANSI_M, "m")]
-        for (code, key) in letters { map[UInt32(code)] = key }
-        return map
-    }()
     /// macOS keeps ⇧⌘4 for its own screenshot tool (symbolic hotkey 30) unless it is turned off in Keyboard settings.
     func checkSystemScreenshotShortcut() {
         guard let area = Shortcut.load().first(where: { $0.id == 1 }), area.keyCode == UInt32(kVK_ANSI_4), area.modifiers == UInt32(cmdKey|shiftKey) else { return }

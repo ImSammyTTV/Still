@@ -221,7 +221,9 @@ async function ocr(buffer) {
   if (!ocrWorker) {
     const { createWorker } = require('tesseract.js');
     const langPath = path.dirname(require.resolve('@tesseract.js-data/eng/package.json')).replace('app.asar', 'app.asar.unpacked');
-    ocrWorker = await createWorker('eng', 1, { langPath: path.join(langPath, '4.0.0_best_int'), cacheMethod: 'none', gzip: true });
+    // errorHandler keeps a worker failure from becoming an uncaught exception dialog.
+    ocrWorker = await createWorker('eng', 1, { langPath: path.join(langPath, '4.0.0_best_int'), cacheMethod: 'none', gzip: true, errorHandler: (error) => console.error('OCR worker:', error) })
+      .catch((error) => { ocrWorker = null; throw error; });
   }
   const { data } = await ocrWorker.recognize(buffer);
   return data.text || '';
@@ -596,6 +598,14 @@ async function selfTest(outDir) {
     log('editorCopy', await clip.hasImage());
     await snap('4-editor');
     log('windowList', (await windowLister.list()).length);
+    // Text recognition on a rendered phrase, to prove the bundled OCR engine loads.
+    const probe = new BrowserWindow({ show: false });
+    await probe.loadURL('data:text/html,<canvas></canvas>');
+    const dataUrl = await probe.webContents.executeJavaScript(`(() => { const c = document.querySelector('canvas'); c.width = 700; c.height = 140;
+      const t = c.getContext('2d'); t.fillStyle = '#fff'; t.fillRect(0, 0, 700, 140); t.fillStyle = '#000'; t.font = '56px Arial'; t.fillText('Still OCR works', 30, 90); return c.toDataURL(); })()`);
+    probe.destroy();
+    const text = await ocr(dataToImage(dataUrl).toPNG());
+    log('ocr', text.trim());
   } catch (error) { log('error', error.stack || error.message); }
   fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify(results, null, 2));
   app.exit(0);
