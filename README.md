@@ -38,6 +38,8 @@
   <a href="#-linux"><img src="assets/card-linux.svg" alt="Still for Linux" width="32%"></a>
 </p>
 
+Still opens a short setup guide on first launch. Start with screen capture; camera, microphone and cloud are optional. You can reopen the guide from Settings at any time.
+
 ### <img src="assets/os-apple.svg" width="20" alt=""> macOS
 
 Paste this into **Terminal** (⌘ Space, type *Terminal*, press Enter):

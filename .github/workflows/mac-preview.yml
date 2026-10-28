@@ -1,0 +1,35 @@
+name: Mac Preview
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Import release identity
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/still.keychain-db"; KP=$(openssl rand -hex 16)
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/still.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/still.p12" -k "$KC" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KP" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/still.p12"
+          echo "STILL_SIGN_IDENTITY=$(security find-identity -p codesigning "$KC" | awk '/Still Self-Signed/ {print $2; exit}')" >> "$GITHUB_ENV"
+      - run: swift test
+      - name: Build with stable release signature
+        run: |
+          test -n "$STILL_SIGN_IDENTITY"
+          ./scripts/build.sh "$RUNNER_TEMP/Still.app"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Still.app" "$RUNNER_TEMP/Still-preview.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Still-mac-preview
+          path: ${{ runner.temp }}/Still-preview.zip
+          retention-days: 7

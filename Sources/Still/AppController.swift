@@ -144,7 +144,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         scrolling.onComplete = { [weak self] image in self?.library.busy = false; self?.completeScreenshot(image); DesktopCover.shared.endCapture(); self?.restoreOverlays() }
         scrolling.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays() }
         // A menu bar app: only open Settings the first time, so launches at login stay out of the way.
-        if !UserDefaults.standard.bool(forKey: "welcomed") { UserDefaults.standard.set(true, forKey: "welcomed"); showMain() }
+        if !UserDefaults.standard.bool(forKey: "studioSetupComplete") { showMain() }
         if CommandLine.arguments.contains("--editor-demo") { demo() }
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
@@ -259,7 +259,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Still Settings"; window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true; window.backgroundColor = .windowBackgroundColor
             window.minSize = NSSize(width: 700, height: 560); window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: MainView(library: library, recorder: recorder).tint(Studio.accent))
+            window.contentView = NSHostingView(rootView: SetupRootView(library: library, recorder: recorder).tint(Studio.accent))
             window.center(); window.setFrameAutosaveName("StillPreferences"); mainWindow = window
         }
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)

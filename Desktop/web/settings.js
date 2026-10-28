@@ -1,4 +1,5 @@
 const PAGES = [
+  ['Setup', 'sparkles', '#d64b32'],
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
   ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
 ];
@@ -27,6 +28,21 @@ function render() {
 }
 
 const pages = {
+  Setup: () => [
+    el('h2', { style: 'font-size:30px;margin:12px 0' }, 'Your first capture starts here.'),
+    el('p', { class: 'hint' }, 'Start with a screenshot. Camera, microphone and cloud setup can wait until you need them.'),
+    group('01 · Capture', [
+      row('Choose an area, or hold Space to select a window.', el('button', { class: 'btn primary', onclick: () => still.send('capture', 'area') }, 'Try Capture Area'))
+    ], prefs.wayland ? 'Your desktop will ask which screen or window to share. Choose it in the system picker each time it appears.' : 'Drag over the area you want, then release. Your capture appears in a floating preview.'),
+    group('02 · Shortcuts', [
+      row('Choose keys that are comfortable for you.', el('button', { class: 'btn', onclick: () => { current = 'Shortcuts'; render(); } }, 'Set Shortcuts'))
+    ], prefs.wayland ? 'If a global shortcut is unavailable, add it in your desktop’s Keyboard settings using: still --capture=area. The tray menu also works.' : 'If another app already uses a shortcut, Still will flag it. Capture is always available from the tray menu.'),
+    group('03 · Make it yours', [
+      row('Try drawing, text and export without capturing anything.', el('button', { class: 'btn', onclick: () => still.send('open:demo') }, 'Explore the Editor')),
+      row('Screenshots stay on your computer unless you upload them.', el('span', {}, 'Cloud is optional'))
+    ]),
+    el('div', { style: 'display:flex;justify-content:flex-end;margin-top:22px' }, [el('button', { class: 'btn primary', onclick: () => { localStorage.setItem('stillSetupComplete', '1'); current = 'General'; render(); } }, 'Finish Setup')])
+  ],
   General: () => [
     group('App', [
       toggle('Launch at login', 'launchAtLogin'),
@@ -177,6 +193,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
 
 (async () => {
   prefs = await applyTheme();
+  if (localStorage.getItem('stillSetupComplete') !== '1') current = 'Setup';
   updateStatus = await still.invoke('update:status');
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   $('#nav').append(...PAGES.map(([name, iconName, color]) => el('button', { 'data-page': name, html: `<span class="tile" style="background:${color}">${icon(iconName)}</span>${name}`, onclick: () => { current = name; render(); } })));

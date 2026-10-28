@@ -49,12 +49,17 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         // are in the picture. The overlay then sits on that frozen image, like the system tool.
         Task {
             var shots: [ObjectIdentifier: CGImage] = [:]
-            await withTaskGroup(of: (ObjectIdentifier, CGImage?).self) { group in
-                for screen in NSScreen.screens { group.addTask { @MainActor in (ObjectIdentifier(screen), try? await ScreenCaptureAPI.image(screen: screen)) } }
-                for await (id, image) in group { if let image { shots[id] = image } }
+            var failures: [String] = []
+            for screen in NSScreen.screens {
+                do { shots[ObjectIdentifier(screen)] = try await ScreenCaptureAPI.image(screen: screen) }
+                catch { let error = error as NSError; failures.append("\(screen.localizedName): \(error.localizedDescription) (\(error.domain) \(error.code))") }
             }
             guard active else { return }
-            guard !shots.isEmpty else { close(); onError?(NSError(domain: "Still", code: 2, userInfo: [NSLocalizedDescriptionKey: "Still couldn’t read the screen. Check Screen Recording permission."])); return }
+            guard !shots.isEmpty else {
+                close()
+                onError?(NSError(domain: "Still", code: 2, userInfo: [NSLocalizedDescriptionKey: "Capture could not start. " + (failures.isEmpty ? "No connected displays were found." : failures.joined(separator: "\n"))]))
+                return
+            }
             images = shots
             for screen in NSScreen.screens {
                 let panel = SelectionPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)

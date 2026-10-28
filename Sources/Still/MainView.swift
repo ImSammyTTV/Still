@@ -68,6 +68,7 @@ struct MainView: View {
     private var general: some View {
         Group {
             section("App") {
+                Button("Open Setup Assistant…") { UserDefaults.standard.set(false, forKey: "studioSetupComplete") }
                 Toggle("Launch at login", isOn: Binding(get: { SMAppService.mainApp.status == .enabled }, set: { do { try prefs.setLaunchAtLogin($0) } catch { loginError = error.localizedDescription } }))
                 Toggle("Check for updates automatically", isOn: $autoUpdate)
                 Toggle("Show menu bar icon", isOn: $prefs.showMenuBar).onChange(of: prefs.showMenuBar) { _, value in AppController.shared.setMenuBarVisible(value) }
