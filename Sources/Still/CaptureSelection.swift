@@ -346,7 +346,7 @@ struct CaptureBar: View {
                 TextField("H", text: $selection.height).frame(width: 40).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture height")
             }.textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 12, design: .monospaced)).padding(.horizontal, 8).frame(height: 28).background(.white.opacity(0.07), in: Capsule())
             Menu { Button("Freeform") { selection.aspect = 0 }; Button("1:1") { selection.aspect = 1 }; Button("4:3") { selection.aspect = 4.0/3 }; Button("16:9") { selection.aspect = 16.0/9 }; Button("9:16") { selection.aspect = 9.0/16 } } label: { Image(systemName: "aspectratio") }.menuStyle(.borderlessButton).fixedSize().frame(width: 30).help("Lock aspect ratio")
-        }.padding(14).frame(width: 320).font(.system(size: 12, weight: .medium))
+        }.padding(14).frame(width: 320, height: 230).font(.system(size: 12, weight: .medium))
             .background(Color(hex: "242522"), in: RoundedRectangle(cornerRadius: 5)).overlay(alignment: .top) { Rectangle().fill(Self.signal).frame(height: 3) }.environment(\.colorScheme, .dark).padding(10)
     }
     private var divider: some View { Rectangle().fill(.white.opacity(0.14)).frame(width: 1, height: 20).padding(.horizontal, 4) }

@@ -198,6 +198,8 @@ has a viewer with comments.
 Open **System Settings → Privacy & Security → Screen & System Audio Recording** and make sure Still is switched on in the
 **upper** list. The lower *System Audio Recording Only* list doesn't allow screenshots. If Still isn't listed, click **+**,
 choose `/Applications/Still.app`, switch it on and reopen Still.
+
+If the switch is already on, open **Settings → General → Open Setup Assistant** and use **Check Again**. A developer build signed with a different certificate can appear enabled while macOS rejects it. Install a build signed with the same release identity before changing permissions. Keep one copy of Still in Applications.
 </details>
 
 <details>

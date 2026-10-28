@@ -259,7 +259,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Still Settings"; window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true; window.backgroundColor = .windowBackgroundColor
             window.minSize = NSSize(width: 700, height: 560); window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: SetupRootView(library: library, recorder: recorder).tint(Studio.accent))
+            let host = NSHostingView(rootView: SetupRootView(library: library, recorder: recorder).tint(Studio.accent))
+            host.sizingOptions = []
+            window.contentView = host
             window.center(); window.setFrameAutosaveName("StillPreferences"); mainWindow = window
         }
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)

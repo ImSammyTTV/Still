@@ -9,3 +9,5 @@ Settings uses a horizontal subject index. The editor places a labeled tool bench
 Keep actions keyboard accessible. Pair selection color with labels or shape. Respect system appearance and reduced motion. Standard system menus and dialogs retain native behavior.
 
 Validation: 21 native core tests and 7 desktop logic tests pass. The Mac universal build supports Apple silicon and Intel. Windows/Linux visual changes require a fresh platform build; this Mac cannot provide a live target-system visual check.
+
+First launch uses a short setup assistant. Screen capture is verified with an actual screenshot request, without saving the result. Permission requests require a button press. Camera, microphone and cloud remain optional. Setup can be skipped and reopened from General settings.
