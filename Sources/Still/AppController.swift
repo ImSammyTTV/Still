@@ -259,7 +259,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Still Settings"; window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true; window.backgroundColor = .windowBackgroundColor
             window.minSize = NSSize(width: 700, height: 560); window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: MainView(library: library, recorder: recorder))
+            window.contentView = NSHostingView(rootView: MainView(library: library, recorder: recorder).tint(Studio.accent))
             window.center(); window.setFrameAutosaveName("StillPreferences"); mainWindow = window
         }
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -564,7 +564,7 @@ extension AppController {
     @objc func restoreLastCapture() { if let item = lastPreviewItem ?? library.items.first { showPreview(item) } }
     @objc func showHistory() {
         if let panel = historyPanel { panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
-        let panel = SelectionPanel(contentRect: CGRect(x: 0, y: 0, width: 880, height: 430), styleMask: [.borderless], backing: .buffered, defer: false)
+        let panel = SelectionPanel(contentRect: CGRect(x: 0, y: 0, width: 880, height: 580), styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .floating; panel.isReleasedWhenClosed = false
         panel.contentView = NSHostingView(rootView: HistoryView(library: library, dismiss: { [weak self] in self?.historyPanel?.close(); self?.historyPanel = nil }))
         historyPanel = panel; panel.center(); panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -639,7 +639,7 @@ extension AppController {
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1120, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = item.title; window.minSize = NSSize(width: 950, height: 640); window.isReleasedWhenClosed = false; window.delegate = self; window.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
         let model = VideoEditorModel(item: item, library: library); videoModels[id] = model
-        window.contentView = NSHostingView(rootView: VideoEditorView(model: model)); editors[id] = window
+        window.contentView = NSHostingView(rootView: VideoEditorView(model: model).tint(Studio.accent)); editors[id] = window
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func performPreviewGesture(_ item: CaptureItem, left: Bool) {

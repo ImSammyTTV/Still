@@ -34,6 +34,19 @@
   .about { display: grid; place-items: center; gap: 8px; padding: 40px 0; text-align: center; }
   .about img { width: 96px; height: 96px; }
   .warning { color: var(--red); font-size: 11px; }
+
+  body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  nav { flex-direction: row; flex-wrap: wrap; gap: 4px 12px; padding: 14px 24px; border-right: 0; border-bottom: 1px solid var(--border); }
+  nav .brand { flex-basis: 100%; padding: 8px 0 15px; }
+  .brand b { font-size: 30px; }
+  nav .tile { display: none; }
+  nav button { border-radius: 0; border-bottom: 2px solid transparent; padding: 0 2px; }
+  nav button.active { background: transparent; border-color: var(--accent); color: var(--accent); }
+  nav .spacer { display: none; }
+  section header { height: 68px; font: 30px "Baskerville", Georgia, serif; }
+  section { grid-template-rows: 68px 1fr; }
+  .content { padding: 0 28px 28px; }
+  .group { border-radius: 3px; }
 </style>
 </head>
 <body>

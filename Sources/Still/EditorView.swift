@@ -10,7 +10,6 @@ struct EditorView: View {
         VStack(spacing: 0) {
             toolbar
             HStack(spacing: 0) {
-            toolRail
             GeometryReader { geometry in
                 let layout = model.canvasLayout
                 let fit = min(max(100, geometry.size.width-60)/layout.size.width, max(100, geometry.size.height-60)/layout.size.height)
@@ -27,12 +26,13 @@ struct EditorView: View {
                         .padding(30)
                         .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                 }
-                .background(Color(nsColor: .underPageBackgroundColor))
+                .background(Studio.paper)
             }
+            toolRail
             }
             bottomBar
         }
-        .font(.system(size: 12)).background(Color(nsColor: .windowBackgroundColor)).ignoresSafeArea()
+        .font(.custom("AvenirNext-Regular", size: 12)).tint(Studio.accent).background(Studio.surface).ignoresSafeArea()
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers { _ = provider.loadObject(ofClass: URL.self) { url, _ in if let url { Task { @MainActor in model.addImage(url) } } } }
             return true
@@ -55,6 +55,7 @@ struct EditorView: View {
     }
     private var toolbar: some View {
         HStack(spacing: 8) {
+            Text("Still / Studio").font(.custom("Baskerville", size: 19)).padding(.trailing, 12)
             HStack(spacing: 5) {
                 roundButton("crop", "Crop") { model.tool = .crop }
                 Menu {
@@ -104,22 +105,23 @@ struct EditorView: View {
             Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } }.buttonStyle(.borderedProminent).controlSize(.small).clipShape(Capsule())
         }
         .padding(.leading, 79).padding(.trailing, 14).frame(height: 48)
-        .background(NativeMaterial(material: .titlebar)).overlay(alignment: .bottom) { Divider() }
+        .background(Studio.surface).overlay(alignment: .bottom) { Divider() }
     }
     /// Still's tool rail: drawing tools stacked down the left edge of the editor.
     private var toolRail: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 3) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("MARK UP").font(.custom("Menlo", size: 9)).tracking(2).foregroundStyle(.secondary).padding(.vertical, 12)
                 ForEach(tools) { tool in
                     Button { model.tool = tool; model.selectedID = nil } label: {
-                        Image(systemName: tool.symbol).font(.system(size: 14, weight: .medium)).frame(width: 34, height: 32)
-                            .foregroundStyle(model.tool == tool ? Color.black.opacity(0.85) : Color.primary)
-                            .background(model.tool == tool ? Color(red: 0.85, green: 0.91, blue: 0.68) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                        Label(tool.title, systemImage: tool.symbol).font(.custom("AvenirNext-Medium", size: 11)).frame(width: 116, height: 32, alignment: .leading).padding(.leading, 9)
+                            .foregroundStyle(model.tool == tool ? Color.white : Color.primary)
+                            .background(model.tool == tool ? Studio.accent : .clear, in: RoundedRectangle(cornerRadius: 3))
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain).help("\(tool.title) (\(tool.key.uppercased()))").accessibilityLabel(tool.title).accessibilityAddTraits(model.tool == tool ? .isSelected : [])
                 }
             }.padding(.vertical, 10).padding(.horizontal, 7)
-        }.frame(width: 48).background(NativeMaterial(material: .titlebar)).overlay(alignment: .trailing) { Divider() }
+        }.frame(width: 144).background(Studio.surface).overlay(alignment: .leading) { Divider() }
     }
     private var bottomBar: some View {
         HStack(spacing: 9) {
@@ -138,7 +140,7 @@ struct EditorView: View {
             roundButton("doc.on.doc.fill", "Copy") { model.copy() }.keyboardShortcut("c", modifiers: [.command, .shift])
             roundButton("square.and.arrow.down", "Save Image") { model.export() }
             roundButton("icloud.and.arrow.up", "Upload to Cloud") { AppController.shared.uploadEditor(model) }
-        }.padding(.horizontal, 13).frame(height: 45).background(NativeMaterial(material: .titlebar)).overlay(alignment: .top) { Divider() }
+        }.padding(.horizontal, 13).frame(height: 45).background(Studio.surface).overlay(alignment: .top) { Divider() }
     }
     private func roundButton(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).font(.system(size: 14, weight: .medium)).frame(width: 32, height: 27).background(Color.primary.opacity(0.07), in: Capsule()) }.buttonStyle(.plain).help(title).accessibilityLabel(title)
@@ -203,12 +205,12 @@ struct BackgroundEditor: View {
             VStack {
                 if let image = try? model.flattened() { Image(decorative: image, scale: 1).resizable().scaledToFit().shadow(radius: 8).padding(28) }
                 Text("Background").font(.headline).padding(.bottom, 20)
-            }.frame(width: 390, height: 510).background(Color(nsColor: .underPageBackgroundColor))
+            }.frame(width: 390, height: 510).background(Studio.paper)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack { Text("Background").font(.headline); Spacer(); Button("Done") { model.activeSheet = nil }.keyboardShortcut(.defaultAction) }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
-                        ForEach(FrameStyle.allCases) { style in Button { model.customBackground = nil; model.frame = style } label: { RoundedRectangle(cornerRadius: 6).fill(LinearGradient(colors: style == .none ? [Color(nsColor: .windowBackgroundColor)] : style.colors.map { Color(nsColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(height: 30).overlay(RoundedRectangle(cornerRadius: 6).stroke(model.frame == style ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: model.frame == style ? 2 : 0.5)).overlay { if style == .none { Image(systemName: "nosign").font(.system(size: 12)) } } }.buttonStyle(.plain).help(style.title).accessibilityLabel(style.title) }
+                        ForEach(FrameStyle.allCases) { style in Button { model.customBackground = nil; model.frame = style } label: { RoundedRectangle(cornerRadius: 6).fill(LinearGradient(colors: style == .none ? [Studio.surface] : style.colors.map { Color(nsColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(height: 30).overlay(RoundedRectangle(cornerRadius: 6).stroke(model.frame == style ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: model.frame == style ? 2 : 0.5)).overlay { if style == .none { Image(systemName: "nosign").font(.system(size: 12)) } } }.buttonStyle(.plain).help(style.title).accessibilityLabel(style.title) }
                     }
                     Button("Choose Image…") { let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]; if panel.runModal() == .OK, let url = panel.url { do { model.customBackground = try Data(contentsOf: url); if model.frame == .none { model.frame = .snow } } catch { model.error = error.localizedDescription } } }
                     Picker("Aspect ratio", selection: Binding(get: { model.aspectRatio ?? 0 }, set: { model.aspectRatio = $0 == 0 ? nil : $0 })) { Text("Auto").tag(0.0); Text("1:1").tag(1.0); Text("4:3").tag(4.0/3); Text("16:9").tag(16.0/9); Text("9:16").tag(9.0/16) }

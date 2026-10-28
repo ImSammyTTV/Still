@@ -7,20 +7,21 @@ struct PreviewView: View {
     @ObservedObject var library: Library
     let dismiss: () -> Void
     @State private var hovering = false
-    private static let lime = Color(red: 0.85, green: 0.91, blue: 0.68)
+    private static let signal = Studio.accent
     /// Still's floating preview: the capture on top, a permanent action bar underneath.
     var body: some View {
         VStack(spacing: 0) {
+            HStack { Text("CAPTURE READY").font(.custom("Menlo", size: 9)).tracking(1.5); Spacer(); Text("Still.").font(.custom("Baskerville", size: 17)) }.padding(10).background(Studio.surface)
             ZStack {
                 Color.black
-                if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFill() }
+                if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit() }
                 if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 30)).foregroundStyle(.white).shadow(radius: 4) }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
-                .overlay(alignment: .bottom) { Self.lime.frame(height: 2) }
+                .overlay(alignment: .bottom) { Self.signal.frame(height: 2) }
                 .contentShape(Rectangle()).onTapGesture(count: 2) { AppController.shared.openItem(item); dismiss() }
                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
             HStack(spacing: 2) {
-                Button { library.copy(item); dismiss() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 9).frame(height: 24).foregroundStyle(Color.black.opacity(0.85)).background(Self.lime, in: Capsule()) }.buttonStyle(.plain)
+                Button { library.copy(item); dismiss() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 9).frame(height: 24).foregroundStyle(Color.white).background(Self.signal, in: Capsule()) }.buttonStyle(.plain)
                 Spacer(minLength: 2)
                 action("square.and.arrow.down", "Save") { if NSEvent.modifierFlags.contains(.option) { library.export(item) } else { library.quickSave(item) }; dismiss() }
                 action(item.isVideo ? "play.fill" : "pencil", item.isVideo ? "Edit Video" : "Annotate") { AppController.shared.openItem(item); dismiss() }
@@ -28,10 +29,10 @@ struct PreviewView: View {
                 action("icloud.and.arrow.up", "Upload") { AppController.shared.upload(item) }
                 action("square.and.arrow.up", "Share") { AppController.shared.shareItem(item) }
                 action("xmark", "Close") { dismiss() }
-            }.padding(.horizontal, 6).frame(height: 34).background(Color(white: 0.12))
+            }.padding(.horizontal, 6).frame(height: 34).background(Studio.surface)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15)))
-        .environment(\.colorScheme, .dark).onHover { hovering = $0 }
+        .clipShape(RoundedRectangle(cornerRadius: 3)).overlay(RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.15)))
+        .tint(Studio.accent).onHover { hovering = $0 }
         .contextMenu { Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Save") { library.quickSave(item) }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Button("Close Preview") { dismiss() } }
         .accessibilityLabel("Floating Preview for \(item.title)")
         .task {

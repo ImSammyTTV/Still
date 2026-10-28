@@ -4,7 +4,12 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const params = new URLSearchParams(Object.entries(window.__STILL_PARAMS__ || {}).filter(([, v]) => typeof v !== 'object').map(([k, v]) => [k, String(v)]));
 
 const icon = (name, size) => `<i data-lucide="${name}"${size ? ` style="width:${size}px;height:${size}px"` : ''}></i>`;
-const refreshIcons = () => window.lucide && window.lucide.createIcons({ attrs: { 'stroke-width': 1.8 } });
+const refreshIcons = () => {
+  if (window.lucide) window.lucide.createIcons({ attrs: { 'stroke-width': 1.8, 'aria-hidden': 'true' } });
+  document.querySelectorAll('button[title]').forEach(button => {
+    if (!button.hasAttribute('aria-label')) button.setAttribute('aria-label', button.title);
+  });
+};
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -21,7 +26,7 @@ function el(tag, attrs = {}, children = []) {
 let toastTimer;
 function toast(text) {
   let node = $('.toast');
-  if (!node) { node = el('div', { class: 'toast' }); document.body.append(node); }
+  if (!node) { node = el('div', { class: 'toast', role: 'status', 'aria-live': 'polite' }); document.body.append(node); }
   node.textContent = text; node.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 1800);
 }

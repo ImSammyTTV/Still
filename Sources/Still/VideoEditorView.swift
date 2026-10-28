@@ -132,16 +132,16 @@ struct VideoEditorView: View {
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Video Editor").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.export(gif: false) }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 13).padding(.vertical, 6).background(Color.accentColor, in: Capsule()).foregroundStyle(.white); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(NativeMaterial(material: .titlebar))
+            HStack { Text("Still / Motion").font(.custom("Baskerville", size: 23)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.export(gif: false) }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 13).padding(.vertical, 6).background(Color.accentColor, in: Capsule()).foregroundStyle(.white); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     HStack { Button { model.togglePlay() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 25) }.buttonStyle(.plain).keyboardShortcut(.space, modifiers: []); Text(time(model.playhead)).monospacedDigit(); Slider(value: Binding(get: { model.playhead }, set: { model.seek($0) }), in: model.settings.start...max(model.settings.start+0.01, model.settings.end)); Text(time(model.settings.end)).monospacedDigit(); Button { model.settings.muted.toggle() } label: { Image(systemName: model.settings.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.buttonStyle(.plain) }.font(.system(size: 11)).padding(13)
                 }
-                inspector.frame(width: 265).background(Color(nsColor: .windowBackgroundColor)).overlay(alignment: .leading) { Divider() }
+                inspector.frame(width: 265).background(Studio.paper).overlay(alignment: .leading) { Divider() }
             }
             timeline
-        }.font(.system(size: 12)).background(Color(nsColor: .windowBackgroundColor))
+        }.font(.system(size: 12)).background(Studio.paper)
         .onChange(of: model.settings) { _, _ in model.schedulePreview() }
         .sheet(isPresented: $model.exporting) { VStack(spacing: 18) { Text("Exporting…").font(.headline); ProgressView(value: model.exportProgress).frame(width: 300); Text("\(Int(model.exportProgress*100))%").monospacedDigit().foregroundStyle(.secondary); Button("Cancel") { model.cancelExport() } }.padding(30).interactiveDismissDisabled() }
         .alert("Video Editor", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
@@ -150,7 +150,7 @@ struct VideoEditorView: View {
         VStack(spacing: 0) {
             HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
-            ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(.system(size: 15, weight: .semibold)); controls }.padding(18) }
+            ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
     }
     @ViewBuilder private var controls: some View {

@@ -26,17 +26,24 @@
   .sub { font-size: 11px; color: var(--text-2); }
   .empty { grid-column: 1 / -1; display: grid; place-items: center; gap: 10px; padding: 80px 0; color: var(--text-2); text-align: center; }
   .empty svg { width: 40px; height: 40px; opacity: .5; }
+
+  body { grid-template-rows: 86px 1fr; }
+  .titlebar { height: 86px; padding: 0 28px; gap: 20px; }
+  h1 { font-size: 28px; }
+  .grid { padding: 26px 28px; gap: 24px; }
+  .tile { border-radius: 3px; box-shadow: 0 3px 0 var(--border); }
+  .meta { padding: 15px; }
 </style>
 </head>
 <body>
 <div class="titlebar">
-  <h1>Capture History</h1>
+  <h1>The collection</h1>
   <div class="segmented" id="filter">
     <button data-kind="all" class="active">All</button>
     <button data-kind="screenshot">Screenshots</button>
     <button data-kind="recording">Recordings</button>
   </div>
-  <input class="field search" id="search" placeholder="Search titles and text">
+  <input class="field search" id="search" aria-label="Search captures" placeholder="Search titles and text">
 </div>
 <div class="grid" id="grid"></div>
 <script src="bridge.js"></script>

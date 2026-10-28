@@ -79,7 +79,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
         let host = FirstClickHostingView(rootView: CaptureBar(selection: self))
         let size = host.fittingSize
-        let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.maxY-size.height-18, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let panel = SelectionPanel(contentRect: CGRect(x: screen.visibleFrame.minX+18, y: screen.visibleFrame.maxY-size.height-18, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Capture Bar"
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue+1); panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.contentView = host
@@ -322,35 +322,35 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
 
 struct CaptureBar: View {
     @ObservedObject var selection: CaptureSelection
-    private static let lime = Color(red: 0.85, green: 0.91, blue: 0.68)
+    private static let signal = Studio.accent
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "viewfinder").font(.system(size: 13, weight: .semibold)).foregroundStyle(Self.lime).padding(.leading, 6).padding(.trailing, 4)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Still.").font(.custom("Baskerville-Bold", size: 22)).foregroundStyle(.white).padding(.horizontal, 10)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 5) {
             mode("Area", "rectangle.dashed", selected: selection.purpose == .screenshot && !selection.windowMode) { selection.setWindowMode(false); selection.purpose = .screenshot }
             mode("Window", "macwindow", selected: selection.windowMode) { selection.toggleWindowMode() }
             mode("Screen", "display") { selection.fullscreen() }
             mode("Scroll", "arrow.down.to.line", selected: selection.purpose == .scroll) { selection.setWindowMode(false); selection.purpose = .scroll }
-            divider
             mode("Text", "text.viewfinder", selected: selection.purpose == .text) { selection.setWindowMode(false); selection.purpose = .text }
             mode("Record", "record.circle", selected: selection.purpose == .recording) { selection.setWindowMode(false); selection.purpose = .recording }
             mode("Timer", "timer") { selection.timer() }
-            divider
+            }
             HStack(spacing: 4) {
                 TextField("W", text: $selection.width).frame(width: 40).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture width")
                 Text("×").foregroundStyle(.secondary)
                 TextField("H", text: $selection.height).frame(width: 40).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture height")
             }.textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 12, design: .monospaced)).padding(.horizontal, 8).frame(height: 28).background(.white.opacity(0.07), in: Capsule())
             Menu { Button("Freeform") { selection.aspect = 0 }; Button("1:1") { selection.aspect = 1 }; Button("4:3") { selection.aspect = 4.0/3 }; Button("16:9") { selection.aspect = 16.0/9 }; Button("9:16") { selection.aspect = 9.0/16 } } label: { Image(systemName: "aspectratio") }.menuStyle(.borderlessButton).fixedSize().frame(width: 30).help("Lock aspect ratio")
-        }.padding(.horizontal, 6).frame(height: 44).font(.system(size: 12, weight: .medium))
-            .background(.ultraThickMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.12))).environment(\.colorScheme, .dark).padding(10)
+        }.padding(14).frame(width: 320).font(.system(size: 12, weight: .medium))
+            .background(Color(hex: "242522"), in: RoundedRectangle(cornerRadius: 5)).overlay(alignment: .top) { Rectangle().fill(Self.signal).frame(height: 3) }.environment(\.colorScheme, .dark).padding(10)
     }
     private var divider: some View { Rectangle().fill(.white.opacity(0.14)).frame(width: 1, height: 20).padding(.horizontal, 4) }
     private func mode(_ title: String, _ symbol: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) { Image(systemName: symbol).font(.system(size: 13)); Text(title) }
                 .padding(.horizontal, 11).frame(height: 32)
-                .foregroundStyle(selected ? Color.black.opacity(0.85) : .primary)
-                .background(selected ? Self.lime : .clear, in: Capsule()).contentShape(Capsule())
+                .foregroundStyle(selected ? Color.white : .primary)
+                .background(selected ? Self.signal : .clear, in: RoundedRectangle(cornerRadius: 3)).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(title)
     }
 }

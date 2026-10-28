@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=for-the-badge&color=d9e8ad&labelColor=1b211d&label=Download" alt="Latest release"></a>
-  <a href="https://github.com/ImSammyTTV/Still/releases"><img src="https://img.shields.io/github/downloads/ImSammyTTV/Still/total?style=for-the-badge&color=d9e8ad&labelColor=1b211d&label=Downloads" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-1b211d?style=for-the-badge" alt="macOS, Windows and Linux">
+  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=for-the-badge&color=d64b32&labelColor=242522&label=Download" alt="Latest release"></a>
+  <a href="https://github.com/ImSammyTTV/Still/releases"><img src="https://img.shields.io/github/downloads/ImSammyTTV/Still/total?style=for-the-badge&color=d64b32&labelColor=242522&label=Downloads" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-242522?style=for-the-badge" alt="macOS, Windows and Linux">
 </p>
 
 <h3 align="center">A fast, quiet screenshot tool that gets out of your way.</h3>
@@ -155,7 +155,7 @@ with your own server connected.
 </table>
 
 <p align="center">
-  <img src="assets/editor.png" alt="The Still editor: tool rail on the left, the capture in the middle, Drag to share and export buttons along the bottom" width="90%">
+  <img src="assets/editor.png" alt="The Still editor: labeled tool bench on the right, the capture in the middle, Drag to share and export buttons along the bottom" width="90%">
 </p>
 
 ## ⌨️ Shortcuts

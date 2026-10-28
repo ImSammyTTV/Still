@@ -21,26 +21,34 @@ struct MainView: View {
     ]
     private var selected: String { categories.map(\.0).contains(library.page) || library.page == "About" ? library.page : "General" }
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 11) { Image(systemName: "viewfinder").font(.system(size: 20)).frame(width: 32, height: 32).background(Color.accentColor.opacity(0.12), in: Circle()); VStack(alignment: .leading, spacing: 3) { Text("Still").font(.system(size: 12, weight: .semibold)); Text("Personal capture utility").font(.system(size: 10)).foregroundStyle(.secondary) } }.padding(.horizontal, 14).padding(.top, 58).padding(.bottom, 19)
-                ForEach(categories, id: \.0) { category in
-                    Button { library.page = category.0 } label: {
-                        HStack(spacing: 10) { Image(systemName: category.1).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 21, height: 21).background(category.2, in: RoundedRectangle(cornerRadius: 5)); Text(category.0); Spacer() }
-                            .padding(.horizontal, 7).frame(height: 32).background(selected == category.0 ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain).padding(.horizontal, 9)
-                }
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Still.").font(.custom("Baskerville-Bold", size: 34))
+                Text("YOUR CAPTURE STUDIO").font(.custom("Menlo", size: 9)).tracking(2).foregroundStyle(.secondary)
                 Spacer()
-                Button { library.page = "About" } label: { HStack(spacing: 10) { Image(systemName: "info.circle.fill").font(.system(size: 20)).foregroundStyle(.gray); Text("About"); Spacer() }.padding(7).frame(height: 32).background(selected == "About" ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 9)) }.buttonStyle(.plain).padding(.horizontal, 9).padding(.bottom, 16)
-            }.frame(width: 205).background(NativeMaterial(material: .sidebar)).overlay(alignment: .trailing) { Divider() }
+                Button("About") { library.page = "About" }.buttonStyle(.plain)
+            }.padding(.horizontal, 24).padding(.top, 42).padding(.bottom, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 18) {
+                    ForEach(categories, id: \.0) { category in
+                        Button { library.page = category.0 } label: {
+                            Text(category.0).font(.custom("AvenirNext-DemiBold", size: 11))
+                                .padding(.vertical, 12)
+                                .foregroundStyle(selected == category.0 ? Studio.accent : Color.secondary)
+                                .overlay(alignment: .bottom) { if selected == category.0 { Rectangle().fill(Studio.accent).frame(height: 3) } }
+                        }.buttonStyle(.plain)
+                    }
+                }.padding(.horizontal, 24)
+            }.frame(height: 42).background(Studio.surface)
+            Divider()
             VStack(alignment: .leading, spacing: 0) {
-                HStack { Text(selected).font(.system(size: 13, weight: .semibold)); Spacer(); if selected == "Shortcuts" { TextField("Search shortcuts", text: $shortcutSearch).textFieldStyle(.roundedBorder).frame(width: 190) } }.padding(.horizontal, 18).padding(.top, 17).padding(.bottom, 14)
+                HStack { Text(selected).font(Studio.heading); Spacer(); if selected == "Shortcuts" { TextField("Search shortcuts", text: $shortcutSearch).textFieldStyle(.roundedBorder).frame(width: 190) } }.padding(.horizontal, 18).padding(.top, 17).padding(.bottom, 14)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 23) { content }.padding(.horizontal, 18).padding(.bottom, 22)
                 }
                 if let message = library.message { Text(message).font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.bottom, 8) }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
-        }.font(.system(size: 12)).ignoresSafeArea()
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Studio.paper)
+        }.font(.custom("AvenirNext-Regular", size: 12)).background(Studio.paper).tint(Studio.accent).ignoresSafeArea()
         .alert("Settings couldn’t be updated", isPresented: Binding(get: { loginError != nil }, set: { if !$0 { loginError = nil } })) { Button("OK") { loginError = nil } } message: { Text(loginError ?? "") }
     }
     @ViewBuilder private var content: some View {
@@ -215,7 +223,7 @@ struct MainView: View {
         }.frame(maxWidth: .infinity).padding(.top, 55)
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 9) { Text(title).font(.system(size: 11, weight: .semibold)); VStack(alignment: .leading, spacing: 0) { content().padding(.horizontal, 10).padding(.vertical, 10) }.frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10)) }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
+        VStack(alignment: .leading, spacing: 9) { Text(title).font(.system(size: 11, weight: .semibold)); VStack(alignment: .leading, spacing: 0) { content().padding(.horizontal, 10).padding(.vertical, 10) }.frame(maxWidth: .infinity, alignment: .leading).background(Studio.surface, in: RoundedRectangle(cornerRadius: 3)) }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
     }
     private func afterRow(_ title: String, image: Binding<Bool>, video: Binding<Bool>? = nil) -> some View { HStack { Text(title); Spacer(); Toggle(title, isOn: image).labelsHidden().toggleStyle(.checkbox).frame(width: 85); if let video { Toggle(title, isOn: video).labelsHidden().toggleStyle(.checkbox).frame(width: 75) } else { Text("—").foregroundStyle(.secondary).frame(width: 75) } } }
     private func choice<Value: Hashable, Content: View>(_ title: String, selection: Binding<Value>, @ViewBuilder content: () -> Content) -> some View { HStack { Text(title); Spacer(minLength: 12); Picker(title, selection: selection, content: content).labelsHidden().fixedSize().frame(maxWidth: 270, alignment: .trailing) } }
