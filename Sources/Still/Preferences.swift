@@ -45,6 +45,10 @@ import StillCore
     @AppStorage("openVideoEditor") var openVideoEditor = false
     @AppStorage("includeCursor") var includeCursor = false
     @AppStorage("windowShadow") var windowShadow = true
+    /// Capture Still's own Settings, editor and History windows (its floating overlays stay out).
+    @AppStorage("captureOwnWindows") var captureOwnWindows = true
+    /// Let hold-Space window picking include menus, Spotlight, popovers and other pop-ups.
+    @AppStorage("pickPopups") var pickPopups = true
     @AppStorage("windowBackground") var windowBackground = false
     @AppStorage("windowPadding") var windowPadding: Double = 40
     @AppStorage("freezeScreen") var freezeScreen = false

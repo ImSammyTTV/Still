@@ -142,6 +142,9 @@ struct MainView: View {
                 Toggle("Include background", isOn: $prefs.windowBackground)
                 HStack { Text("Padding"); Slider(value: $prefs.windowPadding, in: 0...160, step: 4) }
                 Toggle("Capture window shadow", isOn: $prefs.windowShadow)
+                Toggle("Pick menus, Spotlight and pop-ups with Space", isOn: $prefs.pickPopups)
+                Toggle("Capture Still’s own windows", isOn: $prefs.captureOwnWindows)
+                Text("Still’s Floating Previews, pins and recording controls never appear in captures.").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             section("Crosshair") {
                 choice("Crosshair Mode", selection: $prefs.crosshair) { Text("Disabled").tag("disabled"); Text("Cross").tag("cross"); Text("Full Screen").tag("full") }

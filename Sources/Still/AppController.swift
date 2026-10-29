@@ -522,7 +522,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showMain(); let alert = NSAlert(); alert.messageText = title; alert.informativeText = text; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     private func hideForCapture() {
-        for window in NSApp.windows where window.isVisible { window.orderOut(nil) }
+        // Normal windows stay when Still's own windows may be captured; floating ones always step aside.
+        for window in NSApp.windows where window.isVisible && !(Preferences.shared.captureOwnWindows && window.level == .normal) { window.orderOut(nil) }
     }
 }
 

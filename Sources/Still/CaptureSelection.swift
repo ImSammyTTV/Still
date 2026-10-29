@@ -9,7 +9,14 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         guard let display = content.displays.first(where: { $0.displayID == id }) else { throw NSError(domain: "Still", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected display is no longer connected."]) }
-        let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        if Preferences.shared.captureOwnWindows {
+            // Keep Still's normal windows (Settings, editor, History) in the shot; leave out its floating
+            // previews, pins, recording controls and the capture overlay. Desktop covers stay visible.
+            let floating = content.windows.filter { $0.owningApplication?.processID == pid && $0.windowLayer != 0 && !DesktopCover.shared.windowIDs.contains($0.windowID) }
+            return SCContentFilter(display: display, excludingWindows: floating)
+        }
+        let own = content.applications.filter { $0.processID == pid }
         let covers = content.windows.filter { DesktopCover.shared.windowIDs.contains($0.windowID) }
         return SCContentFilter(display: display, excludingApplications: own, exceptingWindows: covers)
     }
@@ -72,11 +79,13 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
                 view.frame = CGRect(origin: .zero, size: screen.frame.size)
                 if let shot = shots[ObjectIdentifier(screen)] { view.setSnapshot(shot) }
                 panel.contentView = view; panels.append(panel); views.append(view)
+                // Keystrokes (Space, Esc, Enter, arrows) go to the selection view, not the bare window.
+                panel.initialFirstResponder = view; panel.makeFirstResponder(view)
                 panel.orderFrontRegardless()
             }
             showBar()
             NSApp.activate(ignoringOtherApps: true)
-            if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil) }
+            if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil); key.makeFirstResponder(key.contentView) }
         }
     }
     /// Still's capture bar: a slim pill along the top of the screen the pointer is on.
@@ -130,11 +139,17 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
 struct OverlayWindow {
     let id: CGWindowID
     let frame: CGRect
-    static func onScreen() -> [OverlayWindow] {
+    @MainActor static func onScreen() -> [OverlayWindow] {
         let own = ProcessInfo.processInfo.processIdentifier
+        let pickPopups = Preferences.shared.pickPopups, captureOwn = Preferences.shared.captureOwnWindows
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         return list.compactMap { info in
-            guard (info[kCGWindowLayer as String] as? Int) == 0, (info[kCGWindowOwnerPID as String] as? pid_t) != own,
+            let layer = info[kCGWindowLayer as String] as? Int ?? 0, owner = info[kCGWindowOwnerPID as String] as? pid_t
+            let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
+            // Normal windows always; menus, Spotlight and other pop-ups when allowed (not the Dock, menu bar or
+            // screen-wide system layers); Still's own normal windows when allowed, never its overlays.
+            let popup = pickPopups && layer > 0 && layer < 1000 && ![20, 24, 25].contains(layer) && !["Dock", "Window Server"].contains(ownerName)
+            guard layer == 0 || popup, owner != own || (captureOwn && layer == 0),
                   let id = info[kCGWindowNumber as String] as? CGWindowID, let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds), frame.width > 40, frame.height > 40,
                   ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0 else { return nil }
@@ -359,4 +374,5 @@ struct CaptureBar: View {
         }.buttonStyle(.plain).accessibilityLabel(title)
     }
 }
+
 
