@@ -115,7 +115,8 @@ struct Shortcut: Codable, Identifiable, Equatable {
         .init(id: 9, title: "Open Capture History", modifiers: 0, label: ""),
         .init(id: 10, title: "Restore Last Capture", modifiers: 0, label: ""),
         .init(id: 11, title: "Toggle Desktop Icons", modifiers: 0, label: ""),
-        .init(id: 12, title: "Hide / Show Overlays", modifiers: 0, label: "")
+        .init(id: 12, title: "Hide / Show Overlays", modifiers: 0, label: ""),
+        .init(id: 13, title: "Clipboard History", keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey|shiftKey), label: "⇧⌘V")
     ]
     static func load() -> [Shortcut] {
         guard let data = UserDefaults.standard.data(forKey: "shortcuts"), var saved = try? JSONDecoder().decode([Shortcut].self, from: data) else { return defaults }

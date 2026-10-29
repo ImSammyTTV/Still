@@ -130,7 +130,13 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     func window() { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window) } }
     func toggleWindowMode() { setWindowMode(!windowMode) }
     func setWindowMode(_ on: Bool) { guard purpose == .screenshot || !on, on != windowMode else { return }; windowMode = on; views.forEach { $0.windowModeChanged() } }
-    func capture(window: OverlayWindow) { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window, windowID: window.id) } }
+    func capture(window: OverlayWindow) {
+        if window.popup, let primary = NSScreen.screens.first,
+           let screen = NSScreen.screens.first(where: { CGRect(x: $0.frame.minX, y: primary.frame.maxY-$0.frame.maxY, width: $0.frame.width, height: $0.frame.height).intersects(window.frame) }) {
+            let local = CGRect(x: window.frame.minX-screen.frame.minX, y: window.frame.minY-(primary.frame.maxY-screen.frame.maxY), width: window.frame.width, height: window.frame.height)
+            finish(on: screen, rect: local.intersection(CGRect(origin: .zero, size: screen.frame.size))); return
+        }
+        close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window, windowID: window.id) } }
     func timer() { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.area, delay: 5) } }
     func cancel() { close(); onCancel?() }
     func close() { active = false; for panel in panels { panel.close() }; panels = []; views = []; images = [:]; bar?.close(); bar = nil }
@@ -139,6 +145,8 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
 struct OverlayWindow {
     let id: CGWindowID
     let frame: CGRect
+    /// Menus, Spotlight and other pop-ups close once Still takes focus, so they're cut from the frozen image.
+    var popup = false
     @MainActor static func onScreen() -> [OverlayWindow] {
         let own = ProcessInfo.processInfo.processIdentifier
         let pickPopups = Preferences.shared.pickPopups, captureOwn = Preferences.shared.captureOwnWindows
@@ -153,7 +161,7 @@ struct OverlayWindow {
                   let id = info[kCGWindowNumber as String] as? CGWindowID, let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds), frame.width > 40, frame.height > 40,
                   ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0 else { return nil }
-            return OverlayWindow(id: id, frame: frame)
+            return OverlayWindow(id: id, frame: frame, popup: layer > 0)
         }
     }
 }

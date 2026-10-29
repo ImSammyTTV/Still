@@ -17,7 +17,7 @@ struct MainView: View {
     private let categories: [(String, String, Color)] = [
         ("General", "gearshape.fill", .gray), ("Shortcuts", "command", .gray), ("Floating Preview", "rectangle.bottomthird.inset.filled", .green),
         ("Wallpaper", "photo.fill", .cyan), ("Screenshots", "camera.fill", .blue), ("Screen Recording", "video.fill", .pink),
-        ("Annotate", "pencil.tip", .orange), ("Cloud", "icloud.fill", .blue), ("Advanced", "wand.and.stars", .purple)
+        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Advanced", "wand.and.stars", .purple)
     ]
     private var selected: String { categories.map(\.0).contains(library.page) || library.page == "About" ? library.page : "General" }
     var body: some View {
@@ -60,6 +60,7 @@ struct MainView: View {
         case "Screenshots": screenshots
         case "Screen Recording": recording
         case "Annotate": annotate
+        case "Clipboard": ClipboardSettings()
         case "Cloud": CloudSettingsView(library: library)
         case "Advanced": advanced
         default: about
@@ -268,4 +269,27 @@ final class ShortcutButton: NSButton {
         }
     }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+}
+
+/// Settings → Clipboard: the history of what you copy.
+struct ClipboardSettings: View {
+    @ObservedObject private var history = ClipboardHistory.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 23) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Keep a history of what I copy", isOn: $history.enabled)
+                    Picker("Remember", selection: $history.limit) { ForEach([25, 50, 100, 200], id: \.self) { Text("Last \($0) items").tag($0) } }.frame(width: 260)
+                    Toggle("Paste automatically after choosing an item", isOn: $history.pasteAutomatically)
+                    Text("Press ⇧⌘V anywhere (change it in Shortcuts) or open Clipboard History in the menu bar menu. Pick an item, or press 1–9 and 0 for the newest ten. Automatic pasting needs Accessibility permission.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }.padding(6)
+            } label: { Text("Clipboard History").fontWeight(.semibold) }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Text, images (up to 10 MB) and files are kept on this Mac only. Copies that apps mark as private, such as passwords from password managers, are never saved.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack { Text("\(history.items.count) items saved").foregroundStyle(.secondary); Spacer(); Button("Clear History") { history.clear() }.disabled(history.items.isEmpty) }
+                }.padding(6)
+            } label: { Text("Privacy").fontWeight(.semibold) }
+        }
+    }
 }

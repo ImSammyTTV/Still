@@ -61,6 +61,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 case 10: self?.restoreLastCapture()
                 case 11: self?.toggleDesktop()
                 case 12: self?.toggleOverlays()
+                case 13: self?.showClipboardMenu()
                 default: break
                 }
             }
@@ -147,6 +148,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CommandLine.arguments.contains("--editor-demo") { demo() }
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
+        ClipboardHistory.shared.start()
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -212,6 +214,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             _ = label
         }
         menu.addItem(.separator())
+        let clipboard = NSMenuItem(title: "Clipboard History", action: nil, keyEquivalent: ""); clipboardMenu.delegate = self; clipboard.submenu = clipboardMenu; menu.addItem(clipboard)
         menu.addItem(withTitle: "Open Image…", action: #selector(importImage), keyEquivalent: "")
         menu.addItem(withTitle: "Capture Previous Area", action: #selector(capturePrevious), keyEquivalent: "")
         menu.addItem(withTitle: "Scrolling Capture", action: #selector(scrollingCapture), keyEquivalent: "")
@@ -269,6 +272,35 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     @objc func stopRecordingFromMenuBar() { if recorder.recording { recorder.stop() } }
+    // MARK: Clipboard history
+    let clipboardMenu = NSMenu(title: "Clipboard History")
+    private var clipboardReturnApp: NSRunningApplication?
+    func fillClipboardMenu(_ target: NSMenu, numbered: Bool) {
+        target.removeAllItems()
+        for item in ClipboardHistory.shared.menuItems(target: self, action: #selector(chooseClipboardItem(_:)), numbered: numbered) { target.addItem(item) }
+        target.addItem(.separator())
+        let clear = NSMenuItem(title: "Clear History", action: #selector(clearClipboardHistory), keyEquivalent: ""); clear.target = self
+        clear.isEnabled = !ClipboardHistory.shared.items.isEmpty; target.addItem(clear)
+    }
+    /// ⇧⌘V: the history pops up at the pointer; 1–9 and 0 pick the first ten.
+    func showClipboardMenu() {
+        let front = NSWorkspace.shared.frontmostApplication
+        clipboardReturnApp = front?.bundleIdentifier == Bundle.main.bundleIdentifier ? lastExternalApp : front
+        let popup = NSMenu(title: "Clipboard History")
+        let header = NSMenuItem(title: "Clipboard History", action: nil, keyEquivalent: ""); header.isEnabled = false; popup.addItem(header)
+        let items = NSMenu(); fillClipboardMenu(items, numbered: true)
+        for item in items.items { items.removeItem(item); popup.addItem(item) }
+        NSApp.activate(ignoringOtherApps: true)
+        popup.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+    @objc func chooseClipboardItem(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID, let item = ClipboardHistory.shared.items.first(where: { $0.id == id }) else { return }
+        let target = clipboardReturnApp; clipboardReturnApp = nil
+        ClipboardHistory.shared.choose(item, returnTo: target)
+        if !ClipboardHistory.shared.pasteAutomatically { target?.activate() }
+    }
+    @objc func clearClipboardHistory() { ClipboardHistory.shared.clear() }
+
     @objc func checkForUpdates() { Updater.shared.check(manual: true) }
     @objc func about() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Still", .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "", .credits: NSAttributedString(string: "A personal capture studio for your Mac.\nBuilt with Swift, AppKit & SwiftUI.\nAll captures and text recognition stay on your Mac.")])
@@ -542,7 +574,7 @@ extension AppController {
         let symbols = ["Capture Bar": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
                        "Record / Stop Recording": "record.circle", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
                        "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
-                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
+                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Clipboard History": "doc.on.clipboard", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {
             if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); Self.keepImageVisible(item) }
@@ -712,4 +744,9 @@ extension AppController {
         panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     private func closeRecordingSetup() { recordingSetupPanel?.close(); recordingSetupPanel = nil; recordingBorder?.close(); recordingBorder = nil }
+}
+
+extension AppController: NSMenuDelegate {
+    /// The Clipboard History submenu is rebuilt each time it opens, so it's always current.
+    func menuNeedsUpdate(_ menu: NSMenu) { if menu === clipboardMenu { fillClipboardMenu(menu, numbered: false) } }
 }
