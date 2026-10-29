@@ -53,6 +53,11 @@ import StillCore
         var config = SCContentSharingPickerConfiguration(); config.allowedPickerModes = [.singleDisplay, .singleWindow]
         config.excludedBundleIDs = [Bundle.main.bundleIdentifier ?? "local.sam.Still"]; config.allowsChangingSelectedContent = false
         picker.defaultConfiguration = config; picker.add(self); picker.isActive = true; picker.present()
+        // If the picker never answers, don't stay stuck in "choosing" (that blocks every later recording).
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(60))
+            if self.choosing, !self.starting, !self.recording { self.choosing = false; self.deactivatePicker(); self.onCancel?() }
+        }
     }
     private func newSession() {
         metadata = RecordingMetadata(); metadata.cursorIncludedInVideo = false; metadata.presentation = Preferences.shared.recordingPresentation

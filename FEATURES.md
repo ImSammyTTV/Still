@@ -57,13 +57,15 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Record an area or the whole screen | ☑️ | ☑️ Windows · ☑️ Linux where WebKitGTK supports screen sharing |
+| Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux where WebKitGTK supports screen sharing |
 | Microphone and computer audio | ☑️ | ☑️ Windows (computer audio) |
+| Stop from the menu bar (red stop button with timer) | ✅ | — |
 | Pause, resume, restart, cancel | ☑️ | ☑️ |
 | MP4 | ✅ export tested | ☑️ (MP4 or WebM, depending on the system) |
 | GIF export | ✅ export tested | — |
 | Camera bubble, click and keystroke overlays | ☑️ | — |
-| Video editor (trim, zoom, background, cursor effects) | ✅ export tested | — |
+| Video editor: trim bar with drag handles, Set In/Out | ✅ | — |
+| Video editor: zoom, background, cursor effects | ✅ export tested | — |
 | Audio transcription | ☑️ | — |
 
 ## Sharing
@@ -91,7 +93,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
   overlays, QR codes, extra arrow and text styles, rotate/flip/resize, combining images and hiding desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account) and custom bitrate presets for recordings.
 - **Windows:** code-signed downloads.
-- **Everywhere:** recording hasn't been checked on real hardware yet, and the ☑️ items above need a hands-on pass.
+- **Windows and Linux:** recording hasn't been checked on real hardware yet.
+- **Everywhere:** the ☑️ items above need a hands-on pass.
 
 ## How it's checked
 

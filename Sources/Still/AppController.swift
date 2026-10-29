@@ -113,8 +113,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recorder.$recording.sink { [weak self] active in
             RecordingAutomation.shared.update(recording: active) { [weak self] in self?.library.toast($0) }
             DispatchQueue.main.async {
-                self?.statusItem.button?.title = active ? " REC" : ""
-                self?.statusItem.button?.contentTintColor = active ? NSColor.systemRed : nil
+                self?.setMenuBarStopButton(active)
                 if active { self?.showRecordingHUD() }
             }
         }.store(in: &subscriptions)
@@ -249,6 +248,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func captureScreen() { capture(.screen) }
     @objc func captureText() { capture(.text) }
     @objc func record() { toggleRecording() }
+    /// While recording, the menu bar icon becomes a red stop button with the timer: one click stops and saves.
+    private func setMenuBarStopButton(_ recording: Bool) {
+        guard let button = statusItem.button else { return }
+        if recording {
+            statusItem.menu = nil
+            button.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: "Stop recording")
+            button.imagePosition = .imageLeading
+            button.title = " 0:00"
+            button.contentTintColor = .systemRed
+            button.target = self; button.action = #selector(stopRecordingFromMenuBar)
+            button.toolTip = "Stop recording"
+            statusItem.isVisible = true
+        } else {
+            button.image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Still capture menu")
+            button.title = ""; button.contentTintColor = nil
+            button.action = nil; button.toolTip = nil
+            statusItem.menu = menu
+            setMenuBarVisible(Preferences.shared.showMenuBar)
+        }
+    }
+    @objc func stopRecordingFromMenuBar() { if recorder.recording { recorder.stop() } }
     @objc func checkForUpdates() { Updater.shared.check(manual: true) }
     @objc func about() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Still", .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "", .credits: NSAttributedString(string: "A personal capture studio for your Mac.\nBuilt with Swift, AppKit & SwiftUI.\nAll captures and text recognition stay on your Mac.")])
@@ -677,7 +697,9 @@ extension AppController {
             DesktopCover.shared.beginCapture(); self.lastExternalApp?.activate()
             if full { self.recorder.recordArea(screen: target, rect: CGRect(origin: .zero, size: target.frame.size)) }
             else if let screen, let rect { let updated = CGRect(origin: rect.origin, size: size).intersection(CGRect(origin: .zero, size: screen.frame.size)); self.startAreaRecording(screen: screen, rect: updated) }
-            else { self.recorder.choose() }
+            // No area chosen: record the whole display the setup panel is on. (The system picker
+            // doesn't reliably appear for menu bar apps, which left recording stuck.)
+            else { self.recorder.recordArea(screen: target, rect: CGRect(origin: .zero, size: target.frame.size)) }
         }))
         recordingSetupPanel = panel
         if let rect {

@@ -128,11 +128,12 @@ import StillCore
 }
 
 struct VideoEditorView: View {
+    @State private var trimDragOrigin: Double?
     @StateObject private var model: VideoEditorModel
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Still / Motion").font(.custom("Baskerville", size: 23)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.export(gif: false) }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 13).padding(.vertical, 6).background(Color.accentColor, in: Capsule()).foregroundStyle(.white); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
+            HStack { Text("Still / Motion").font(.custom("Baskerville", size: 23)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.export(gif: false) }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().tint(.white).foregroundStyle(.white).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -209,21 +210,54 @@ struct VideoEditorView: View {
             Text("Microphone and system audio are preserved in MP4 exports. GIFs have no audio.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
+    /// Trim bar: drag the handles at either end of the film strip; the kept part is framed, the rest dimmed.
     private var timeline: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { Text("Trim").fontWeight(.semibold); Text("\(time(model.settings.start)) — \(time(model.settings.end))").monospacedDigit().foregroundStyle(.secondary); Spacer(); Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10)) }
+            HStack(spacing: 10) {
+                Text("Trim").fontWeight(.semibold)
+                Text("\(time(model.settings.start)) — \(time(model.settings.end))  ·  \(time(model.settings.end-model.settings.start))").monospacedDigit().foregroundStyle(.secondary)
+                Spacer()
+                Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
+                Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
+                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01)
+                Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10))
+            }.buttonStyle(.borderless).controlSize(.small)
             GeometryReader { geometry in
+                let width = geometry.size.width, total = max(0.01, model.duration)
+                let x = { (t: Double) in CGFloat(t/total)*width }
+                let startX = x(model.settings.start), endX = x(model.settings.end)
                 ZStack(alignment: .leading) {
-                    HStack(spacing: 1) { ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, image in Image(nsImage: image).resizable().scaledToFill().frame(width: geometry.size.width/9, height: 49).clipped() } }.clipShape(RoundedRectangle(cornerRadius: 5))
-                    ForEach(model.settings.zooms) { zoom in Rectangle().fill(Color.accentColor.opacity(0.4)).frame(width: max(3, (zoom.end-zoom.start)/max(0.01, model.duration)*geometry.size.width), height: 10).offset(x: zoom.start/max(0.01, model.duration)*geometry.size.width, y: 21) }
-                    Rectangle().fill(.white).frame(width: 2, height: 55).shadow(radius: 2).offset(x: model.playhead/max(0.01, model.duration)*geometry.size.width)
-                }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { model.seek(max(model.settings.start, min(model.settings.end, $0.location.x/geometry.size.width*model.duration))) })
-            }.frame(height: 55)
-            HStack {
-                Text("In"); Slider(value: Binding(get: { model.settings.start }, set: { model.settings.start = min($0, model.settings.end-0.05) }), in: 0...max(0.01, model.duration))
-                Text("Out"); Slider(value: Binding(get: { model.settings.end }, set: { model.settings.end = max($0, model.settings.start+0.05) }), in: 0...max(0.01, model.duration))
-            }
+                    HStack(spacing: 1) { ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, image in Image(nsImage: image).resizable().scaledToFill().frame(width: width/9, height: 52).clipped() } }
+                        .frame(width: width, height: 52, alignment: .leading).clipShape(RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { model.seek(max(model.settings.start, min(model.settings.end, Double($0.location.x/width)*total))) })
+                    ForEach(model.settings.zooms) { zoom in Rectangle().fill(Color.accentColor.opacity(0.4)).frame(width: max(3, x(zoom.end-zoom.start)), height: 8).offset(x: x(zoom.start), y: 22).allowsHitTesting(false) }
+                    // Dim what gets cut.
+                    Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, startX), height: 52).allowsHitTesting(false)
+                    Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, width-endX), height: 52).offset(x: endX).allowsHitTesting(false)
+                    // Frame around the kept part.
+                    RoundedRectangle(cornerRadius: 6).strokeBorder(Studio.accent, lineWidth: 3).frame(width: max(14, endX-startX), height: 58).offset(x: startX).allowsHitTesting(false)
+                    Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(model.playhead)-1).allowsHitTesting(false)
+                    // Handles move by how far you drag from where you grabbed them.
+                    handle(edge: .leading).offset(x: startX-7)
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                            let origin = trimDragOrigin ?? model.settings.start; trimDragOrigin = origin
+                            model.settings.start = max(0, min(origin+Double(value.translation.width/width)*total, model.settings.end-0.2)); model.seek(model.settings.start)
+                        }.onEnded { _ in trimDragOrigin = nil })
+                    handle(edge: .trailing).offset(x: endX-7)
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                            let origin = trimDragOrigin ?? model.settings.end; trimDragOrigin = origin
+                            model.settings.end = min(total, max(origin+Double(value.translation.width/width)*total, model.settings.start+0.2)); model.seek(model.settings.end)
+                        }.onEnded { _ in trimDragOrigin = nil })
+                }
+            }.frame(height: 64)
         }.padding(16).background(Color.primary.opacity(0.035)).overlay(alignment: .top) { Divider() }
+    }
+    private func handle(edge: HorizontalEdge) -> some View {
+        UnevenRoundedRectangle(topLeadingRadius: edge == .leading ? 6 : 0, bottomLeadingRadius: edge == .leading ? 6 : 0, bottomTrailingRadius: edge == .trailing ? 6 : 0, topTrailingRadius: edge == .trailing ? 6 : 0)
+            .fill(Studio.accent).frame(width: 14, height: 64)
+            .overlay(Capsule().fill(.white.opacity(0.9)).frame(width: 3, height: 20))
+            .contentShape(Rectangle()).onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .accessibilityLabel(edge == .leading ? "Trim start" : "Trim end")
     }
     private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View { VStack { HStack { Text(title); Spacer(); Text(value.wrappedValue.formatted(.number.precision(.fractionLength(1)))).foregroundStyle(.secondary) }; Slider(value: value, in: range) } }
     private func time(_ seconds: Double) -> String { let value = max(0, seconds.isFinite ? seconds : 0); return String(format: "%02d:%05.2f", Int(value)/60, value.truncatingRemainder(dividingBy: 60)) }

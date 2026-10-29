@@ -27,18 +27,13 @@
   body.window-mode .camera { display: block; }
   .menu { color: #f5f5f7; background: #2a2a2d; }
 
-  .bar { left: 18px; transform: none; width: 320px; height: auto; padding: 16px; border-radius: 4px; border-top: 3px solid var(--accent); flex-wrap: wrap; gap: 6px; background:#242522; }
-  .brand { flex-basis: 100%; justify-content: start; font: 24px Baskerville,Georgia,serif; color:white; padding:0 0 8px; }
-  .mode { border-radius:3px; }
-  .mode.active { background:var(--accent); color:white; }
-  .divider { display:none; }
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
 <div class="camera" id="camera"><i data-lucide="camera" style="width:24px;height:24px"></i></div>
 <div class="bar" id="bar">
-  <span class="brand">Still.</span>
+  <span class="brand"><i data-lucide="scan"></i></span>
   <button class="mode active" data-mode="area" title="Area (A)"><i data-lucide="square-dashed"></i>Area</button>
   <button class="mode" data-mode="window" title="Window (hold Space)"><i data-lucide="app-window"></i>Window</button>
   <button class="mode" data-mode="fullscreen" title="Screen (F)"><i data-lucide="monitor"></i>Screen</button>
