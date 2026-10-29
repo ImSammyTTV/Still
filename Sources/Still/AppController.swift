@@ -133,13 +133,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 panel.orderFrontRegardless(); self.cameraPanel = panel
             }
         }.store(in: &subscriptions)
-        selection.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays() }
+        selection.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays(); self?.returnFocus() }
         selection.onError = { [weak self] error in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.showError("Capture failed", error.localizedDescription) }
         selection.onSelected = { [weak self] image, screen, rect, purpose in
             guard let self else { return }
             if purpose == .scroll { self.scrolling.start(first: image, screen: screen, rect: rect) }
             else if purpose == .recording { self.library.busy = false; DesktopCover.shared.endCapture(); self.showRecordingSetup(screen: screen, rect: rect) }
-            else { self.library.busy = false; self.completeScreenshot(image, text: purpose == .text); DesktopCover.shared.endCapture(); self.restoreOverlays() }
+            else { self.library.busy = false; self.completeScreenshot(image, text: purpose == .text); DesktopCover.shared.endCapture(); self.restoreOverlays(); self.returnFocus() }
         }
         scrolling.onComplete = { [weak self] image in self?.library.busy = false; self?.completeScreenshot(image); DesktopCover.shared.endCapture(); self?.restoreOverlays() }
         scrolling.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays() }
@@ -614,6 +614,11 @@ extension AppController {
     @objc func toggleOverlays() {
         overlaysHidden.toggle()
         for panel in Array(previewPanels.values)+Array(pins.values) { if overlaysHidden { panel.orderOut(nil) } else { panel.orderFrontRegardless() } }
+    }
+    /// The overlay takes keyboard focus; give it back so ⌘V lands in the app you were using.
+    private func returnFocus() {
+        guard !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
+        lastExternalApp?.activate()
     }
     private func restoreOverlays() { if !overlaysHidden { for panel in Array(previewPanels.values)+Array(pins.values) { panel.orderFrontRegardless() } } }
     @objc func restoreLastCapture() { if let item = lastPreviewItem ?? library.items.first { showPreview(item) } }
