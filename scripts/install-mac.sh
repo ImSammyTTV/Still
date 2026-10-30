@@ -15,6 +15,9 @@ if pgrep -f '^/Applications/Still.app/Contents/MacOS/Still$' >/dev/null; then
     echo "Quit Still before installing the update." >&2
     exit 1
 fi
-ditto "$source_app" "$target_app"
+# Copy next to the old app, then swap, so the bundle is never a mix of two versions.
+rm -rf "$target_app.new"; ditto "$source_app" "$target_app.new"
+if [ -d "$target_app" ]; then mv "$target_app" "$target_app.old"; fi
+mv "$target_app.new" "$target_app" && rm -rf "$target_app.old"
 codesign --verify --strict "$target_app"
 echo "Installed Still with its existing signing identity."
