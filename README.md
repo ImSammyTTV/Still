@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="assets/icon.png" alt="" width="96">
-</p>
-
-<p align="center">
   <img src="assets/banner.svg" alt="Still: capture, annotate and share, on macOS, Windows and Linux" width="100%">
 </p>
 
@@ -99,7 +95,7 @@ global shortcuts, add your own shortcut that runs `still --capture=area`
 
 #### 📸 Capture anything
 Drag over an area, or **hold Space** and click a window. Full screen, timed captures, exact sizes and aspect-ratio lock
-are in the **Capture Bar** at the top of the screen. Open menus and Spotlight stay in the shot.
+are in the **Capture Bar** at the bottom of the screen. Open menus and Spotlight stay in the shot.
 
 </td>
 <td width="50%" valign="top">
