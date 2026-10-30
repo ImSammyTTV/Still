@@ -30,6 +30,7 @@ function init(data) {
   image.onload = () => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); };
   image.src = still.fileUrl(data.imagePath);
   refreshIcons();
+  window.focus();
 }
 // Window frames stay in physical pixels in config.rawWindows and are re-scaled whenever the page's size
 // or the display scaling changes, so hover outlines keep lining up with the real windows.

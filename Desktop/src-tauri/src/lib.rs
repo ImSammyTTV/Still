@@ -103,6 +103,30 @@ fn glass<'a>(builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>) -> Webvie
     #[allow(unreachable_code)] builder
 }
 
+/// Brings a capture overlay to the front with keyboard focus. Windows refuses focus to a process that didn't receive
+/// the last input, and a global shortcut counts as input for the app that was in front, so without this the overlay
+/// appears but Escape, Enter and the arrows keep going to that app. A synthetic tap of Alt earns the right to focus.
+fn take_focus(win: &WebviewWindow) {
+    #[cfg(windows)] {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{keybd_event, KEYEVENTF_KEYUP, VK_MENU};
+        unsafe { keybd_event(VK_MENU as u8, 0, 0, 0); keybd_event(VK_MENU as u8, 0, KEYEVENTF_KEYUP, 0); }
+    }
+    let _ = win.set_focus();
+}
+
+/// While an overlay is open, Escape cancels the capture even if the overlay never got keyboard focus.
+/// The shortcut lives only as long as the selection: end_selection removes it.
+fn watch_escape(app: &AppHandle) {
+    let _ = app.global_shortcut().on_shortcut("Escape", |app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed { return; }
+        let app = app.clone();
+        // Off the handler's thread, so removing the shortcut inside end_selection never waits on the handler itself.
+        std::thread::spawn(move || {
+            if st(&app).session.lock().unwrap().busy { end_selection(&app); } else { let _ = app.global_shortcut().unregister("Escape"); }
+        });
+    });
+}
+
 fn focus_or<F: FnOnce() -> Option<WebviewWindow>>(app: &AppHandle, label: &str, make: F) -> Option<WebviewWindow> {
     if let Some(w) = app.get_webview_window(label) { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); return Some(w); }
     let w = make()?;
@@ -288,6 +312,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
             jobs.into_iter().map(|job| job.join().unwrap_or_default()).collect()
         });
         let mut labels = Vec::new();
+        let mut focused: Option<WebviewWindow> = None;
         for (i, g) in grabs.iter().enumerate() {
             let file = temp.join(format!("still-overlay-{}-{}.jpg", std::process::id(), i));
             let _ = std::fs::write(&file, &pictures[i]);
@@ -314,16 +339,20 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
             };
             if let Ok(win) = built {
                 let _ = win.show();
-                if under_cursor { let _ = win.set_focus(); }
+                if under_cursor { take_focus(&win); focused = Some(win.clone()); }
                 labels.push(label);
             }
         }
+        // The page may not be ready for keys on the first try; a second attempt a moment later is cheap.
+        if let Some(win) = focused { std::thread::sleep(Duration::from_millis(60)); let _ = win.set_focus(); }
+        watch_escape(&app);
         let mut s = st(&app).session.lock().unwrap();
         s.grabs = grabs; s.overlays = labels;
     });
 }
 
 fn end_selection(app: &AppHandle) {
+    let _ = app.global_shortcut().unregister("Escape");
     let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.grabs.clear(); std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
     for i in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}.jpg", std::process::id(), i))); }
