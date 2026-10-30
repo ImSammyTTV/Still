@@ -15,8 +15,7 @@
         "enable": true,
         "scope": [
           "$APPDATA/**",
-          "$APPCONFIG/**",
-          "$TEMP/**",
+          "$APPCACHE/still-tmp/**",
           "$DESKTOP/**",
           "$PICTURE/**"
         ]

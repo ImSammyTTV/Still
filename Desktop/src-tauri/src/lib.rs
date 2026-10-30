@@ -38,6 +38,21 @@ struct Session {
 struct State { settings: Mutex<Settings>, library: Mutex<Library>, session: Mutex<Session> }
 
 fn st(app: &AppHandle) -> &State { app.state::<State>().inner() }
+
+/// Still's own temporary folder: screen grabs, OCR input and drag files go here rather than the shared
+/// system temp folder, readable only by this account (0700 on Linux), and emptied at start and exit.
+static PRIVATE_TEMP: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+fn private_temp() -> PathBuf { PRIVATE_TEMP.get().cloned().unwrap_or_else(std::env::temp_dir) }
+fn init_private_temp(cache: PathBuf) {
+    let dir = cache.join("still-tmp");
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)); }
+    let _ = PRIVATE_TEMP.set(dir);
+}
+fn clear_private_temp() {
+    if let Ok(entries) = std::fs::read_dir(private_temp()) { for e in entries.flatten() { let _ = std::fs::remove_file(e.path()); } }
+}
+
 fn setting(app: &AppHandle, path: &str) -> Value { st(app).settings.lock().unwrap().get(path).clone() }
 fn notify(app: &AppHandle, title: &str, body: &str) { let _ = app.notification().builder().title(title).body(body).show(); }
 fn broadcast(app: &AppHandle, event: &str, payload: Value) { let _ = app.emit(event, payload); }
@@ -158,7 +173,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
-        let temp = std::env::temp_dir();
+        let temp = private_temp();
         let mut labels = Vec::new();
         for (i, g) in grabs.iter().enumerate() {
             let file = temp.join(format!("still-overlay-{}-{}.jpg", std::process::id(), i));
@@ -192,7 +207,9 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
 }
 
 fn end_selection(app: &AppHandle) {
-    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; std::mem::take(&mut s.overlays) };
+    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.grabs.clear(); std::mem::take(&mut s.overlays) };
+    // The overlay's frozen pictures of every screen aren't needed once the selection is over.
+    for i in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}.jpg", std::process::id(), i))); }
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
     hide_floating(app, false);
 }
@@ -266,7 +283,7 @@ fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
 
 /// OCR runs in a hidden page (the engine is WebAssembly); it reports back through `ocr_result`.
 fn recognize_file(app: &AppHandle, image: &RgbaImage) {
-    let file = std::env::temp_dir().join(format!("still-ocr-{}.png", uuid::Uuid::new_v4().simple()));
+    let file = private_temp().join(format!("still-ocr-{}.png", uuid::Uuid::new_v4().simple()));
     let _ = std::fs::write(&file, capture::png(image));
     let label = format!("ocr-{}", uuid::Uuid::new_v4().simple());
     let _ = builder(app, &label, "ocr.html", json!({ "file": file })).title("Still OCR").inner_size(200.0, 100.0).skip_taskbar(true).build();
@@ -717,7 +734,7 @@ async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: 
 #[tauri::command]
 async fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
     let Some(bytes) = capture::data_url_bytes(&data_url) else { return };
-    let file = std::env::temp_dir().join(format!("{}.png", library::capture_name("Still")));
+    let file = private_temp().join(format!("{}.png", library::capture_name("Still")));
     if std::fs::write(&file, bytes).is_ok() { start_drag(&app, window, file); }
 }
 #[tauri::command]
@@ -733,7 +750,7 @@ async fn editor_open_image(app: AppHandle) -> Option<String> {
 }
 
 fn pin_image(app: &AppHandle, image: &RgbaImage) {
-    let file = std::env::temp_dir().join(format!("still-pin-{}.png", uuid::Uuid::new_v4().simple()));
+    let file = private_temp().join(format!("still-pin-{}.png", uuid::Uuid::new_v4().simple()));
     if std::fs::write(&file, capture::png(image)).is_err() { return; }
     let (w, h) = image.dimensions();
     let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
@@ -764,6 +781,7 @@ async fn capture_action(app: AppHandle, action: String) { run_action(&app, &acti
 #[tauri::command]
 async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
     let _ = window.close();
+    if let Ok(entries) = std::fs::read_dir(private_temp()) { for e in entries.flatten() { if e.file_name().to_string_lossy().starts_with("still-ocr-") { let _ = std::fs::remove_file(e.path()); } } }
     if let Some(dir) = st(&app).session.lock().unwrap().selftest.clone() { let _ = std::fs::write(dir.join("ocr.txt"), &text); return; }
     if let Some(e) = error { notify(&app, "Text recognition failed", &e); return; }
     let text = text.trim().to_string();
@@ -848,7 +866,7 @@ async fn cloud_upload(app: AppHandle, id: String) -> Result<String, String> { up
 #[tauri::command]
 async fn cloud_upload_data(app: AppHandle, data_url: String, title: String) -> Result<String, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
-    let file = std::env::temp_dir().join(format!("still-share-{}.png", uuid::Uuid::new_v4().simple()));
+    let file = private_temp().join(format!("still-share-{}.png", uuid::Uuid::new_v4().simple()));
     std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
     let result = share(&app, file.clone(), if title.is_empty() { library::capture_name("Still") } else { title }, String::new()).await;
     let _ = std::fs::remove_file(file);
@@ -966,6 +984,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            if let Ok(cache) = app.path().app_cache_dir() { init_private_temp(cache); }
+            clear_private_temp();
             let handle = app.handle().clone();
             let config = app.path().app_config_dir()?;
             let data = app.path().app_data_dir()?;
@@ -1012,5 +1032,9 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")
-        .run(|_app, event| if let tauri::RunEvent::ExitRequested { api, code, .. } = event { if code.is_none() { api.prevent_exit(); } });
+        .run(|_app, event| match event {
+            tauri::RunEvent::ExitRequested { api, code, .. } => if code.is_none() { api.prevent_exit(); },
+            tauri::RunEvent::Exit => clear_private_temp(),
+            _ => {}
+        });
 }
