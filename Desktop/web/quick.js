@@ -22,7 +22,7 @@ function schedule() {
     video.muted = true; $('#media').append(video, el('span', { class: 'badge' }, StillGeometry.formatDuration(item.duration || 0)));
     $('#card').addEventListener('mouseenter', () => video.play().catch(() => {}));
     $('#card').addEventListener('mouseleave', () => video.pause());
-    $('#edit').title = 'Open'; $('#edit').innerHTML = icon('play'); $('#pin').remove();
+    $('#edit').title = 'Trim and export'; $('#edit').innerHTML = icon('scissors'); $('#pin').remove();
   } else $('#media').append(el('img', { class: 'media', src: url, draggable: 'false' }));
   refreshIcons();
   if (params.get('sound') === '1') shutter();

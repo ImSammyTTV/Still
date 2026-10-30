@@ -11,6 +11,7 @@
     "allow-library-delete",
     "allow-library-drag",
     "allow-library-open",
+    "allow-library-play",
     "allow-library-pin",
     "allow-library-rename",
     "allow-library-reveal",

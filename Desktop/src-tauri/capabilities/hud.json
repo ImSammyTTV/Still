@@ -9,6 +9,7 @@
     "allow-recording-started",
     "allow-recording-cancel",
     "allow-recording-error",
-    "allow-recording-save"
+    "allow-recording-save",
+    "allow-recording-tick"
   ]
 }

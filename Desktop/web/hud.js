@@ -2,13 +2,15 @@
 // a canvas crops it to the selection, and the finished file goes back to Still.
 const opts = window.__STILL_PARAMS__ || {};
 let recorder, streams = [], chunks = [], cropTimer, audioContext, ext = 'webm';
-let start = 0, pausedAt = 0, pausedTotal = 0, paused = false, cancelled = false;
+let start = 0, pausedAt = 0, pausedTotal = 0, paused = false, cancelled = false, finishing = false, trayTime = '';
 refreshIcons();
 
 setInterval(() => {
   if (!start) return;
   const now = paused ? pausedAt : performance.now();
-  $('#time').textContent = StillGeometry.formatDuration((now - start - pausedTotal) / 1000);
+  const seconds = Math.max(0, Math.floor((now - start - pausedTotal) / 1000));
+  $('#time').textContent = StillGeometry.formatDuration(seconds);
+  if (trayTime !== `${seconds} ${paused}`) { trayTime = `${seconds} ${paused}`; still.send('recording:tick', seconds, paused); }
 }, 250);
 
 function pickType(format) {
@@ -63,6 +65,8 @@ async function begin() {
 
 function stop() { if (recorder && recorder.state !== 'inactive') recorder.stop(); else finish(); }
 async function finish() {
+  if (finishing) return; // Stop can arrive twice now that the tray offers it too.
+  finishing = true;
   clearInterval(cropTimer);
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); audioContext?.close();
   if (cancelled || !chunks.length) return still.invoke('recording:cancel');
