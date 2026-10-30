@@ -10,7 +10,10 @@ impl Cloud {
     pub fn new(endpoint: &str, token: &str) -> Result<Self, String> {
         if rustls::crypto::CryptoProvider::get_default().is_none() { let _ = rustls::crypto::ring::default_provider().install_default(); }
         let endpoint = endpoint.trim().trim_end_matches('/').to_string();
-        if !(endpoint.starts_with("https://") || endpoint.starts_with("http://127.0.0.1") || endpoint.starts_with("http://localhost")) {
+        // Parse the address rather than compare prefixes: http://localhost.example.com is not this computer.
+        let url = reqwest::Url::parse(&endpoint).map_err(|_| "That server address isn’t valid.".to_string())?;
+        let local = matches!(url.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]"));
+        if !(url.scheme() == "https" || (url.scheme() == "http" && local)) {
             return Err("Use an https:// server address (http is only allowed for this computer).".into());
         }
         if token.trim().is_empty() { return Err("Add your personal access token first.".into()); }

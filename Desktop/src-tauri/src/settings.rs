@@ -55,7 +55,9 @@ impl Settings {
         let file = dir.join("settings.json");
         let mut values = defaults();
         if let Ok(text) = fs::read_to_string(&file) {
-            if let Ok(saved) = serde_json::from_str::<Value>(&text) { merge(&mut values, &saved); }
+            // Anything but a JSON object (a damaged or hand-edited file) is ignored rather than replacing
+            // the settings and crashing later.
+            if let Ok(saved) = serde_json::from_str::<Value>(&text) { if saved.is_object() { merge(&mut values, &saved); } }
         }
         Settings { file, values }
     }

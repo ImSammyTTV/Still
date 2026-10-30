@@ -87,7 +87,7 @@ const pages = {
     ]),
     group('Selection', [
       select('Crosshair', 'crosshair', [['partial', 'Partial'], ['full', 'Full screen'], ['disabled', 'Off']]),
-      toggle('Show magnifier', 'magnifier'), toggle('Freeze screen while selecting', 'freezeScreen'), toggle('Remember last selection', 'rememberSelection')
+      toggle('Show magnifier', 'magnifier'), toggle('Remember last selection', 'rememberSelection')
     ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it.')
   ],
   Recording: () => [

@@ -32,58 +32,75 @@ pub fn capture_name(kind: &str) -> String {
 impl Library {
     pub fn open(dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
-        let items: Vec<Item> = fs::read_to_string(dir.join("library.json")).ok()
-            .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let index = dir.join("library.json");
+        let items: Vec<Item> = match fs::read_to_string(&index) {
+            Err(_) => Vec::new(),
+            Ok(text) => match serde_json::from_str(&text) {
+                Ok(items) => items,
+                // A damaged index is kept aside, never overwritten, and the list is rebuilt from the
+                // capture folders so nothing is orphaned.
+                Err(_) => { let _ = fs::rename(&index, dir.join(format!("library-damaged-{}.json", now_ms()))); rebuild(&dir) }
+            },
+        };
         let mut lib = Library { dir, items };
         lib.items.retain(|i| lib_file(&lib.dir, i).exists());
+        let _ = lib.save();
         lib
     }
-    fn save(&self) { let _ = fs::write(self.dir.join("library.json"), serde_json::to_string_pretty(&self.items).unwrap_or_default()); }
+    /// Writes the index to a temporary file and renames it over the old one, so a crash or a full disk
+    /// never leaves a half-written library.json.
+    fn save(&self) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(&self.items).map_err(|e| e.to_string())?;
+        let temp = self.dir.join("library.json.tmp");
+        fs::write(&temp, text).map_err(|e| e.to_string())?;
+        fs::rename(&temp, self.dir.join("library.json")).map_err(|e| e.to_string())
+    }
     pub fn folder(&self, item: &Item) -> PathBuf { self.dir.join(&item.id) }
     pub fn file(&self, item: &Item) -> PathBuf { lib_file(&self.dir, item) }
     pub fn original(&self, item: &Item) -> PathBuf { self.folder(item).join(&item.original_name) }
 
-    pub fn add(&mut self, bytes: &[u8], kind: &str, ext: &str, title: Option<String>, width: u32, height: u32) -> Item {
+    pub fn add(&mut self, bytes: &[u8], kind: &str, ext: &str, title: Option<String>, width: u32, height: u32) -> Result<Item, String> {
         let item = Item {
             id: uuid::Uuid::new_v4().to_string(), kind: kind.into(),
             title: title.unwrap_or_else(|| capture_name(if kind == "recording" { "Still Recording" } else { "Still" })),
             file_name: format!("capture.{ext}"), original_name: format!("original.{ext}"),
             created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0,
         };
-        let _ = fs::create_dir_all(self.folder(&item));
-        let _ = fs::write(self.file(&item), bytes);
-        if kind != "recording" { let _ = fs::write(self.original(&item), bytes); }
+        let written = fs::create_dir_all(self.folder(&item)).and_then(|_| fs::write(self.file(&item), bytes))
+            .and_then(|_| if kind != "recording" { fs::write(self.original(&item), bytes) } else { Ok(()) });
+        if let Err(e) = written { let _ = fs::remove_dir_all(self.folder(&item)); return Err(e.to_string()); }
         self.items.insert(0, item.clone());
-        self.save();
-        item
+        if let Err(e) = self.save() { self.items.remove(0); let _ = fs::remove_dir_all(self.folder(&item)); return Err(e); }
+        Ok(item)
     }
     pub fn get(&self, id: &str) -> Option<Item> { self.items.iter().find(|i| i.id == id).cloned() }
     pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Item)) -> Option<Item> {
         let item = self.items.iter_mut().find(|i| i.id == id)?;
         f(item);
         let out = item.clone();
-        self.save();
+        let _ = self.save();
         Some(out)
     }
-    pub fn replace_file(&mut self, id: &str, bytes: &[u8], ext: &str) -> Option<Item> {
-        let item = self.get(id)?;
+    pub fn replace_file(&mut self, id: &str, bytes: &[u8], ext: &str) -> Result<Item, String> {
+        let item = self.get(id).ok_or("That capture no longer exists.")?;
         let name = format!("capture.{ext}");
+        // Write the new file before removing the old one.
+        fs::write(self.folder(&item).join(&name), bytes).map_err(|e| e.to_string())?;
         if name != item.file_name { let _ = fs::remove_file(self.file(&item)); }
-        let updated = self.update(id, |i| { i.file_name = name.clone(); i.modified = Some(now_ms()); })?;
-        let _ = fs::write(self.file(&updated), bytes);
-        Some(updated)
+        self.update(id, |i| { i.file_name = name.clone(); i.modified = Some(now_ms()); }).ok_or_else(|| "That capture no longer exists.".to_string())
     }
     pub fn project(&self, id: &str) -> Option<Value> {
         let item = self.get(id)?;
         serde_json::from_str(&fs::read_to_string(self.folder(&item).join("project.json")).ok()?).ok()
     }
-    pub fn save_project(&self, id: &str, project: &Value) {
-        if let Some(item) = self.get(id) { let _ = fs::write(self.folder(&item).join("project.json"), project.to_string()); }
+    pub fn save_project(&self, id: &str, project: &Value) -> Result<(), String> {
+        let item = self.get(id).ok_or("That capture no longer exists.")?;
+        fs::write(self.folder(&item).join("project.json"), project.to_string()).map_err(|e| e.to_string())
     }
     pub fn remove(&mut self, id: &str) {
         if let Some(item) = self.get(id) { let _ = fs::remove_dir_all(self.folder(&item)); }
         self.items.retain(|i| i.id != id);
-        self.save();
+        let _ = self.save();
     }
     pub fn search(&self, query: &str, kind: &str) -> Vec<Item> {
         let q = query.trim().to_lowercase();
@@ -94,6 +111,23 @@ impl Library {
 
 fn lib_file(dir: &Path, item: &Item) -> PathBuf { dir.join(&item.id).join(&item.file_name) }
 
+/// The captures on disk, newest first, for when library.json can't be read.
+fn rebuild(dir: &Path) -> Vec<Item> {
+    let mut items: Vec<Item> = fs::read_dir(dir).into_iter().flatten().flatten().filter(|e| e.path().is_dir()).filter_map(|entry| {
+        let folder = entry.path();
+        let files: Vec<String> = fs::read_dir(&folder).ok()?.flatten().map(|f| f.file_name().to_string_lossy().to_string()).collect();
+        let file_name = files.iter().find(|f| f.starts_with("capture."))?.clone();
+        let ext = file_name.rsplit('.').next().unwrap_or("png").to_string();
+        let original_name = files.iter().find(|f| f.starts_with("original.")).cloned().unwrap_or_else(|| file_name.clone());
+        let created = entry.metadata().ok().and_then(|m| m.created().or_else(|_| m.modified()).ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or_else(now_ms);
+        Some(Item { id: entry.file_name().to_string_lossy().to_string(), kind: if ["mp4", "webm"].contains(&ext.as_str()) { "recording".into() } else { "screenshot".into() },
+            title: "Recovered capture".into(), file_name, original_name, created, modified: None, width: 0, height: 0, text: String::new(), duration: 0.0 })
+    }).collect();
+    items.sort_by(|a, b| b.created.cmp(&a.created));
+    items
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,9 +135,9 @@ mod tests {
     fn keeps_original_edits_and_project() {
         let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
         let mut lib = Library::open(dir.clone());
-        let item = lib.add(b"original", "screenshot", "png", Some("Bug report".into()), 10, 5);
-        lib.replace_file(&item.id, b"edited", "jpg");
-        lib.save_project(&item.id, &serde_json::json!({ "marks": [{ "type": "arrow" }] }));
+        let item = lib.add(b"original", "screenshot", "png", Some("Bug report".into()), 10, 5).unwrap();
+        lib.replace_file(&item.id, b"edited", "jpg").unwrap();
+        lib.save_project(&item.id, &serde_json::json!({ "marks": [{ "type": "arrow" }] })).unwrap();
         let again = Library::open(dir);
         let reloaded = again.get(&item.id).unwrap();
         assert_eq!(fs::read(again.original(&reloaded)).unwrap(), b"original");
@@ -114,12 +148,23 @@ mod tests {
     #[test]
     fn search_filters_kind_title_and_text() {
         let mut lib = Library::open(std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4())));
-        let a = lib.add(b"a", "screenshot", "png", Some("Invoice".into()), 1, 1);
+        let a = lib.add(b"a", "screenshot", "png", Some("Invoice".into()), 1, 1).unwrap();
         lib.update(&a.id, |i| i.text = "total due".into());
-        lib.add(b"b", "recording", "mp4", Some("Demo".into()), 0, 0);
+        lib.add(b"b", "recording", "mp4", Some("Demo".into()), 0, 0).unwrap();
         assert_eq!(lib.search("due", "all").len(), 1);
         assert_eq!(lib.search("", "recording")[0].title, "Demo");
         lib.remove(&a.id);
         assert_eq!(lib.items.len(), 1);
+    }
+    #[test]
+    fn damaged_index_is_kept_and_rebuilt() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let item = lib.add(b"png", "screenshot", "png", None, 1, 1).unwrap();
+        fs::write(dir.join("library.json"), "{ not json").unwrap();
+        let again = Library::open(dir.clone());
+        assert_eq!(again.items.len(), 1);
+        assert_eq!(again.items[0].id, item.id);
+        assert!(fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("library-damaged-")));
     }
 }

@@ -432,14 +432,16 @@ const project = () => ({ version: 1, ...doc });
 async function persist() {
   if (!itemId || !dirty) return;
   dirty = false;
-  await still.invoke('editor:save', itemId, flatten(), project());
+  // If saving fails, keep the edits marked unsaved and say so.
+  try { await still.invoke('editor:save', itemId, flatten(), project()); }
+  catch (e) { dirty = true; toast(`Couldn’t save your changes: ${e}`); throw e; }
 }
-function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 900); }
+function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => persist().catch(() => {}), 900); }
 addEventListener('beforeunload', () => { if (itemId && dirty) still.invoke('editor:save', itemId, flatten(), project()); });
 
 $('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:copy', flatten()); toast('Copied to clipboard'); };
-$('#save').onclick = async () => { finishTextEdit(); await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); };
-$('#saveAs').onclick = async () => { finishTextEdit(); const file = await still.invoke('editor:export', flatten(), document.title, true); if (file) toast('Saved'); };
+$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${e}`); } };
+$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', flatten(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${e}`); } };
 $('#pin').onclick = () => still.invoke('editor:pin', flatten());
 $('#upload').onclick = async () => { finishTextEdit(); toast('Uploading…'); try { await still.invoke('cloud:uploadData', flatten(), document.title); toast('Link copied'); } catch (error) { toast(String(error)); } };
 $('#ocr').onclick = () => recognize();

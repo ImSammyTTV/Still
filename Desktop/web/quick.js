@@ -33,7 +33,7 @@ $('#card').addEventListener('mouseenter', () => { hovering = true; clearTimeout(
 $('#card').addEventListener('mouseleave', () => { hovering = false; schedule(); });
 $('#close').onclick = () => leave();
 $('#copy').onclick = async () => { await still.invoke('library:copy', id); leave(); };
-$('#save').onclick = async () => { await still.invoke('library:save', id); leave(); };
+$('#save').onclick = async () => { try { await still.invoke('library:save', id); leave(); } catch (e) { toast(`Couldn’t save: ${e}`); } };
 $('#upload').onclick = async () => { $('#upload').disabled = true; try { await still.invoke('cloud:upload', id); leave(); } catch { $('#upload').disabled = false; } };
 $('#edit').onclick = () => item.kind === 'recording' ? (still.invoke('library:open', id), leave()) : still.send('preview:edit', id);
 $('#pin').onclick = () => { still.invoke('library:pin', id); leave(); };

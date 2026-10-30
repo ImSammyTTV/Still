@@ -270,11 +270,14 @@ fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
     if text { recognize_file(app, &image); return; }
     let (bytes, ext) = encode(app, &image);
     let (w, h) = image.dimensions();
-    let item = st(app).library.lock().unwrap().add(&bytes, "screenshot", ext, None, w, h);
     if setting(app, "afterCapture.copy").as_bool().unwrap_or(true) {
         if let Err(e) = copy_image(app, &image) { notify(app, "Couldn’t copy the screenshot", &e); }
     }
-    if setting(app, "afterCapture.save").as_bool().unwrap_or(false) { let _ = export_item(app, &item.id, None); }
+    let item = match st(app).library.lock().unwrap().add(&bytes, "screenshot", ext, None, w, h) {
+        Ok(item) => item,
+        Err(e) => { notify(app, "Couldn’t save the screenshot", &e); return; }
+    };
+    if setting(app, "afterCapture.save").as_bool().unwrap_or(false) { if let Err(e) = export_item(app, &item.id, None) { notify(app, "Couldn’t save to your folder", &e); } }
     if setting(app, "cloud.autoUpload").as_bool().unwrap_or(false) { let (a, id) = (app.clone(), item.id.clone()); tauri::async_runtime::spawn(async move { let _ = upload_item(&a, &id).await; }); }
     if setting(app, "afterCapture.annotate").as_bool().unwrap_or(false) { open_editor(app, Some(&item.id), false); }
     else if setting(app, "afterCapture.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, true); }
@@ -302,15 +305,15 @@ fn unique_path(folder: &Path, name: &str, ext: &str) -> PathBuf {
     while file.exists() { file = folder.join(format!("{clean} ({n}).{ext}")); n += 1; }
     file
 }
-fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Option<PathBuf> {
+fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<PathBuf, String> {
     let lib = st(app).library.lock().unwrap();
-    let item = lib.get(id)?;
+    let item = lib.get(id).ok_or("That capture no longer exists.")?;
     let src = lib.file(&item);
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
     drop(lib);
     let file = target.unwrap_or_else(|| unique_path(&export_folder(app), &item.title, &ext));
-    std::fs::copy(src, &file).ok()?;
-    Some(file)
+    std::fs::copy(src, &file).map_err(|e| format!("Couldn’t save to {}: {e}", file.display()))?;
+    Ok(file)
 }
 
 // ---- Recording ----------------------------------------------------------------------------------
@@ -331,6 +334,20 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64)
     build_tray_menu(app);
 }
 
+/// Windows can close without going through their normal IPC (Alt+F4, a crashed page). Put the app back in
+/// a working state when that happens instead of leaving capture or shortcuts stuck.
+fn window_gone(app: &AppHandle, label: &str) {
+    match label {
+        // Closing Settings while recording a shortcut would otherwise leave every shortcut unregistered.
+        "settings" => register_shortcuts(app),
+        "hud" => { if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); } }
+        _ if label.starts_with("overlay-") => {
+            let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
+            if !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
+        }
+        _ => {}
+    }
+}
 fn stop_recording_state(app: &AppHandle) {
     st(app).session.lock().unwrap().recording = None;
     if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
@@ -456,12 +473,14 @@ fn on_menu(app: &AppHandle, id: &str) {
 
 fn import_image(app: &AppHandle) {
     let app = app.clone();
-    app.clone().dialog().file().add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"]).pick_file(move |file| {
+    app.clone().dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).pick_file(move |file| {
         let Some(path) = file.and_then(|f| f.into_path().ok()) else { return };
         let Some(image) = std::fs::read(&path).ok().and_then(|b| capture::decode(&b)) else { notify(&app, "Still", "That file could not be opened as an image."); return };
         let (w, h) = image.dimensions();
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
-        let item = st(&app).library.lock().unwrap().add(&capture::png(&image), "screenshot", "png", title, w, h);
+        let item = match st(&app).library.lock().unwrap().add(&capture::png(&image), "screenshot", "png", title, w, h) {
+            Ok(item) => item, Err(e) => { notify(&app, "Couldn’t add the image", &e); return; }
+        };
         open_editor(&app, Some(&item.id), false);
         broadcast(&app, "library:changed", Value::Null);
     });
@@ -645,13 +664,13 @@ async fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
     copy_image(&app, &image)
 }
 #[tauri::command]
-async fn library_save(app: AppHandle, id: String) -> Option<String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
+async fn library_save(app: AppHandle, id: String) -> Result<String, String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
 #[tauri::command]
-async fn library_save_as(app: AppHandle, id: String) -> Option<String> {
-    let item = st(&app).library.lock().unwrap().get(&id)?;
-    let ext = Path::new(&item.file_name).extension()?.to_string_lossy().to_string();
-    let target = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{}.{ext}", item.title)).blocking_save_file()?.into_path().ok()?;
-    export_item(&app, &id, Some(target)).map(|p| p.to_string_lossy().to_string())
+async fn library_save_as(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let item = st(&app).library.lock().unwrap().get(&id).ok_or("That capture no longer exists.")?;
+    let ext = Path::new(&item.file_name).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "png".into());
+    let Some(target) = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{}.{ext}", item.title)).blocking_save_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
+    export_item(&app, &id, Some(target)).map(|p| Some(p.to_string_lossy().to_string()))
 }
 #[tauri::command]
 async fn library_reveal(app: AppHandle, id: String) {
@@ -664,7 +683,8 @@ fn reveal(file: &Path) {
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg("-R").arg(file).spawn(); }
 }
 fn open_path(file: &Path) {
-    #[cfg(windows)] { let _ = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(file).spawn(); }
+    // explorer opens the file with its default app without a shell, so "&" and other characters are safe.
+    #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(file).spawn(); }
     #[cfg(target_os = "linux")] { let _ = std::process::Command::new("xdg-open").arg(file).spawn(); }
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(file).spawn(); }
 }
@@ -705,9 +725,9 @@ async fn editor_save(app: AppHandle, id: String, data_url: String, project: Valu
     let image = capture::decode(&bytes).ok_or("Bad image")?;
     let (encoded, ext) = encode(&app, &image);
     let mut lib = st(&app).library.lock().unwrap();
-    let id = if !id.is_empty() && lib.get(&id).is_some() { lib.replace_file(&id, &encoded, ext); id }
-        else { let (w, h) = image.dimensions(); lib.add(&encoded, "screenshot", ext, None, w, h).id };
-    lib.save_project(&id, &project);
+    let id = if !id.is_empty() && lib.get(&id).is_some() { lib.replace_file(&id, &encoded, ext)?; id }
+        else { let (w, h) = image.dimensions(); lib.add(&encoded, "screenshot", ext, None, w, h)?.id };
+    lib.save_project(&id, &project)?;
     drop(lib);
     broadcast(&app, "library:changed", Value::Null);
     Ok(id)
@@ -718,18 +738,21 @@ async fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> {
     copy_image(&app, &image)
 }
 #[tauri::command]
-async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Option<String> {
-    let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b))?;
+async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> {
+    let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
     let (bytes, ext) = encode(&app, &image);
     let name = if name.is_empty() { library::capture_name("Still") } else { name };
     let mut file = unique_path(&export_folder(&app), &name, ext);
+    let failed = |e: std::io::Error, f: &Path| format!("Couldn’t save to {}: {e}", f.display());
     if save_as {
-        file = app.dialog().file().set_directory(export_folder(&app)).set_file_name(file.file_name()?.to_string_lossy().to_string())
-            .add_filter("PNG", &["png"]).add_filter("JPEG", &["jpg"]).blocking_save_file()?.into_path().ok()?;
+        let suggested = file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let Some(chosen) = app.dialog().file().set_directory(export_folder(&app)).set_file_name(suggested)
+            .add_filter("PNG", &["png"]).add_filter("JPEG", &["jpg"]).blocking_save_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
+        file = chosen;
         let jpg = file.extension().map(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")).unwrap_or(false);
-        std::fs::write(&file, if jpg { capture::jpeg(&image, 92) } else { capture::png(&image) }).ok()?;
-    } else { std::fs::write(&file, bytes).ok()?; }
-    Some(file.to_string_lossy().to_string())
+        std::fs::write(&file, if jpg { capture::jpeg(&image, 92) } else { capture::png(&image) }).map_err(|e| failed(e, &file))?;
+    } else { std::fs::write(&file, bytes).map_err(|e| failed(e, &file))?; }
+    Ok(Some(file.to_string_lossy().to_string()))
 }
 #[tauri::command]
 async fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
@@ -744,7 +767,7 @@ async fn editor_pin(app: AppHandle, data_url: String) {
 #[tauri::command]
 async fn editor_open_image(app: AppHandle) -> Option<String> {
     use base64::Engine;
-    let path = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]).blocking_pick_file()?.into_path().ok()?;
+    let path = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).blocking_pick_file()?.into_path().ok()?;
     let image = capture::decode(&std::fs::read(path).ok()?)?;
     Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(capture::png(&image))))
 }
@@ -803,9 +826,20 @@ fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<()
     let ext = if header("x-ext") == "mp4" { "mp4" } else { "webm" };
     let duration: f64 = header("x-duration").parse().unwrap_or(0.0);
     stop_recording_state(&app);
-    let item = st(&app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
+    let added = st(&app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
+    let item = match added {
+        Ok(item) => item,
+        Err(e) => {
+            // Never lose a recording: if the library can't take it, put it where the user can find it.
+            let rescue = unique_path(&app.path().desktop_dir().unwrap_or_else(|_| export_folder(&app)), &library::capture_name("Still Recording"), ext);
+            return match std::fs::write(&rescue, bytes) {
+                Ok(_) => { notify(&app, "Recording saved to your Desktop", &format!("Still’s library couldn’t store it ({e}), so it was saved as {}.", rescue.display())); Ok(()) }
+                Err(e2) => { notify(&app, "Your recording couldn’t be saved", &format!("{e}; {e2}")); Err(e2.to_string()) }
+            };
+        }
+    };
     st(&app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
-    if setting(&app, "afterRecording.save").as_bool().unwrap_or(true) { let _ = export_item(&app, &item.id, None); }
+    if setting(&app, "afterRecording.save").as_bool().unwrap_or(true) { if let Err(e) = export_item(&app, &item.id, None) { notify(&app, "Couldn’t save to your folder", &e); } }
     if setting(&app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(&app, &item, false); }
     broadcast(&app, "library:changed", Value::Null);
     Ok(())
@@ -818,8 +852,11 @@ fn cloud_token(app: &AppHandle) -> String { token_file(app).and_then(|f| std::fs
 fn save_token(app: &AppHandle, token: &str) -> Result<(), String> {
     let file = token_file(app).ok_or("No settings folder")?;
     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
-    std::fs::write(&file, token).map_err(|e| e.to_string())?;
-    // Only your account can read the token.
+    // Only your account can read the token, from the moment the file exists.
+    let mut options = std::fs::OpenOptions::new(); options.write(true).create(true).truncate(true);
+    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    use std::io::Write;
+    options.open(&file).and_then(|mut f| f.write_all(token.as_bytes())).map_err(|e| e.to_string())?;
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)); }
     Ok(())
 }
@@ -849,7 +886,9 @@ async fn upload_item(app: &AppHandle, id: &str) -> Result<String, String> {
 async fn cloud_get(app: AppHandle) -> Value { json!({ "endpoint": setting(&app, "cloud.endpoint"), "hasToken": !cloud_token(&app).is_empty() }) }
 #[tauri::command]
 async fn cloud_connect(app: AppHandle, endpoint: String, token: String) -> Result<String, String> {
-    let token = if token.trim().is_empty() { cloud_token(&app) } else { token };
+    // Reuse the saved token only for the server it was saved for, never send it to a new address.
+    let saved_endpoint = setting(&app, "cloud.endpoint").as_str().unwrap_or("").trim_end_matches('/').to_string();
+    let token = if token.trim().is_empty() && endpoint.trim().trim_end_matches('/') == saved_endpoint { cloud_token(&app) } else { token };
     let name = cloud::Cloud::new(&endpoint, &token)?.test().await?;
     save_token(&app, token.trim())?;
     let endpoint = endpoint.trim().trim_end_matches('/').to_string();
@@ -975,6 +1014,7 @@ fn run_args(app: &AppHandle, args: &[String]) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|window, event| if let tauri::WindowEvent::Destroyed = event { window_gone(window.app_handle(), window.label()); })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| { if !run_args(app, &args) { open_settings(app, None); } }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
