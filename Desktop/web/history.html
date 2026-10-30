@@ -5,43 +5,36 @@
 <title>Capture History</title>
 <link rel="stylesheet" href="style.css">
 <style>
-  body { display: grid; grid-template-rows: 44px 1fr; }
-  .titlebar { border-bottom: 1px solid var(--border); }
-  h1 { font-size: 13px; font-weight: 600; margin: 0 8px 0 4px; }
+  body { display: grid; grid-template-rows: 86px 1fr; }
+  .titlebar { height: 86px; padding: 0 var(--space-7); gap: var(--space-5); border-bottom: 1px solid var(--border); }
+  h1 { font-size: var(--text-2xl); margin: 0 8px 0 4px; }
   .search { width: 220px; margin-left: auto; }
   /* Rows and cards keep their natural height: in Chromium (Windows' WebView2) a card with overflow: hidden
      could otherwise shrink to nothing when there are many captures. */
-  .grid { overflow: auto; padding: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); grid-auto-rows: max-content; gap: 16px; align-content: start; min-height: 0; }
+  .grid { overflow: auto; padding: 26px var(--space-7); display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); grid-auto-rows: max-content; gap: var(--space-6); align-content: start; min-height: 0; }
   .tile > * { flex: none; }
-  .tile { border-radius: 12px; background: var(--bg-elevated); border: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
+  .tile { border-radius: var(--radius); background: var(--bg-elevated); border: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 6px 16px rgba(0,0,0,.08); }
   .tile:hover { border-color: var(--accent); }
   .thumb { position: relative; aspect-ratio: 16 / 10; background: var(--canvas); display: grid; place-items: center; overflow: hidden; }
   .thumb img, .thumb video { max-width: 100%; max-height: 100%; object-fit: contain; display: block; -webkit-user-drag: none; }
-  .thumb .kind { position: absolute; left: 7px; top: 7px; padding: 2px 7px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; font-size: 10px; display: flex; gap: 4px; align-items: center; }
+  .thumb .kind { position: absolute; left: 7px; top: 7px; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); font-size: var(--text-xs); display: flex; gap: 4px; align-items: center; }
   .thumb .kind svg { width: 11px; height: 11px; }
   .tools { position: absolute; right: 6px; top: 6px; display: none; gap: 4px; }
   .tile:hover .tools { display: flex; }
-  .tools button { width: 26px; height: 26px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgba(255,255,255,.92); color: #1d1d1f; }
+  .tools button { width: 26px; height: 26px; border-radius: 50%; border: 0; display: grid; place-items: center; background: var(--bg-elevated); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
   .tools svg { width: 13px; height: 13px; }
-  .meta { padding: 9px 11px; display: grid; gap: 2px; }
-  .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; outline: none; border-radius: 4px; }
+  .meta { padding: var(--space-4); display: grid; gap: 2px; }
+  .title { font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; outline: none; border-radius: var(--radius-xs); }
   .title[contenteditable="true"] { background: var(--surface); padding: 0 3px; }
-  .sub { font-size: 11px; color: var(--text-2); }
+  .sub { font-size: var(--text-xs); color: var(--text-2); }
   .empty { grid-column: 1 / -1; display: grid; place-items: center; gap: 10px; padding: 80px 0; color: var(--text-2); text-align: center; }
   .empty svg { width: 40px; height: 40px; opacity: .5; }
 
-  body { grid-template-rows: 86px 1fr; }
-  .titlebar { height: 86px; padding: 0 28px; gap: 20px; }
-  h1 { font-size: 28px; }
-  .grid { padding: 26px 28px; gap: 24px; }
-  .tile { border-radius: var(--radius); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 6px 16px rgba(0,0,0,.08); }
-  h1 { font-size: 22px; }
-  .meta { padding: 15px; }
 </style>
 </head>
 <body class="glass">
 <div class="titlebar">
-  <h1>The collection</h1>
+  <h1>Capture History</h1>
   <div class="segmented" id="filter">
     <button data-kind="all" class="active">All</button>
     <button data-kind="screenshot">Screenshots</button>

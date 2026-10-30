@@ -17,6 +17,10 @@ func defaulted<T>(_ binding: Binding<T?>, _ fallback: T) -> Binding<T> { Binding
 enum Studio {
     /// Graphite: a neutral accent that reads well in light and dark mode.
     static let accent = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "98989D") : NSColor(hex: "6E6E73") })
+    /// Text and glyphs drawn on `accent`. The accent lightens in dark mode, so its text darkens to keep contrast.
+    static let onAccent = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "171719") : .white })
+    /// Corner radii shared with the Windows and Linux app: controls, cards and floating panels.
+    enum Radius { static let control: CGFloat = 8; static let card: CGFloat = 12; static let panel: CGFloat = 16 }
     // Slightly translucent, so the window's glass material (see `glass`) shows through.
     static let paper = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "1C1C1E").withAlphaComponent(0.3) : NSColor(hex: "F6F6F8").withAlphaComponent(0.35) })
     static let surface = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "3A3A3C").withAlphaComponent(0.45) : NSColor(hex: "FFFFFF").withAlphaComponent(0.55) })

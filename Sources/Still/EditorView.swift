@@ -115,8 +115,8 @@ struct EditorView: View {
                 ForEach(tools) { tool in
                     Button { model.tool = tool; model.selectedID = nil } label: {
                         Label(tool.title, systemImage: tool.symbol).font(.system(size: 11, weight: .medium)).frame(width: 116, height: 32, alignment: .leading).padding(.leading, 9)
-                            .foregroundStyle(model.tool == tool ? Color.white : Color.primary)
-                            .background(model.tool == tool ? Studio.accent : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .foregroundStyle(model.tool == tool ? Studio.onAccent : Color.primary)
+                            .background(model.tool == tool ? Studio.accent : .clear, in: RoundedRectangle(cornerRadius: Studio.Radius.control, style: .continuous))
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain).help("\(tool.title) (\(tool.key.uppercased()))").accessibilityLabel(tool.title).accessibilityAddTraits(model.tool == tool ? .isSelected : [])
                 }

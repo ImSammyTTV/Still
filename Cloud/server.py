@@ -60,7 +60,7 @@ class Store:
         self.brand = os.environ.get("STILL_BRAND", "Still Cloud")[:80]
         self.accent = os.environ.get("STILL_ACCENT", "#6e6e73")
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", self.accent):
-            self.accent = "#087cff"
+            self.accent = "#6e6e73"
         self.secret = self._secret("session-secret")
         self.scim_token = os.environ.get("STILL_SCIM_TOKEN", "")
         # Behind the bundled Caddy proxy every request comes from the proxy's address; trust its
