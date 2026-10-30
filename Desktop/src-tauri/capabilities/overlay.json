@@ -12,6 +12,7 @@
     "allow-overlay-timer",
     "allow-overlay-purpose",
     "allow-overlay-window-mode",
-    "allow-overlay-pointer"
+    "allow-overlay-pointer",
+    "allow-overlay-ready"
   ]
 }

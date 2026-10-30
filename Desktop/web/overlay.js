@@ -8,6 +8,7 @@ const bounds = () => ({ x: 0, y: 0, w: config.width, h: config.height });
 // The frozen screen and window frames arrive in physical pixels; the page works in CSS pixels.
 let pixelScale = 1;
 function init(data) {
+  if (data.warm) still.send('overlay:ready');
   config = { ...data, rawWindows: data.windows || [], width: innerWidth, height: innerHeight };
   scaleWindows();
   purpose = data.purpose === 'record' ? 'record' : data.purpose;
@@ -25,7 +26,9 @@ function scaleWindows() {
   config.windows = (config.rawWindows || []).map((w) => ({ ...w, x: w.x / pixelScale, y: w.y / pixelScale, w: w.w / pixelScale, h: w.h / pixelScale }));
 }
 addEventListener('resize', () => { if (config) { config.width = innerWidth; config.height = innerHeight; scaleWindows(); } });
-init(window.__STILL_PARAMS__.init);
+// A pre-warmed page waits hidden until a capture hands it its screen; the app falls back to a fresh page if it doesn't answer.
+if (window.__STILL_PARAMS__.init) init(window.__STILL_PARAMS__.init);
+else { refreshIcons(); still.on('overlay:init', init, () => still.send('overlay:ready')); }
 still.on('overlay:purpose', (next) => { purpose = next; if (!StillCaptureInput.allowsWindowSelection(next)) setWindowMode(false, true); updateBar(); });
 still.on('overlay:windowMode', (on) => setWindowMode(on, true));
 still.on('overlay:clear', () => { if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
@@ -38,6 +41,7 @@ function resize() {
 addEventListener('resize', () => { if (config) { resize(); draw(); } });
 
 function setWindowMode(on, fromOthers = false) {
+  if (!config) return;
   if (on && (!config.canSelectWindows || !StillCaptureInput.allowsWindowSelection(purpose))) {
     if (on && !fromOthers) toastWindowUnavailable();
     on = false;

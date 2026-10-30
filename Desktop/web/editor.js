@@ -592,20 +592,29 @@ scroller.addEventListener('wheel', (e) => {
 
 // ---- Output -------------------------------------------------------------------------------------
 
-function flatten() {
+function flattened() {
   const prevTool = tool; tool = tool === 'crop' ? 'select' : tool;
   const out = document.createElement('canvas'), L = layout(false);
   out.width = L.w; out.height = L.h;
   const prevSel = selected; selected = null; render(out.getContext('2d'), { handles: false }); selected = prevSel; tool = prevTool;
-  return out.toDataURL('image/png');
+  return out;
 }
+const flatten = () => flattened().toDataURL('image/png');
+// The same picture, encoded in pieces rather than all at once: autosave happens while someone is still drawing.
+const flattenInBackground = () => new Promise((done, failed) => flattened().toBlob((blob) => {
+  if (!blob) return failed(new Error('The image is too large'));
+  const reader = new FileReader(); reader.onload = () => done(reader.result); reader.onerror = () => failed(reader.error); reader.readAsDataURL(blob);
+}, 'image/png'));
 const project = () => M.projectFile(doc, assets);
-let captureGone = false;
-async function persist() {
+let captureGone = false, saving = Promise.resolve();
+// One save at a time, so a slower older save can never land on top of a newer one.
+function persist() { saving = saving.catch(() => {}).then(saveEdits); return saving; }
+async function saveEdits() {
   if (!itemId || !dirty || captureGone) return;
   dirty = false;
   // If saving fails, keep the edits marked unsaved and say so.
-  try { await still.invoke('editor:save', itemId, flatten(), project()); }
+  // Encoding takes a moment and more edits can land meanwhile, so the project is copied now to match the picture.
+  try { const edits = JSON.parse(JSON.stringify(project())); await still.invoke('editor:save', itemId, await flattenInBackground(), edits); }
   catch (e) {
     dirty = true;
     // The capture was deleted from History: stop autosaving rather than bring it back.

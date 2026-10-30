@@ -1,17 +1,19 @@
 let kind = 'all';
+const images = new Map();
 const sizeLabel = (item) => item.kind === 'recording' ? StillGeometry.formatDuration(item.duration || 0) : item.width ? `${item.width} × ${item.height}` : '';
 const when = (time) => new Date(time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 async function load() {
   const items = await still.invoke('library:list', { query: $('#search').value, kind });
-  const grid = $('#grid'); grid.replaceChildren();
+  const grid = $('#grid'); grid.replaceChildren(); images.clear();
   if (!items.length) {
     grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No captures match your search.' : 'Your captures will appear here.'}</div>` }));
     return refreshIcons();
   }
   for (const item of items) {
     const url = `${still.fileUrl(item.path)}?t=${item.modified || item.created}`;
-    const media = item.kind === 'recording' ? el('video', { src: url, muted: true, preload: 'metadata' }) : el('img', { src: url, loading: 'lazy', draggable: 'false' });
+    const media = item.kind === 'recording' ? el('video', { src: url, muted: true, preload: 'metadata' }) : el('img', { src: item.thumb ? `${still.fileUrl(item.thumb)}?t=${item.modified || item.created}` : url, loading: 'lazy', decoding: 'async', draggable: 'false' });
+    if (item.kind !== 'recording') images.set(item.id, media);
     if (item.kind === 'recording') { media.muted = true; media.addEventListener('mouseenter', () => media.play().catch(() => {})); media.addEventListener('mouseleave', () => { media.pause(); media.currentTime = 0; }); }
     const title = el('div', { class: 'title', title: 'Double-click to rename' }, item.title);
     title.addEventListener('dblclick', (e) => { e.stopPropagation(); title.contentEditable = 'true'; title.focus(); document.getSelection().selectAllChildren(title); });
@@ -55,4 +57,5 @@ $('#filter').addEventListener('click', (e) => {
 let searchTimer;
 $('#search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
 still.on('library:changed', load);
+still.on('library:thumb', ({ id, thumb }) => { const image = images.get(id); if (image) image.src = `${still.fileUrl(thumb)}?t=${Date.now()}`; });
 applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); load(); });

@@ -1,6 +1,8 @@
-use image::{codecs::jpeg::JpegEncoder, DynamicImage, ImageFormat, RgbaImage};
+use image::buffer::ConvertBuffer;
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::{ExtendedColorType, ImageEncoder, RgbImage, RgbaImage};
 use serde::Serialize;
-use std::io::Cursor;
 use xcap::Monitor;
 #[cfg(not(windows))]
 use xcap::Window;
@@ -110,17 +112,39 @@ pub fn crop(image: &RgbaImage, x: f64, y: f64, w: f64, h: f64) -> RgbaImage {
     image::imageops::crop_imm(image, x0, y0, w, h).to_image()
 }
 
+/// Lossless. One fixed filter is about four times faster than choosing per row, for files about 10% larger.
 pub fn png(image: &RgbaImage) -> Vec<u8> {
-    let mut out = Cursor::new(Vec::new());
-    let _ = DynamicImage::ImageRgba8(image.clone()).write_to(&mut out, ImageFormat::Png);
-    out.into_inner()
+    let mut out = Vec::new();
+    let (w, h) = image.dimensions();
+    let _ = PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::Sub).write_image(image.as_raw(), w, h, ExtendedColorType::Rgba8);
+    out
 }
 
 pub fn jpeg(image: &RgbaImage, quality: u8) -> Vec<u8> {
     let mut out = Vec::new();
-    let rgb = DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+    let rgb: RgbImage = image.convert();
     let _ = JpegEncoder::new_with_quality(&mut out, quality).encode_image(&rgb);
     out
+}
+
+/// The width and height a PNG declares, read without decoding it. None if the bytes aren't a PNG.
+pub fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 24 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") { return None; }
+    Some((u32::from_be_bytes(bytes[16..20].try_into().ok()?), u32::from_be_bytes(bytes[20..24].try_into().ok()?)))
+}
+
+/// History's cards and the Floating Preview are at most about 800 device pixels across.
+pub const THUMB_MAX: u32 = 800;
+
+/// A small copy of a capture for showing in a list, never for saving: returns the bytes and their extension.
+/// Screens become a light JPEG. Anything transparent, or too small to shrink, stays a lossless PNG.
+pub fn thumbnail(image: &RgbaImage) -> (Vec<u8>, &'static str) {
+    let (w, h) = image.dimensions();
+    let longest = w.max(h);
+    if longest <= THUMB_MAX { return (png(image), "png"); }
+    let scaled = |side: u32| ((side as u64 * THUMB_MAX as u64 / longest as u64) as u32).max(1);
+    let small = image::imageops::thumbnail(image, scaled(w), scaled(h));
+    if small.pixels().all(|p| p[3] == 255) { (jpeg(&small, 80), "jpg") } else { (png(&small), "png") }
 }
 
 pub fn decode(bytes: &[u8]) -> Option<RgbaImage> { image::load_from_memory(bytes).ok().map(|i| i.to_rgba8()) }
@@ -145,6 +169,86 @@ mod tests {
         let img = RgbaImage::from_pixel(8, 4, image::Rgba([255, 0, 0, 255]));
         assert_eq!(decode(&png(&img)).unwrap().dimensions(), (8, 4));
         assert_eq!(decode(&jpeg(&img, 90)).unwrap().dimensions(), (8, 4));
+    }
+    #[test]
+    fn png_is_lossless_and_keeps_transparency() {
+        let mut img = RgbaImage::new(64, 32);
+        for (x, y, p) in img.enumerate_pixels_mut() { *p = image::Rgba([(x * 3) as u8, (y * 7) as u8, (x ^ y) as u8, (x + y) as u8]); }
+        assert_eq!(decode(&png(&img)).unwrap(), img);
+    }
+    #[test]
+    fn png_size_reads_the_header() {
+        assert_eq!(png_size(&png(&RgbaImage::new(1234, 56))), Some((1234, 56)));
+        assert_eq!(png_size(&jpeg(&RgbaImage::new(8, 8), 90)), None);
+        assert_eq!(png_size(b"\x89PNG"), None);
+    }
+    #[test]
+    fn thumbnails_shrink_to_fit_and_keep_shape() {
+        let (bytes, ext) = thumbnail(&RgbaImage::from_pixel(3840, 2160, image::Rgba([10, 20, 30, 255])));
+        assert_eq!((ext, decode(&bytes).unwrap().dimensions()), ("jpg", (800, 450)));
+        let (bytes, _) = thumbnail(&RgbaImage::from_pixel(100, 6000, image::Rgba([10, 20, 30, 255])));
+        assert_eq!(decode(&bytes).unwrap().dimensions(), (13, 800));
+        let (bytes, _) = thumbnail(&RgbaImage::from_pixel(6000, 1, image::Rgba([10, 20, 30, 255])));
+        assert_eq!(decode(&bytes).unwrap().dimensions(), (800, 1));
+    }
+    #[test]
+    fn thumbnails_keep_transparency_and_small_pictures_exact() {
+        let (bytes, ext) = thumbnail(&RgbaImage::from_pixel(2000, 1000, image::Rgba([10, 20, 30, 128])));
+        assert_eq!(ext, "png");
+        assert_eq!(decode(&bytes).unwrap().get_pixel(5, 5)[3], 128);
+        let small = RgbaImage::from_pixel(300, 200, image::Rgba([1, 2, 3, 255]));
+        let (bytes, ext) = thumbnail(&small);
+        assert_eq!((ext, decode(&bytes).unwrap()), ("png", small));
+    }
+    /// Screen-like test picture: grainy wallpaper, a window of text-like marks and a photo-like panel.
+    fn screen(w: u32, h: u32) -> RgbaImage {
+        let mut seed = 0x9E3779B9u32;
+        let mut rnd = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; seed };
+        let mut img = RgbaImage::new(w, h);
+        for y in 0..h { for x in 0..w {
+            let (fx, fy, n) = (x as f32 / w as f32, y as f32 / h as f32, (rnd() % 7) as u8);
+            img.put_pixel(x, y, image::Rgba([(30.0 + 60.0 * fx) as u8 + n, (40.0 + 80.0 * fy) as u8 + n, (90.0 + 90.0 * (1.0 - fx)) as u8 + n, 255]));
+        } }
+        let (ww, wh) = (w * 6 / 10, h * 7 / 10);
+        for y in h / 10..h / 10 + wh { for x in w / 12..w / 12 + ww { img.put_pixel(x, y, image::Rgba([250, 250, 252, 255])); } }
+        let (mut y, line, cw) = (h / 10 + h / 20, (h / 54).max(10), (w / 240).max(4));
+        while y + line < h / 10 + wh {
+            let mut x = w / 12 + 24;
+            while x + cw < w / 12 + ww - 24 {
+                if rnd() % 6 == 0 { x += cw * 2; continue; }
+                let g = (rnd() % 90) as u8 + 10;
+                for gy in 0..line * 2 / 3 { for gx in 0..cw - 1 { if (gx * 3 + gy * 5 + rnd() % 3) % 4 != 0 { img.put_pixel(x + gx, y + gy, image::Rgba([g, g, g + 20, 255])); } } }
+                x += cw;
+            }
+            y += line + line / 2;
+        }
+        for y in h / 8..h / 8 + h / 3 { for x in w * 3 / 4 - w / 16..(w - w / 16).min(w) {
+            let (v, n) = (((x as f32 / 37.0).sin() * (y as f32 / 23.0).cos() * 80.0 + 120.0) as u8, (rnd() % 24) as u8);
+            img.put_pixel(x, y, image::Rgba([v.saturating_add(n), v / 2 + n, 255 - v / 2 - n, 255]));
+        } }
+        img
+    }
+    /// cargo test --lib --release -- --ignored --nocapture encode_timings
+    #[test]
+    #[ignore]
+    fn encode_timings() {
+        fn best<T>(name: &str, mut f: impl FnMut() -> T) -> T {
+            let (mut fastest, mut out) = (f64::MAX, None);
+            for _ in 0..5 { let t = std::time::Instant::now(); out = Some(std::hint::black_box(f())); fastest = fastest.min(t.elapsed().as_secs_f64() * 1000.0); }
+            println!("  {name:18} {fastest:7.1} ms");
+            out.unwrap()
+        }
+        for (w, h) in [(1920, 1080), (2560, 1440), (3840, 2160)] {
+            println!("{w}x{h}");
+            let img = screen(w, h);
+            let encoded = best("png", || png(&img));
+            println!("  png size           {:7} KB", encoded.len() / 1024);
+            assert_eq!(decode(&encoded).unwrap(), img);
+            best("png decode", || decode(&encoded));
+            best("jpeg q90", || jpeg(&img, 90));
+            let (small, ext) = best("thumbnail", || thumbnail(&img));
+            println!("  thumbnail size     {:7} KB {ext}", small.len() / 1024);
+        }
     }
     #[test]
     fn data_urls_decode() {
