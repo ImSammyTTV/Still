@@ -12,6 +12,8 @@
     "allow-recording-finished",
     "allow-recording-cancel",
     "allow-recording-error",
+    "allow-recording-chunk",
+    "allow-recording-reset",
     "allow-recording-save",
     "allow-recording-tick"
   ]

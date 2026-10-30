@@ -1,23 +1,33 @@
 // The recording HUD also does the recording: the system web engine captures the screen,
 // a canvas crops it to the selection, and the finished file goes back to Still.
 const opts = window.__STILL_PARAMS__ || {};
-let recorder, streams = [], chunks = [], cropTimer, audioContext, ext = 'webm';
-let start = 0, pausedAt = 0, pausedTotal = 0, paused = false, cancelled = false, finishing = false, trayTime = '';
+let recorder, streams = [], cropTimer, audioContext, ext = 'webm';
+let start = 0, pausedAt = 0, pausedTotal = 0, paused = false, cancelled = false, finishing = false, finishedAt = 0, trayTime = '';
 let media = null, triedWebm = false, failure = '';
+// Each second of video goes to Still as soon as the recorder hands it over, in order, and Still appends it to a
+// file. Nothing waits in memory for the end, so stopping is quick however long the recording ran, and a
+// recording that is interrupted still exists on disk up to its last second.
+let written = 0, writes = Promise.resolve();
+const base64 = (blob) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.onerror = () => reject(reader.error || new Error('The recorded data couldn’t be read.')); reader.readAsDataURL(blob); });
+function queueChunk(blob) {
+  writes = writes.then(async () => { await still.invoke('recording:chunk', await base64(blob), ext); written += blob.size; })
+    .catch((error) => { failure = failure || (error && error.message) || String(error); });
+}
+function discardWritten() { written = 0; writes = writes.then(() => still.invoke('recording:reset')).catch(() => {}); }
 
 // The recorder can fail after it has started (most often an MP4 encoder that this machine doesn't really have).
 // Without a handler that failure was silent: the stop produced no data and the HUD quietly cancelled.
 function startRecorder(type) {
   ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
   recorder = new MediaRecorder(media, { mimeType: type || undefined, videoBitsPerSecond: 12_000_000 });
-  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.ondataavailable = (e) => { if (e.data.size) queueChunk(e.data); };
   recorder.onstop = finish;
   recorder.onerror = (e) => {
     const reason = (e.error && (e.error.message || e.error.name)) || 'The video encoder stopped unexpectedly.';
-    if (!chunks.length && ext === 'mp4' && !triedWebm) {
+    if (!written && ext === 'mp4' && !triedWebm) {
       // Nothing recorded yet, so start over in WebM, which every engine can encode. The failed recorder's own
       // stop event follows this error; ignoring it keeps the two recorders from both finishing.
-      triedWebm = true; recorder.onstop = null; recorder.ondataavailable = null;
+      triedWebm = true; recorder.onstop = null; recorder.ondataavailable = null; discardWritten();
       setTimeout(() => { startRecorder(pickType('webm')); recorder.start(1000); start = performance.now(); pausedTotal = 0; toast('MP4 isn’t available here, so this is recording as WebM'); }, 0);
       return;
     }
@@ -88,22 +98,24 @@ async function begin() {
 
 function stop() {
   still.send('recording:listen', false); // Keys stop here, not when the file has finished saving.
+  // A second Stop while saving has stalled is a way out, never a dead button: Still keeps what was written.
+  if (finishing) { if (finishedAt && performance.now() - finishedAt > 5000) still.invoke('recording:error', failure || 'Saving didn’t finish.', 'save').catch(() => {}); return; }
   if (recorder && recorder.state !== 'inactive') recorder.stop(); else finish();
 }
 async function finish() {
   if (finishing) return; // Stop can arrive twice now that the tray offers it too.
-  finishing = true;
+  finishing = true; finishedAt = performance.now();
   still.send('recording:finished'); // After the recorder, so the bubble doesn't vanish in the last frames.
   clearInterval(cropTimer);
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); audioContext?.close();
-  if (cancelled) return still.invoke('recording:cancel');
-  // No data is a failure to report, never something to drop quietly.
-  if (!chunks.length) return still.invoke('recording:error', failure || 'No video was captured. Try the WebM format in Settings → Recording.', 'save');
+  if (cancelled) { await writes; return still.invoke('recording:cancel'); }
   $('#time').textContent = 'Saving…';
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
+  await writes; // The last second is usually still on its way.
+  // No data is a failure to report, never something to drop quietly.
+  if (!written) return still.invoke('recording:error', failure || 'No video was captured. Try the WebM format in Settings → Recording.', 'save');
   try {
-    const bytes = new Uint8Array(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer());
-    await still.raw('recording_save', bytes, { 'x-ext': ext, 'x-duration': String(duration) });
+    await still.invoke('recording:save', ext, duration);
   } catch (error) {
     // The HUD would otherwise sit on "Saving…" for good with nothing to show for the recording.
     await still.invoke('recording:error', `${failure ? failure + ' ' : ''}${error && error.message ? error.message : String(error)}`, 'save');
@@ -125,7 +137,7 @@ function showPaused() {
 $('#stop').onclick = () => stop();
 $('#pause').onclick = () => togglePause();
 $('#cancel').onclick = () => { cancelled = true; stop(); };
-$('#restart').onclick = () => { if (!recorder) return; chunks = []; recorder.stop(); recorder.onstop = () => { chunks = []; recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
+$('#restart').onclick = () => { if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
 if (opts.stopShortcut) still.invoke('shortcut:label', opts.stopShortcut).then((label) => { const stop = $('#stop'); stop.title = `Stop and save (${label})`; stop.setAttribute('aria-label', stop.title); }).catch(() => {});
 begin().catch((error) => still.invoke('recording:error', error.message || String(error)));
