@@ -48,6 +48,10 @@ struct Session {
     previews: Vec<(String, String)>,
     recording: Option<Value>,
     recorded: Option<Recorded>,
+    /// The container of the recording being written chunk by chunk, and when it started, so that a recording whose
+    /// controls stop answering can still be saved with a sensible name and duration.
+    recording_ext: String,
+    recording_began: Option<std::time::Instant>,
     marks: Option<marks::Options>,
     listener: Option<marks::Listener>,
     failed_shortcuts: Vec<String>,
@@ -484,13 +488,15 @@ fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<Pat
 fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64, selected_window: bool) {
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
-    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec });
+    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
+        "stopShortcut": setting(app, "shortcuts")["record"] });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     {
         let mut s = st(app).session.lock().unwrap();
         s.recording = Some(params.clone());
         s.recorded = Some(Recorded { area: marks::Area { x: grab.x as f64 + x, y: grab.y as f64 + y, w, h }, display: marks::Area { x: grab.x as f64, y: grab.y as f64, w: iw as f64, h: ih as f64 }, scale });
     }
+    let _ = std::fs::remove_file(recording_part(app)); // Never let a previous recording's leftovers lead this one.
     let built = builder(app, "hud", "hud.html", params).title("Recording").inner_size(300.0, 52.0).decorations(false).transparent(true).shadow(false)
         .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).on_permission_request(hud_access).build();
     if let Ok(hud) = built {
@@ -511,7 +517,8 @@ fn window_gone(app: &AppHandle, label: &str) {
         "settings" => register_shortcuts(app),
         "hud" => {
             end_recording_extras(app);
-            if st(app).session.lock().unwrap().recording.is_some() { { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; } build_tray_menu(app); }
+            // The controls went away mid-recording (Alt+F4, a crashed page): keep what was recorded up to then.
+            if st(app).session.lock().unwrap().recording.is_some() { salvage_recording(app); }
         }
         // Never keep watching the keyboard with nothing on screen to show for it.
         "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
@@ -641,7 +648,7 @@ fn run_action(app: &AppHandle, action: &str) {
         }
         "text" => start_selection(app, "text", 0, false),
         "record" => {
-            if st(app).session.lock().unwrap().recording.is_some() { let _ = app.emit_to("hud", "hud:stop", ()); }
+            if st(app).session.lock().unwrap().recording.is_some() { request_stop(app); }
             else { start_selection(app, "record", 0, false) }
         }
         "history" => open_history(app),
@@ -1186,7 +1193,10 @@ async fn recording_prepared(app: AppHandle) {
     if st(&app).session.lock().unwrap().recording.is_none() { end_recording_extras(&app); }
 }
 #[tauri::command]
-async fn recording_started(app: AppHandle) { build_tray_menu(&app); start_listening(&app); }
+async fn recording_started(app: AppHandle) {
+    st(&app).session.lock().unwrap().recording_began = Some(std::time::Instant::now());
+    build_tray_menu(&app); start_listening(&app);
+}
 #[tauri::command]
 async fn recording_listen(app: AppHandle, on: bool) {
     if on { start_listening(&app); } else { let listener = st(&app).session.lock().unwrap().listener.take(); drop(listener); }
@@ -1199,33 +1209,92 @@ async fn camera_failed(app: AppHandle, message: String) {
     notify(&app, "Camera bubble is off", &message);
 }
 #[tauri::command]
-async fn recording_cancel(app: AppHandle) { stop_recording_state(&app); }
+async fn recording_cancel(app: AppHandle) { let _ = std::fs::remove_file(recording_part(&app)); stop_recording_state(&app); }
 #[tauri::command]
-async fn recording_error(app: AppHandle, message: String) { stop_recording_state(&app); notify(&app, "Recording couldn’t start", &message); }
-#[tauri::command]
-fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected video bytes".into()) };
-    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    let ext = if header("x-ext") == "mp4" { "mp4" } else { "webm" };
-    let duration: f64 = header("x-duration").parse().unwrap_or(0.0);
+async fn recording_error(app: AppHandle, message: String, stage: Option<String>) {
+    if stage.as_deref() == Some("save") {
+        // Whatever reached the disk before the problem is still a recording worth keeping.
+        if salvage_recording(&app) { notify(&app, "Recording saved", &format!("Saving ran into a problem ({message}), so Still kept the video it had already written.")); }
+        else { notify(&app, "Recording couldn’t be saved", &message); }
+        return;
+    }
     stop_recording_state(&app);
-    let added = st(&app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
+    notify(&app, "Recording couldn’t start", &message);
+}
+/// The recording as written so far. The HUD sends each second of video as the recorder hands it over, so the file
+/// grows during the recording and the save at the end is only a rename into the library.
+fn recording_part(_app: &AppHandle) -> PathBuf { private_temp().join(format!("still-recording-{}.part", std::process::id())) }
+#[tauri::command]
+async fn recording_chunk(app: AppHandle, data: String, ext: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    {
+        let mut s = st(&app).session.lock().unwrap();
+        // A chunk arriving after Still has already ended the recording belongs to nothing.
+        if s.recording.is_none() { return Ok(()); }
+        s.recording_ext = if ext == "mp4" { "mp4".into() } else { "webm".into() };
+    }
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(recording_part(&app)).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut file, &bytes).map_err(|e| e.to_string())
+}
+/// Restart throws the recording away and begins again.
+#[tauri::command]
+async fn recording_reset(app: AppHandle) { let _ = std::fs::remove_file(recording_part(&app)); }
+#[tauri::command]
+async fn recording_save(app: AppHandle, ext: String, duration: f64) -> Result<(), String> {
+    let part = recording_part(&app);
+    // Still may already have ended and saved this recording itself (see request_stop); then there is nothing left to do.
+    if st(&app).session.lock().unwrap().recording.is_none() { let _ = std::fs::remove_file(&part); return Ok(()); }
+    let bytes = std::fs::read(&part).map_err(|e| format!("The recording’s file couldn’t be read: {e}"))?;
+    let _ = std::fs::remove_file(&part);
+    if bytes.is_empty() { stop_recording_state(&app); return Err("No video was captured.".into()); }
+    store_recording(&app, &bytes, if ext == "mp4" { "mp4" } else { "webm" }, duration)
+}
+/// Ends a recording whose controls can't finish it themselves, keeping whatever was already written.
+/// Returns true when a video was saved.
+fn salvage_recording(app: &AppHandle) -> bool {
+    let (ext, began) = { let s = st(app).session.lock().unwrap(); (s.recording_ext.clone(), s.recording_began) };
+    let part = recording_part(app);
+    let bytes = std::fs::read(&part).unwrap_or_default();
+    let _ = std::fs::remove_file(&part);
+    if bytes.is_empty() { stop_recording_state(app); return false; }
+    let duration = began.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+    match store_recording(app, &bytes, if ext == "mp4" { "mp4" } else { "webm" }, duration) {
+        Ok(()) => true,
+        Err(e) => { notify(app, "Recording couldn’t be saved", &e); false }
+    }
+}
+/// Puts a finished recording in the library and does what the After Recording settings ask.
+fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> Result<(), String> {
+    stop_recording_state(app);
+    let added = st(app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
     let item = match added {
         Ok(item) => item,
         Err(e) => {
             // Never lose a recording: if the library can't take it, put it where the user can find it.
-            let rescue = unique_path(&app.path().desktop_dir().unwrap_or_else(|_| export_folder(&app)), &library::capture_name("Still Recording"), ext);
+            let rescue = unique_path(&app.path().desktop_dir().unwrap_or_else(|_| export_folder(app)), &library::capture_name("Still Recording"), ext);
             return match std::fs::write(&rescue, bytes) {
-                Ok(_) => { notify(&app, "Recording saved to your Desktop", &format!("Still’s library couldn’t store it ({e}), so it was saved as {}.", rescue.display())); Ok(()) }
-                Err(e2) => { notify(&app, "Your recording couldn’t be saved", &format!("{e}; {e2}")); Err(e2.to_string()) }
+                Ok(_) => { notify(app, "Recording saved to your Desktop", &format!("Still’s library couldn’t store it ({e}), so it was saved as {}.", rescue.display())); Ok(()) }
+                Err(e2) => { notify(app, "Your recording couldn’t be saved", &format!("{e}; {e2}")); Err(e2.to_string()) }
             };
         }
     };
-    st(&app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
-    if setting(&app, "afterRecording.save").as_bool().unwrap_or(true) { if let Err(e) = export_item(&app, &item.id, None) { notify(&app, "Couldn’t save to your folder", &e); } }
-    if setting(&app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(&app, &item, false); }
-    broadcast(&app, "library:changed", Value::Null);
+    st(app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
+    if setting(app, "afterRecording.save").as_bool().unwrap_or(true) { if let Err(e) = export_item(app, &item.id, None) { notify(app, "Couldn’t save to your folder", &e); } }
+    if setting(app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, false); }
+    broadcast(app, "library:changed", Value::Null);
     Ok(())
+}
+/// Asks the HUD to stop. If it hasn't ended the recording a few seconds later, its page has stopped answering, so
+/// the recording ends here and whatever it had already written is saved. Stopping is never a dead end.
+fn request_stop(app: &AppHandle) {
+    let _ = app.emit_to("hud", "hud:stop", ());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(8));
+        if st(&app).session.lock().unwrap().recording.is_none() { return; }
+        if !salvage_recording(&app) { notify(&app, "Recording stopped", "The recording controls stopped responding before any video was captured."); }
+    });
 }
 
 #[tauri::command]
@@ -1587,7 +1656,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
             update_status, update_check, update_install,
             cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop
         ])

@@ -120,7 +120,7 @@ const pages = {
       select('Format', 'recording.format', [['mp4', 'MP4'], ['webm', 'WebM']]),
       select('Frame rate', 'recording.fps', [[24, '24 fps'], [30, '30 fps'], [60, '60 fps']], true),
       select('Countdown', 'recording.countdown', [[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], true)
-    ]),
+    ], prefs.shortcuts.record ? `Press ${StillGeometry.shortcutLabel(prefs.shortcuts.record, prefs.platform)} to stop a recording from anywhere, even when a full-screen app hides the recording controls. If MP4 can’t be encoded on this computer, Still records WebM instead.` : 'Set a Start / Stop Recording shortcut to stop a recording from anywhere, even when a full-screen app hides the recording controls.'),
     group('Audio', [toggle('Record microphone', 'recording.microphone'), ...(prefs.platform === 'win32' ? [toggle('Record computer audio', 'recording.systemAudio')] : [])],
       prefs.platform === 'win32' ? null : 'Computer audio recording is available on Windows.'),
     group('Camera', [
