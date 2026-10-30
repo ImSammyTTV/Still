@@ -190,6 +190,56 @@ mod tests {
         let (bytes, ext) = thumbnail(&small);
         assert_eq!((ext, decode(&bytes).unwrap()), ("png", small));
     }
+    /// Screen-like test picture: grainy wallpaper, a window of text-like marks and a photo-like panel.
+    fn screen(w: u32, h: u32) -> RgbaImage {
+        let mut seed = 0x9E3779B9u32;
+        let mut rnd = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; seed };
+        let mut img = RgbaImage::new(w, h);
+        for y in 0..h { for x in 0..w {
+            let (fx, fy, n) = (x as f32 / w as f32, y as f32 / h as f32, (rnd() % 7) as u8);
+            img.put_pixel(x, y, image::Rgba([(30.0 + 60.0 * fx) as u8 + n, (40.0 + 80.0 * fy) as u8 + n, (90.0 + 90.0 * (1.0 - fx)) as u8 + n, 255]));
+        } }
+        let (ww, wh) = (w * 6 / 10, h * 7 / 10);
+        for y in h / 10..h / 10 + wh { for x in w / 12..w / 12 + ww { img.put_pixel(x, y, image::Rgba([250, 250, 252, 255])); } }
+        let (mut y, line, cw) = (h / 10 + h / 20, (h / 54).max(10), (w / 240).max(4));
+        while y + line < h / 10 + wh {
+            let mut x = w / 12 + 24;
+            while x + cw < w / 12 + ww - 24 {
+                if rnd() % 6 == 0 { x += cw * 2; continue; }
+                let g = (rnd() % 90) as u8 + 10;
+                for gy in 0..line * 2 / 3 { for gx in 0..cw - 1 { if (gx * 3 + gy * 5 + rnd() % 3) % 4 != 0 { img.put_pixel(x + gx, y + gy, image::Rgba([g, g, g + 20, 255])); } } }
+                x += cw;
+            }
+            y += line + line / 2;
+        }
+        for y in h / 8..h / 8 + h / 3 { for x in w * 3 / 4 - w / 16..(w - w / 16).min(w) {
+            let (v, n) = (((x as f32 / 37.0).sin() * (y as f32 / 23.0).cos() * 80.0 + 120.0) as u8, (rnd() % 24) as u8);
+            img.put_pixel(x, y, image::Rgba([v.saturating_add(n), v / 2 + n, 255 - v / 2 - n, 255]));
+        } }
+        img
+    }
+    /// cargo test --lib --release -- --ignored --nocapture encode_timings
+    #[test]
+    #[ignore]
+    fn encode_timings() {
+        fn best<T>(name: &str, mut f: impl FnMut() -> T) -> T {
+            let (mut fastest, mut out) = (f64::MAX, None);
+            for _ in 0..5 { let t = std::time::Instant::now(); out = Some(std::hint::black_box(f())); fastest = fastest.min(t.elapsed().as_secs_f64() * 1000.0); }
+            println!("  {name:18} {fastest:7.1} ms");
+            out.unwrap()
+        }
+        for (w, h) in [(1920, 1080), (2560, 1440), (3840, 2160)] {
+            println!("{w}x{h}");
+            let img = screen(w, h);
+            let encoded = best("png", || png(&img));
+            println!("  png size           {:7} KB", encoded.len() / 1024);
+            assert_eq!(decode(&encoded).unwrap(), img);
+            best("png decode", || decode(&encoded));
+            best("jpeg q90", || jpeg(&img, 90));
+            let (small, ext) = best("thumbnail", || thumbnail(&img));
+            println!("  thumbnail size     {:7} KB {ext}", small.len() / 1024);
+        }
+    }
     #[test]
     fn data_urls_decode() {
         assert_eq!(data_url_bytes("data:text/plain;base64,aGk=").unwrap(), b"hi");

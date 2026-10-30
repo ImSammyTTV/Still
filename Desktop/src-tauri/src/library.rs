@@ -62,10 +62,8 @@ impl Library {
     pub fn file(&self, item: &Item) -> PathBuf { lib_file(&self.dir, item) }
     pub fn original(&self, item: &Item) -> PathBuf { self.folder(item).join(&item.original_name) }
     pub fn thumb(&self, item: &Item) -> Option<PathBuf> { THUMBS.iter().map(|name| self.folder(item).join(name)).find(|f| f.exists()) }
-    /// Screenshots big enough to need a thumbnail that don't have one, newest first.
-    pub fn missing_thumbs(&self) -> Vec<Item> {
-        self.items.iter().filter(|i| i.kind != "recording" && (i.width == 0 || i.width.max(i.height) > crate::capture::THUMB_MAX) && self.thumb(i).is_none()).cloned().collect()
-    }
+    /// Screenshots that should have a thumbnail and don't, newest first.
+    pub fn missing_thumbs(&self) -> Vec<Item> { self.items.iter().filter(|i| wants_thumb(i) && self.thumb(i).is_none()).cloned().collect() }
     /// Keeps a thumbnail made from `item`, unless the capture was edited or deleted while it was being made.
     pub fn store_thumb(&self, item: &Item, bytes: &[u8], ext: &str) -> Option<PathBuf> {
         if self.get(&item.id)?.modified != item.modified { return None; }
@@ -128,6 +126,8 @@ impl Library {
     }
 }
 
+/// Screenshots too big to show as they are. A size of 0 means it isn't known, as with a recovered capture.
+pub fn wants_thumb(item: &Item) -> bool { item.kind != "recording" && (item.width == 0 || item.width.max(item.height) > crate::capture::THUMB_MAX) }
 fn lib_file(dir: &Path, item: &Item) -> PathBuf { dir.join(&item.id).join(&item.file_name) }
 
 /// The captures on disk, newest first, for when library.json can't be read.

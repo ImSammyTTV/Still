@@ -27,6 +27,11 @@ struct Session {
     purpose: String,
     grabs: Vec<Grab>,
     overlays: Vec<String>,
+    /// Hidden overlay pages that have loaded and are waiting for a capture.
+    warm: Vec<String>,
+    /// The pre-warmed page that has just been given a screen and hasn't answered yet.
+    handing: Option<String>,
+    from_shortcut: bool,
     previews: Vec<(String, String)>,
     recording: Option<Value>,
     failed_shortcuts: Vec<String>,
@@ -154,26 +159,83 @@ fn close_preview(app: &AppHandle, id: &str) {
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.close(); } }
 }
 
-fn hide_floating(app: &AppHandle, hidden: bool) {
+/// Returns whether there was anything to hide or show.
+fn hide_floating(app: &AppHandle, hidden: bool) -> bool {
+    let mut any = false;
     for (label, win) in app.webview_windows() {
-        if label.starts_with("quick-") || label.starts_with("pin-") { let _ = if hidden { win.hide() } else { win.show() }; }
+        if label.starts_with("quick-") || label.starts_with("pin-") { let _ = if hidden { win.hide() } else { win.show() }; any = true; }
     }
+    any
 }
 
 // ---- Capture ------------------------------------------------------------------------------------
 
+fn overlay_window<'a>(app: &'a AppHandle, label: &str, params: Value) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    builder(app, label, "overlay.html", params).title("Capture Selection").decorations(false).resizable(false)
+        .always_on_top(true).skip_taskbar(true).shadow(false).visible_on_all_workspaces(true)
+}
+fn place_overlay(win: &WebviewWindow, g: &Grab) {
+    let (w, h) = g.image.dimensions();
+    let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
+    let _ = win.set_size(PhysicalSize::new(w, h));
+}
+
+/// Starting a webview is the slowest part of opening the overlay, so one page per display is loaded ahead of time and
+/// waits hidden. Each is used once, for one capture, then replaced.
+static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn warm_overlays(app: &AppHandle) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if WARMING.swap(true, Relaxed) { return; }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // Let the windows of the capture that just ended go first, and stay out of the way of saving it.
+        std::thread::sleep(Duration::from_millis(500));
+        let waiting = { let s = st(&app).session.lock().unwrap(); app.webview_windows().keys().filter(|l| l.starts_with("overlay-warm-") && !s.overlays.contains(l)).count() };
+        for m in app.available_monitors().unwrap_or_default().iter().skip(waiting) {
+            if st(&app).session.lock().unwrap().busy { break; }
+            let label = format!("overlay-warm-{}", uuid::Uuid::new_v4().simple());
+            if let Ok(win) = overlay_window(&app, &label, json!({})).build() {
+                let _ = win.set_position(*m.position());
+                let _ = win.set_size(*m.size());
+            }
+        }
+        WARMING.store(false, Relaxed);
+    });
+}
+
+/// Gives a waiting page this display. A page can't be trusted just because it loaded earlier, so it has to answer;
+/// if it doesn't, the capture goes on with a fresh page rather than leaving a blank window over the screen.
+fn warm_overlay(app: &AppHandle, g: &Grab, init: &Value) -> Option<(String, WebviewWindow)> {
+    let label = { let mut s = st(app).session.lock().unwrap(); let label = s.warm.pop()?; s.handing = Some(label.clone()); label };
+    let win = app.get_webview_window(&label);
+    if let Some(win) = &win {
+        place_overlay(win, g);
+        let mut init = init.clone();
+        init["warm"] = json!(true);
+        let _ = app.emit_to(label.as_str(), "overlay:init", init);
+        for _ in 0..150 {
+            if st(app).session.lock().unwrap().handing.is_none() { return Some((label, win.clone())); }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let _ = win.destroy();
+    }
+    st(app).session.lock().unwrap().handing = None;
+    None
+}
+
 fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool) {
-    {
+    let from_shortcut = {
         let mut s = st(app).session.lock().unwrap();
         if s.busy || s.recording.is_some() { drop(s); notify(app, "Still", "Finish the current capture or recording first."); return; }
         s.busy = true; s.purpose = purpose.to_string();
-    }
+        s.from_shortcut
+    };
     let app = app.clone();
     let purpose = purpose.to_string();
     std::thread::spawn(move || {
         if delay > 0 { notify(&app, "Still", &format!("Capture starts in {delay} seconds")); std::thread::sleep(Duration::from_secs(delay)); }
-        hide_floating(&app, true);
-        std::thread::sleep(Duration::from_millis(80));
+        // Floating windows take a moment to leave the screen, and so does a tray menu. A shortcut with nothing floating has nothing to wait for.
+        if hide_floating(&app, true) || !from_shortcut { std::thread::sleep(Duration::from_millis(80)); }
         let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
         let windows = if purpose == "screenshot" { capture::list_windows(factor) } else { vec![] };
@@ -181,10 +243,15 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
         let temp = private_temp();
+        // All at once, so a second display doesn't add to the wait.
+        let pictures: Vec<Vec<u8>> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = grabs.iter().map(|g| scope.spawn(|| capture::jpeg(&g.image, 90))).collect();
+            jobs.into_iter().map(|job| job.join().unwrap_or_default()).collect()
+        });
         let mut labels = Vec::new();
         for (i, g) in grabs.iter().enumerate() {
             let file = temp.join(format!("still-overlay-{}-{}.jpg", std::process::id(), i));
-            let _ = std::fs::write(&file, capture::jpeg(&g.image, 90));
+            let _ = std::fs::write(&file, &pictures[i]);
             let (w, h) = g.image.dimensions();
             let mine: Vec<Value> = windows.iter().filter(|r| r.x < (g.x + w as i32) as f64 && r.y < (g.y + h as i32) as f64 && r.x + r.w > g.x as f64 && r.y + r.h > g.y as f64)
                 .map(|r| json!({ "id": r.id, "x": r.x - g.x as f64, "y": r.y - g.y as f64, "w": r.w, "h": r.h })).collect();
@@ -196,13 +263,17 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
                 "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
             });
-            let label = format!("overlay-{i}");
-            if let Some(old) = app.get_webview_window(&label) { let _ = old.destroy(); }
-            let built = builder(&app, &label, "overlay.html", json!({ "init": init })).title("Capture Selection").decorations(false).resizable(false)
-                .always_on_top(true).skip_taskbar(true).shadow(false).visible_on_all_workspaces(true).build();
+            let (label, built) = match warm_overlay(&app, g, &init) {
+                Some((label, win)) => (label, Ok(win)),
+                None => {
+                    let label = format!("overlay-{i}");
+                    if let Some(old) = app.get_webview_window(&label) { let _ = old.destroy(); }
+                    let built = overlay_window(&app, &label, json!({ "init": init })).build();
+                    if let Ok(win) = &built { place_overlay(win, g); }
+                    (label, built)
+                }
+            };
             if let Ok(win) = built {
-                let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
-                let _ = win.set_size(PhysicalSize::new(w, h));
                 let _ = win.show();
                 if under_cursor { let _ = win.set_focus(); }
                 labels.push(label);
@@ -219,6 +290,7 @@ fn end_selection(app: &AppHandle) {
     for i in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}.jpg", std::process::id(), i))); }
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
     hide_floating(app, false);
+    warm_overlays(app);
 }
 
 fn finish_selection(app: &AppHandle, payload: Value) {
@@ -275,14 +347,20 @@ fn copy_image(app: &AppHandle, image: &RgbaImage) -> Result<(), String> {
 
 fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
     if text { recognize_file(app, &image); return; }
-    let (bytes, ext) = encode(app, &image);
     let (w, h) = image.dimensions();
-    if setting(app, "afterCapture.copy").as_bool().unwrap_or(true) {
-        if let Err(e) = copy_image(app, &image) { notify(app, "Couldn’t copy the screenshot", &e); }
-    }
-    let item = match st(app).library.lock().unwrap().add(&bytes, "screenshot", ext, None, w, h) {
-        Ok(item) => item,
-        Err(e) => { notify(app, "Couldn’t save the screenshot", &e); return; }
+    // None of these depend on each other, so the Floating Preview waits only for the slowest.
+    let ((bytes, ext), copied, thumb) = std::thread::scope(|scope| {
+        let copied = scope.spawn(|| if setting(app, "afterCapture.copy").as_bool().unwrap_or(true) { copy_image(app, &image) } else { Ok(()) });
+        let thumb = scope.spawn(|| if w.max(h) > capture::THUMB_MAX { Some(capture::thumbnail(&image)) } else { None });
+        (encode(app, &image), copied.join().unwrap_or(Ok(())), thumb.join().unwrap_or(None))
+    });
+    if let Err(e) = copied { notify(app, "Couldn’t copy the screenshot", &e); }
+    let item = {
+        let mut lib = st(app).library.lock().unwrap();
+        match lib.add(&bytes, "screenshot", ext, None, w, h) {
+            Ok(item) => { if let Some((small, kind)) = thumb { lib.store_thumb(&item, &small, kind); } item }
+            Err(e) => { drop(lib); notify(app, "Couldn’t save the screenshot", &e); return; }
+        }
     };
     if setting(app, "afterCapture.save").as_bool().unwrap_or(false) { if let Err(e) = export_item(app, &item.id, None) { notify(app, "Couldn’t save to your folder", &e); } }
     if setting(app, "cloud.autoUpload").as_bool().unwrap_or(false) { let (a, id) = (app.clone(), item.id.clone()); tauri::async_runtime::spawn(async move { let _ = upload_item(&a, &id).await; }); }
@@ -349,6 +427,8 @@ fn window_gone(app: &AppHandle, label: &str) {
         // Closing Settings while recording a shortcut would otherwise leave every shortcut unregistered.
         "settings" => register_shortcuts(app),
         "hud" => { if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); } }
+        // A page that was only waiting, or that never answered, isn't part of the selection on screen.
+        _ if label.starts_with("overlay-warm-") && !st(app).session.lock().unwrap().overlays.iter().any(|l| l == label) => {}
         _ if label.starts_with("overlay-") => {
             let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
             if !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
@@ -392,7 +472,11 @@ fn register_shortcuts(app: &AppHandle) {
         let Some(accel) = shortcuts[action].as_str().filter(|s| !s.is_empty()) else { continue };
         let action = action.to_string();
         let ok = gs.on_shortcut(accel, move |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed { run_action(app, &action); }
+            if event.state == ShortcutState::Pressed {
+                st(app).session.lock().unwrap().from_shortcut = true;
+                run_action(app, &action);
+                st(app).session.lock().unwrap().from_shortcut = false;
+            }
         });
         if ok.is_err() { failed.push(action_key(accel, &shortcuts)); }
     }
@@ -657,6 +741,13 @@ async fn overlay_purpose(app: AppHandle, purpose: String) {
 }
 #[tauri::command]
 async fn overlay_window_mode(app: AppHandle, on: bool) { broadcast(&app, "overlay:windowMode", json!(on)); }
+/// A waiting page reports in twice: once when it has loaded, and again when it has been given a screen.
+#[tauri::command]
+async fn overlay_ready(app: AppHandle, window: tauri::Window) {
+    let mut s = st(&app).session.lock().unwrap();
+    let label = window.label().to_string();
+    if s.handing.as_deref() == Some(label.as_str()) { s.handing = None; } else { s.warm.push(label); }
+}
 #[tauri::command]
 async fn overlay_pointer(app: AppHandle, window: tauri::Window) {
     for l in st(&app).session.lock().unwrap().overlays.iter() { if l != window.label() { let _ = app.emit_to(l.as_str(), "overlay:clear", ()); } }
@@ -666,12 +757,36 @@ fn item_json(lib: &Library, item: &Item) -> Value {
     let mut v = serde_json::to_value(item).unwrap_or(Value::Null);
     v["path"] = json!(lib.file(item));
     v["original"] = json!(lib.original(item));
+    v["thumb"] = json!(lib.thumb(item));
     v
+}
+
+/// Makes one capture's thumbnail and hands it to History if it's open.
+fn make_thumb(app: &AppHandle, item: &Item) {
+    let file = st(app).library.lock().unwrap().file(item);
+    let Some(image) = std::fs::read(file).ok().and_then(|b| capture::decode(&b)) else { return };
+    let (bytes, ext) = capture::thumbnail(&image);
+    let stored = st(app).library.lock().unwrap().store_thumb(item, &bytes, ext);
+    if let Some(thumb) = stored { let _ = app.emit_to("history", "library:thumb", json!({ "id": item.id, "thumb": thumb })); }
+}
+/// Fills in thumbnails for captures from before they existed, one at a time and away from any window. History shows
+/// the full picture for these until theirs arrives.
+static BACKFILLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn backfill_thumbs(app: &AppHandle) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if BACKFILLING.swap(true, Relaxed) { return; }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let items = st(&app).library.lock().unwrap().missing_thumbs();
+        for item in &items { make_thumb(&app, item); }
+        BACKFILLING.store(false, Relaxed);
+    });
 }
 #[tauri::command]
 async fn library_list(app: AppHandle, query: Value) -> Vec<Value> {
-    let lib = st(&app).library.lock().unwrap();
-    lib.search(query["query"].as_str().unwrap_or(""), query["kind"].as_str().unwrap_or("all")).iter().map(|i| item_json(&lib, i)).collect()
+    let list = { let lib = st(&app).library.lock().unwrap(); lib.search(query["query"].as_str().unwrap_or(""), query["kind"].as_str().unwrap_or("all")).iter().map(|i| item_json(&lib, i)).collect() };
+    backfill_thumbs(&app);
+    list
 }
 #[tauri::command]
 async fn library_get(app: AppHandle, id: String) -> Value {
@@ -748,16 +863,21 @@ fn start_drag(app: &AppHandle, window: tauri::Window, file: PathBuf) {
 #[tauri::command]
 async fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
-    let image = capture::decode(&bytes).ok_or("Bad image")?;
-    let (encoded, ext) = encode(&app, &image);
+    // The page's PNG is already lossless, so unless JPEG is wanted it can go straight to disk.
+    let (encoded, ext, (w, h)) = match capture::png_size(&bytes).filter(|_| setting(&app, "imageFormat").as_str() != Some("jpg")) {
+        Some(size) => (bytes, "png", size),
+        None => { let image = capture::decode(&bytes).ok_or("Bad image")?; let (encoded, ext) = encode(&app, &image); (encoded, ext, image.dimensions()) }
+    };
     let mut lib = st(&app).library.lock().unwrap();
     // An editor whose capture was deleted mustn't quietly re-create it on autosave.
     if !id.is_empty() && lib.get(&id).is_none() { return Err("That capture no longer exists.".into()); }
     let id = if !id.is_empty() { lib.replace_file(&id, &encoded, ext)?; id }
-        else { let (w, h) = image.dimensions(); lib.add(&encoded, "screenshot", ext, None, w, h)?.id };
+        else { lib.add(&encoded, "screenshot", ext, None, w, h)?.id };
     lib.save_project(&id, &project)?;
+    let item = lib.get(&id).filter(library::wants_thumb);
     drop(lib);
     broadcast(&app, "library:changed", Value::Null);
+    if let Some(item) = item { let a = app.clone(); std::thread::spawn(move || make_thumb(&a, &item)); }
     Ok(id)
 }
 #[tauri::command]
@@ -991,6 +1111,7 @@ fn self_test(app: AppHandle, dir: PathBuf) {
         wait(3000);
         let overlays = st(&app).session.lock().unwrap().overlays.clone();
         log("overlayWindows", json!(overlays.len()));
+        log("overlayPreWarmed", json!(overlays.iter().any(|l| l.starts_with("overlay-warm-"))));
         log("windowList", json!(capture::list_windows(1.0).len()));
         snap("2-overlay");
         let display = st(&app).session.lock().unwrap().grabs.first().map(|g| g.id).unwrap_or(0);
@@ -1070,6 +1191,7 @@ pub fn run() {
                 .build(app)?;
             register_shortcuts(&handle);
             apply_login_item(&handle);
+            std::thread::spawn({ let h = handle.clone(); move || { std::thread::sleep(Duration::from_secs(3)); warm_overlays(&h); backfill_thumbs(&h); } });
             let args: Vec<String> = std::env::args().collect();
             if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--self-test=")) {
                 let dir = PathBuf::from(dir);
@@ -1091,7 +1213,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
-            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer,
+            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_ready,
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
