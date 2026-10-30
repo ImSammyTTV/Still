@@ -396,7 +396,7 @@ struct CaptureBar: View {
     private static let accent = Studio.accent
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "viewfinder").font(.system(size: 13, weight: .semibold)).foregroundStyle(Self.accent).padding(.leading, 6).padding(.trailing, 4)
+            Image(nsImage: Studio.menuBarIcon()).renderingMode(.template).foregroundStyle(Self.accent).padding(.leading, 6).padding(.trailing, 4)
             mode("Area", "rectangle.dashed", selected: selection.purpose == .screenshot && !selection.windowMode) { selection.setWindowMode(false); selection.purpose = .screenshot }
             mode("Window", "macwindow", selected: selection.windowMode) { selection.toggleWindowMode() }
             mode("Screen", "display") { selection.fullscreen() }

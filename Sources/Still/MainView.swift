@@ -28,7 +28,9 @@ struct MainView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                TextField("Search settings", text: $sidebarSearch).accessibilityLabel("Search settings categories").textFieldStyle(.roundedBorder).controlSize(.regular).padding(.horizontal, 10).padding(.bottom, 10)
+                TextField("Search settings", text: $sidebarSearch).accessibilityLabel("Search settings categories").textFieldStyle(.roundedBorder).foregroundStyle(.primary)
+                    .overlay(alignment: .trailing) { if !sidebarSearch.isEmpty { Button { sidebarSearch = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).padding(.trailing, 5).help("Clear search").accessibilityLabel("Clear search") } }
+                    .controlSize(.regular).padding(.horizontal, 10).padding(.bottom, 10)
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(visibleCategories, id: \.0) { category in sidebarRow(category.0, symbol: category.1, color: category.2) }
@@ -42,7 +44,7 @@ struct MainView: View {
                 Divider().padding(.horizontal, 10).padding(.vertical, 6)
                 Button { library.page = "About" } label: {
                     HStack(spacing: 9) {
-                        CaptureFrameMark().frame(width: 24, height: 22)
+                        Image(nsImage: Studio.menuBarIcon()).renderingMode(.template).foregroundStyle(.primary)
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Still").font(.system(size: 12, weight: .semibold))
                             Text("Version \(Updater.shared.currentVersion)").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -249,7 +251,7 @@ struct MainView: View {
     }
     private var about: some View {
         VStack(spacing: 18) {
-            Image(systemName: "viewfinder").font(.system(size: 60, weight: .light)).foregroundStyle(Color.accentColor)
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
             Text("Still").font(.system(size: 25, weight: .bold)); Text("Native capture for your Mac").foregroundStyle(.secondary)
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")").font(.system(size: 11)).foregroundStyle(.secondary)
             Button("Open Feature Coverage") { if let path = Bundle.main.resourceURL?.appendingPathComponent("Documentation/FEATURES.md") { NSWorkspace.shared.open(path) } }
@@ -330,24 +332,3 @@ struct ClipboardSettings: View {
 }
 
 /// The lifted screenshot corner, drawn as a template mark on transparent surfaces.
-struct CaptureFrameMark: View {
-    var body: some View {
-        GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
-            let w = side, h = side
-            Path { path in
-                path.move(to: CGPoint(x: w*0.7, y: h*0.92))
-                path.addLine(to: CGPoint(x: w*0.08, y: h*0.92))
-                path.addLine(to: CGPoint(x: w*0.08, y: h*0.08))
-                path.addLine(to: CGPoint(x: w*0.92, y: h*0.08))
-                path.addLine(to: CGPoint(x: w*0.92, y: h*0.7))
-            }.stroke(.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-            Path { path in
-                path.move(to: CGPoint(x: w*0.7, y: h*0.92))
-                path.addLine(to: CGPoint(x: w*0.7, y: h*0.7))
-                path.addLine(to: CGPoint(x: w*0.92, y: h*0.7))
-                path.closeSubpath()
-            }.fill(.primary)
-        }.accessibilityHidden(true)
-    }
-}
