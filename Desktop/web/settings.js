@@ -9,6 +9,21 @@ const SHORTCUTS = [
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
 let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' };
+let searchBox = null;
+
+// Setup is a one-time guide: once finished it leaves the sidebar, and General offers to bring it back.
+const setupDone = () => { try { return localStorage.getItem('stillSetupComplete') === '1'; } catch { return true; } };
+const setSetupDone = (done) => { try { if (done) localStorage.setItem('stillSetupComplete', '1'); else localStorage.removeItem('stillSetupComplete'); } catch { /* the guide simply stays available */ } };
+function filterNav() {
+  const query = (searchBox?.value || '').trim().toLocaleLowerCase();
+  let matches = 0;
+  $$('#nav button[data-page]').forEach((button) => {
+    const page = button.dataset.page;
+    button.hidden = (page === 'Setup' && setupDone()) || !page.toLocaleLowerCase().includes(query);
+    if (!button.hidden) matches++;
+  });
+  const empty = $('.nav-empty'); if (empty) empty.hidden = matches > 0;
+}
 
 const set = async (patch) => { prefs = { ...prefs, ...(await still.invoke('settings:set', patch)) }; };
 const group = (title, rows, hint) => [title ? el('div', { class: 'group-title' }, title) : null, el('div', { class: 'group' }, rows), hint ? el('div', { class: 'hint' }, hint) : null];
@@ -25,6 +40,7 @@ const select = (label, path, options, number = false) => {
 };
 
 function render() {
+  filterNav();
   $$('#nav button[data-page]').forEach((b) => {
     const active = b.dataset.page === current;
     b.classList.toggle('active', active);
@@ -48,7 +64,7 @@ const pages = {
       row('Try drawing, text and export without capturing anything.', el('button', { class: 'btn', onclick: () => still.send('open:demo') }, 'Explore the Editor')),
       row('Screenshots stay on your computer unless you upload them.', el('span', {}, 'Cloud is optional'))
     ]),
-    el('div', { style: 'display:flex;justify-content:flex-end;margin-top:22px' }, [el('button', { class: 'btn primary', onclick: () => { localStorage.setItem('stillSetupComplete', '1'); current = 'General'; render(); } }, 'Finish Setup')])
+    el('div', { style: 'display:flex;justify-content:flex-end;margin-top:22px' }, [el('button', { class: 'btn primary', onclick: () => { setSetupDone(true); current = 'General'; render(); } }, 'Finish Setup')])
   ],
   General: () => [
     group('App', [
@@ -57,6 +73,7 @@ const pages = {
       select('Appearance', 'theme', [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']])
     ]),
     group('Sounds', [toggle('Play sounds', 'playSounds')]),
+    group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: () => { setSetupDone(false); current = 'Setup'; render(); } }, 'Open Setup Assistant'))]),
     group('Export', [row('Export location', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
       el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Documents › Still'),
       el('button', { class: 'btn', onclick: async () => { if (await still.invoke('settings:chooseFolder')) { prefs = await still.invoke('settings:get'); render(); } } }, 'Choose…')
@@ -95,7 +112,7 @@ const pages = {
     group('Selection', [
       select('Crosshair', 'crosshair', [['partial', 'Partial'], ['full', 'Full screen'], ['disabled', 'Off']]),
       toggle('Show magnifier', 'magnifier'), toggle('Remember last selection', 'rememberSelection')
-    ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it.'),
+    ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it. Scroll to zoom the magnifier.'),
     prefs.platform === 'win32' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], 'Your icons come back as soon as the capture ends.') : null
   ],
   Recording: () => [
@@ -222,18 +239,14 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
 
 (async () => {
   prefs = await applyTheme();
-  if (localStorage.getItem('stillSetupComplete') !== '1') current = 'Setup';
+  if (!setupDone()) current = 'Setup';
   updateStatus = await still.invoke('update:status');
   driveState = await still.invoke('drive:get');
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings…', 'aria-label': 'Search settings categories', autocomplete: 'off' });
   const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');
-  search.addEventListener('input', () => {
-    const query = search.value.trim().toLocaleLowerCase();
-    let matches = 0;
-    $$('#nav button[data-page]').forEach(button => { button.hidden = !button.dataset.page.toLocaleLowerCase().includes(query); if (!button.hidden) matches++; });
-    empty.hidden = matches > 0;
-  });
+  searchBox = search;
+  search.addEventListener('input', filterNav);
   $('#nav').append(search);
   $('#nav').append(...PAGES.map(([name, iconName, color]) => el('button', { 'data-page': name, html: `<span class="tile" style="background:${color}">${icon(iconName)}</span>${name}`, onclick: () => { current = name; render(); } })));
   $('#nav').append(empty, el('div', { class: 'spacer' }));

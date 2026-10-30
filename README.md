@@ -111,7 +111,7 @@ Linux builds use Ubuntu 24.04 and need compatible WebKitGTK and desktop screen-s
 | Start / stop recording | `⌃⇧⌘6` | `Ctrl Shift 6` |
 | Clipboard history | `⇧⌘V` | — |
 
-**While selecting:** hold **Space** for a window, press **Enter** to confirm an area, or **Escape** to cancel. Arrow keys nudge; **Shift** makes larger nudges. Shortcuts can be changed in **Settings → Shortcuts**.
+**While selecting:** hold **Space** for a window, press **Enter** to confirm an area, or **Escape** to cancel. Arrow keys nudge; **Shift** makes larger nudges. Scroll to zoom the magnifier in or out. Shortcuts can be changed in **Settings → Shortcuts**.
 
 macOS reserves `⇧⌘4` for its screenshot tool. To use it with Still, turn off the matching selected-area shortcut in **Keyboard → Keyboard Shortcuts → Screenshots**, or choose a different shortcut in Still.
 

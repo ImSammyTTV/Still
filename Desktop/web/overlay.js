@@ -6,6 +6,15 @@ const canvas = $('#canvas'), ctx = canvas.getContext('2d');
 const image = new Image();
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
 let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
+// The magnifier's zoom steps; the scroll wheel moves between them and the choice is remembered.
+const ZOOMS = [2, 3, 4, 6, 8, 12, 16];
+let magnifierZoom = (() => { try { const z = Number(localStorage.getItem('stillMagnifierZoom')); return ZOOMS.includes(z) ? z : 8; } catch { return 8; } })();
+function stepMagnifier(direction) {
+  const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(magnifierZoom) + direction))];
+  if (next === magnifierZoom) return;
+  magnifierZoom = next;
+  try { localStorage.setItem('stillMagnifierZoom', String(next)); } catch { /* the zoom still applies for this capture */ }
+}
 const bounds = () => ({ x: 0, y: 0, w: config.width, h: config.height });
 
 // The frozen screen and window frames arrive in physical pixels; the page works in CSS pixels.
@@ -106,13 +115,18 @@ function draw() {
 }
 
 function drawMagnifier() {
-  const scale = pixelScale, size = 96, zoom = 8;
+  const scale = pixelScale, size = 96, zoom = magnifierZoom;
   const sx = pointer.x * scale - size / zoom / 2, sy = pointer.y * scale - size / zoom / 2;
   const x = Math.min(innerWidth - size - 10, pointer.x + 24), y = Math.max(10, pointer.y - size - 24);
   ctx.save(); roundRect(x, y, size, size, 10); ctx.clip(); ctx.imageSmoothingEnabled = false;
   ctx.drawImage(image, sx, sy, size / zoom, size / zoom, x, y, size, size);
   ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
   ctx.strokeRect(x + size / 2 - zoom / 2, y + size / 2 - zoom / 2, zoom, zoom);
+  // The current zoom, so a scroll of the wheel has visible feedback.
+  ctx.font = `500 10px ${getComputedStyle(document.body).getPropertyValue('--mono')}`; ctx.textBaseline = 'bottom'; ctx.textAlign = 'right';
+  const tag = `${zoom}×`, tw = ctx.measureText(tag).width;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; roundRect(x + size - tw - 12, y + size - 18, tw + 8, 14, 4); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillText(tag, x + size - 8, y + size - 5); ctx.textAlign = 'left';
   ctx.restore();
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; roundRect(x, y, size, size, 10); ctx.stroke();
 }
@@ -166,6 +180,14 @@ addEventListener('mouseup', (e) => {
 addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
 
 addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
+
+// Scrolling up zooms the magnifier in, scrolling down zooms it out.
+addEventListener('wheel', (e) => {
+  if (!config || !config.magnifier || onBar(e) || anchor || windowMode || !e.deltaY) return;
+  e.preventDefault();
+  stepMagnifier(e.deltaY < 0 ? 1 : -1);
+  draw();
+}, { passive: false });
 
 addEventListener('keydown', (e) => {
   const action = StillCaptureInput.keyAction({ key: e.key, code: e.code, editingText: ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName), commandModifier: e.metaKey || e.ctrlKey || e.altKey, purpose });
