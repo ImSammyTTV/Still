@@ -88,6 +88,10 @@ While selecting: `Shift` keeps it square, arrow keys nudge (`Shift` for 10 px, `
 captures, `Esc` cancels. In the editor each tool has a letter: `A` arrow, `R` rectangle, `T` text, `N` step, `B` redact,
 `U` blur, `C` crop and so on. Change any shortcut in **Settings → Shortcuts**.
 
+**From the right-click menu (Mac):** Still's image actions are also macOS Services. Right-click an image in Finder, or
+a selected image in another app, for **Open in Still**, **Copy Text from Image with Still** and **Pin Image with Still**.
+**System Settings → Keyboard → Keyboard Shortcuts → Services** can switch them off or give them a shortcut.
+
 > [!NOTE]
 > macOS uses `⇧⌘4` for its own screenshots. If Still asks, turn off *"Save picture of selected area as a file"* in
 > **System Settings → Keyboard → Keyboard Shortcuts → Screenshots**.
