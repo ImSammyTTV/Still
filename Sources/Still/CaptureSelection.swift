@@ -88,12 +88,12 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil); key.makeFirstResponder(key.contentView) }
         }
     }
-    /// Still's capture bar: a slim pill along the top of the screen the pointer is on.
+    /// Still's capture bar: a slim pill along the bottom of the screen the pointer is on.
     private func showBar() {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
         let host = FirstClickHostingView(rootView: CaptureBar(selection: self))
         let size = host.fittingSize
-        let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.maxY-size.height-18, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.minY+28, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Capture Bar"
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue+1); panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.contentView = host
