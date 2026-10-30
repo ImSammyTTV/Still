@@ -362,7 +362,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     override func mouseMoved(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); updateHover(); refresh() }
     /// Scrolling up zooms the magnifier in, scrolling down zooms it out.
     override func scrollWheel(with event: NSEvent) {
-        guard Preferences.shared.magnifier, anchor == nil, !windowMode, event.scrollingDeltaY != 0 else { return }
+        guard Preferences.shared.magnifier, anchor == nil, !coordinator.windowMode, event.scrollingDeltaY != 0 else { return }
         let steps = Self.magnifierPatches, index = steps.firstIndex(of: magnifierPatch) ?? 3
         magnifierPatch = steps[max(0, min(steps.count-1, index + (event.scrollingDeltaY > 0 ? 1 : -1)))]
         refresh()
