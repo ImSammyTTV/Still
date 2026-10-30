@@ -21,11 +21,11 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Open menus and Spotlight stay in the capture | ✅ | ☑️ |
 | Timed capture (3, 5, 10 s) | ☑️ | ☑️ |
 | Arrow-key nudging and resizing of the selection | ☑️ | ☑️ |
-| Capture the previous area again | ☑️ | — |
-| Scrolling capture | ☑️ | — |
-| Hide desktop icons while capturing | ☑️ | — |
+| Capture the previous area again | ☑️ | ☑️ |
+| Scrolling capture | ☑️ | ☑️ vertical only, no auto-scroll · off on Wayland |
+| Hide desktop icons while capturing | ☑️ | ☑️ Windows · — Linux |
 | Copy text from the screen (OCR) | ✅ | ✅ English |
-| QR code reading | ☑️ | — |
+| QR code reading | ☑️ | ☑️ |
 
 ## Floating Preview and after capture
 
@@ -46,9 +46,9 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, crop | ✅ | ✅ |
 | Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
 | Solid redaction that survives export | ✅ | ☑️ |
-| Arrow styles (plain, filled, double, curved) and text styles | ☑️ | — |
-| Resize, rotate and flip | ☑️ | — |
-| Combine images by dropping them in | ☑️ | — |
+| Arrow styles (plain, filled, double, curved) and text styles | ☑️ | ☑️ |
+| Resize, rotate and flip | ☑️ | ☑️ |
+| Combine images by dropping them in | ☑️ | ☑️ |
 | Backgrounds: gradients, own image, padding, corners, shadow, aspect ratio | ✅ | ✅ |
 | Copy, save, Drag to share, pin, upload | ✅ | ✅ copy · ☑️ others |
 | Editable projects (reopen and change annotations later) | ✅ | ✅ |
@@ -57,14 +57,15 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux where WebKitGTK supports screen sharing |
+| Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux, not yet confirmed on real WebKitGTK |
 | Microphone and computer audio | ☑️ | ☑️ Windows (computer audio) |
-| Stop from the menu bar (red stop button with timer) | ✅ | — |
+| Stop from the menu bar or tray, with a timer | ✅ | ☑️ tray menu · click to stop on Windows |
 | Pause, resume, restart, cancel | ☑️ | ☑️ |
 | MP4 | ✅ export tested | ☑️ (MP4 or WebM, depending on the system) |
-| GIF export | ✅ export tested | — |
-| Camera bubble, click and keystroke overlays | ☑️ | — |
-| Video editor: trim bar with drag handles, Set In/Out | ✅ | — |
+| GIF export | ✅ export tested | ☑️ up to 60 s and 1280 px |
+| Custom bitrate presets | ☑️ | — |
+| Camera bubble, click and keystroke overlays | ☑️ | ☑️ Windows · ☑️ Linux on X11 (camera also on Wayland; clicks and keys are off there) |
+| Video editor: trim bar with drag handles, Set In/Out | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
 | Video editor: zoom, background, cursor effects | ✅ export tested | — |
 | Audio transcription | ☑️ | — |
 
@@ -92,16 +93,16 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** scrolling capture, the video editor, GIF export, the camera bubble, click and keystroke
-  overlays, QR codes, extra arrow and text styles, rotate/flip/resize, combining images and hiding desktop icons.
-- **Mac:** Apple notarization (needs a paid Apple Developer account) and custom bitrate presets for recordings.
+- **Windows and Linux:** video editor zoom, background and cursor effects, audio transcription, extra capture options
+  such as horizontal and auto-scrolling, and saved trim points. Linux can't hide desktop icons.
+- **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
 - **Windows and Linux:** recording hasn't been checked on real hardware yet.
 - **Everywhere:** the ☑️ items above need a hands-on pass.
 
 ## How it's checked
 
-- `swift test`: 21 Mac tests covering image processing, redaction, projects, backgrounds, text recognition,
+- `swift test`: 39 Mac tests covering image processing, redaction, projects, backgrounds, text recognition,
   scrolling stitching and real MP4/GIF exports.
 - `cd Desktop && npm test`: JavaScript and Rust tests for selection geometry, the library, settings and image encoding.
 - `still --self-test`: runs on real Windows and Linux machines in GitHub Actions and checks capture, the Floating Preview,
