@@ -1,6 +1,8 @@
-use image::{codecs::jpeg::JpegEncoder, DynamicImage, ImageFormat, RgbaImage};
+use image::buffer::ConvertBuffer;
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::{ExtendedColorType, ImageEncoder, RgbImage, RgbaImage};
 use serde::Serialize;
-use std::io::Cursor;
 use xcap::Monitor;
 #[cfg(not(windows))]
 use xcap::Window;
@@ -100,17 +102,39 @@ pub fn crop(image: &RgbaImage, x: f64, y: f64, w: f64, h: f64) -> RgbaImage {
     image::imageops::crop_imm(image, x0, y0, w, h).to_image()
 }
 
+/// Lossless. One fixed filter is about four times faster than choosing per row, for files about 10% larger.
 pub fn png(image: &RgbaImage) -> Vec<u8> {
-    let mut out = Cursor::new(Vec::new());
-    let _ = DynamicImage::ImageRgba8(image.clone()).write_to(&mut out, ImageFormat::Png);
-    out.into_inner()
+    let mut out = Vec::new();
+    let (w, h) = image.dimensions();
+    let _ = PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::Sub).write_image(image.as_raw(), w, h, ExtendedColorType::Rgba8);
+    out
 }
 
 pub fn jpeg(image: &RgbaImage, quality: u8) -> Vec<u8> {
     let mut out = Vec::new();
-    let rgb = DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+    let rgb: RgbImage = image.convert();
     let _ = JpegEncoder::new_with_quality(&mut out, quality).encode_image(&rgb);
     out
+}
+
+/// The width and height a PNG declares, read without decoding it. None if the bytes aren't a PNG.
+pub fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 24 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") { return None; }
+    Some((u32::from_be_bytes(bytes[16..20].try_into().ok()?), u32::from_be_bytes(bytes[20..24].try_into().ok()?)))
+}
+
+/// History's cards and the Floating Preview are at most about 800 device pixels across.
+pub const THUMB_MAX: u32 = 800;
+
+/// A small copy of a capture for showing in a list, never for saving: returns the bytes and their extension.
+/// Screens become a light JPEG. Anything transparent, or too small to shrink, stays a lossless PNG.
+pub fn thumbnail(image: &RgbaImage) -> (Vec<u8>, &'static str) {
+    let (w, h) = image.dimensions();
+    let longest = w.max(h);
+    if longest <= THUMB_MAX { return (png(image), "png"); }
+    let scaled = |side: u32| ((side as u64 * THUMB_MAX as u64 / longest as u64) as u32).max(1);
+    let small = image::imageops::thumbnail(image, scaled(w), scaled(h));
+    if small.pixels().all(|p| p[3] == 255) { (jpeg(&small, 80), "jpg") } else { (png(&small), "png") }
 }
 
 pub fn decode(bytes: &[u8]) -> Option<RgbaImage> { image::load_from_memory(bytes).ok().map(|i| i.to_rgba8()) }
@@ -135,6 +159,36 @@ mod tests {
         let img = RgbaImage::from_pixel(8, 4, image::Rgba([255, 0, 0, 255]));
         assert_eq!(decode(&png(&img)).unwrap().dimensions(), (8, 4));
         assert_eq!(decode(&jpeg(&img, 90)).unwrap().dimensions(), (8, 4));
+    }
+    #[test]
+    fn png_is_lossless_and_keeps_transparency() {
+        let mut img = RgbaImage::new(64, 32);
+        for (x, y, p) in img.enumerate_pixels_mut() { *p = image::Rgba([(x * 3) as u8, (y * 7) as u8, (x ^ y) as u8, (x + y) as u8]); }
+        assert_eq!(decode(&png(&img)).unwrap(), img);
+    }
+    #[test]
+    fn png_size_reads_the_header() {
+        assert_eq!(png_size(&png(&RgbaImage::new(1234, 56))), Some((1234, 56)));
+        assert_eq!(png_size(&jpeg(&RgbaImage::new(8, 8), 90)), None);
+        assert_eq!(png_size(b"\x89PNG"), None);
+    }
+    #[test]
+    fn thumbnails_shrink_to_fit_and_keep_shape() {
+        let (bytes, ext) = thumbnail(&RgbaImage::from_pixel(3840, 2160, image::Rgba([10, 20, 30, 255])));
+        assert_eq!((ext, decode(&bytes).unwrap().dimensions()), ("jpg", (800, 450)));
+        let (bytes, _) = thumbnail(&RgbaImage::from_pixel(100, 6000, image::Rgba([10, 20, 30, 255])));
+        assert_eq!(decode(&bytes).unwrap().dimensions(), (13, 800));
+        let (bytes, _) = thumbnail(&RgbaImage::from_pixel(6000, 1, image::Rgba([10, 20, 30, 255])));
+        assert_eq!(decode(&bytes).unwrap().dimensions(), (800, 1));
+    }
+    #[test]
+    fn thumbnails_keep_transparency_and_small_pictures_exact() {
+        let (bytes, ext) = thumbnail(&RgbaImage::from_pixel(2000, 1000, image::Rgba([10, 20, 30, 128])));
+        assert_eq!(ext, "png");
+        assert_eq!(decode(&bytes).unwrap().get_pixel(5, 5)[3], 128);
+        let small = RgbaImage::from_pixel(300, 200, image::Rgba([1, 2, 3, 255]));
+        let (bytes, ext) = thumbnail(&small);
+        assert_eq!((ext, decode(&bytes).unwrap()), ("png", small));
     }
     #[test]
     fn data_urls_decode() {

@@ -23,7 +23,7 @@ function schedule() {
     $('#card').addEventListener('mouseenter', () => video.play().catch(() => {}));
     $('#card').addEventListener('mouseleave', () => video.pause());
     $('#edit').title = 'Open'; $('#edit').innerHTML = icon('play'); $('#pin').remove();
-  } else $('#media').append(el('img', { class: 'media', src: url, draggable: 'false' }));
+  } else $('#media').append(el('img', { class: 'media', src: item.thumb ? `${still.fileUrl(item.thumb)}?t=${item.modified || item.created}` : url, decoding: 'async', draggable: 'false' }));
   refreshIcons();
   if (params.get('sound') === '1') shutter();
   schedule();

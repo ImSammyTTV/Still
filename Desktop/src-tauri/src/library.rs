@@ -22,6 +22,9 @@ pub struct Item {
 
 pub struct Library { dir: PathBuf, pub items: Vec<Item> }
 
+/// A thumbnail lives in its capture's folder, so deleting the capture removes it too.
+const THUMBS: [&str; 2] = ["thumb.jpg", "thumb.png"];
+
 pub fn now_ms() -> i64 { chrono::Utc::now().timestamp_millis() }
 
 /// "Still 2026-10-25 at 15.04.12" — sortable and safe for every file system.
@@ -58,6 +61,21 @@ impl Library {
     pub fn folder(&self, item: &Item) -> PathBuf { self.dir.join(&item.id) }
     pub fn file(&self, item: &Item) -> PathBuf { lib_file(&self.dir, item) }
     pub fn original(&self, item: &Item) -> PathBuf { self.folder(item).join(&item.original_name) }
+    pub fn thumb(&self, item: &Item) -> Option<PathBuf> { THUMBS.iter().map(|name| self.folder(item).join(name)).find(|f| f.exists()) }
+    /// Screenshots big enough to need a thumbnail that don't have one, newest first.
+    pub fn missing_thumbs(&self) -> Vec<Item> {
+        self.items.iter().filter(|i| i.kind != "recording" && (i.width == 0 || i.width.max(i.height) > crate::capture::THUMB_MAX) && self.thumb(i).is_none()).cloned().collect()
+    }
+    /// Keeps a thumbnail made from `item`, unless the capture was edited or deleted while it was being made.
+    pub fn store_thumb(&self, item: &Item, bytes: &[u8], ext: &str) -> Option<PathBuf> {
+        if self.get(&item.id)?.modified != item.modified { return None; }
+        let (temp, file) = (self.folder(item).join("thumb.tmp"), self.folder(item).join(format!("thumb.{ext}")));
+        fs::write(&temp, bytes).ok()?;
+        self.remove_thumbs(item);
+        fs::rename(&temp, &file).ok()?;
+        Some(file)
+    }
+    fn remove_thumbs(&self, item: &Item) { for name in THUMBS { let _ = fs::remove_file(self.folder(item).join(name)); } }
 
     pub fn add(&mut self, bytes: &[u8], kind: &str, ext: &str, title: Option<String>, width: u32, height: u32) -> Result<Item, String> {
         let item = Item {
@@ -87,6 +105,7 @@ impl Library {
         // Write the new file before removing the old one.
         fs::write(self.folder(&item).join(&name), bytes).map_err(|e| e.to_string())?;
         if name != item.file_name { let _ = fs::remove_file(self.file(&item)); }
+        self.remove_thumbs(&item);
         self.update(id, |i| { i.file_name = name.clone(); i.modified = Some(now_ms()); }).ok_or_else(|| "That capture no longer exists.".to_string())
     }
     pub fn project(&self, id: &str) -> Option<Value> {
@@ -144,6 +163,43 @@ mod tests {
         assert_eq!(fs::read(again.file(&reloaded)).unwrap(), b"edited");
         assert_eq!(reloaded.file_name, "capture.jpg");
         assert_eq!(again.project(&item.id).unwrap()["marks"][0]["type"], "arrow");
+    }
+    #[test]
+    fn thumbnails_follow_their_capture() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir);
+        let big = lib.add(b"a", "screenshot", "png", None, 3840, 2160).unwrap();
+        lib.add(b"b", "screenshot", "png", None, 300, 200).unwrap();
+        lib.add(b"c", "recording", "mp4", None, 0, 0).unwrap();
+        assert_eq!(lib.missing_thumbs().iter().map(|i| i.id.clone()).collect::<Vec<_>>(), vec![big.id.clone()]);
+        let file = lib.store_thumb(&big, b"small", "jpg").unwrap();
+        assert_eq!(lib.thumb(&big), Some(file.clone()));
+        assert!(lib.missing_thumbs().is_empty());
+        // A different format replaces the old thumbnail rather than sitting beside it.
+        let png = lib.store_thumb(&big, b"small", "png").unwrap();
+        assert!(!file.exists() && png.exists());
+        // Editing drops the thumbnail, and one made from the old picture can't come back afterwards.
+        lib.replace_file(&big.id, b"edited", "png").unwrap();
+        assert_eq!(lib.thumb(&big), None);
+        assert_eq!(lib.store_thumb(&big, b"stale", "jpg"), None);
+        assert_eq!(lib.thumb(&big), None);
+        // Deleting takes the thumbnail with it.
+        let edited = lib.get(&big.id).unwrap();
+        let file = lib.store_thumb(&edited, b"fresh", "jpg").unwrap();
+        lib.remove(&big.id);
+        assert!(!file.exists());
+        assert_eq!(lib.store_thumb(&edited, b"late", "jpg"), None);
+        assert!(!lib.folder(&edited).exists());
+    }
+    #[test]
+    fn a_thumbnail_is_not_mistaken_for_the_capture_when_rebuilding() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let item = lib.add(b"png", "screenshot", "png", None, 3840, 2160).unwrap();
+        lib.store_thumb(&item, b"small", "jpg").unwrap();
+        fs::write(dir.join("library.json"), "{ not json").unwrap();
+        let again = Library::open(dir);
+        assert_eq!(again.items[0].file_name, "capture.png");
     }
     #[test]
     fn search_filters_kind_title_and_text() {

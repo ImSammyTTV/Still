@@ -3,7 +3,7 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
         "settings_get", "settings_set", "settings_reset", "settings_choose_folder", "shortcuts_pause", "overlay_done",
-        "overlay_cancel", "overlay_fullscreen", "overlay_timer", "overlay_purpose", "overlay_window_mode", "overlay_pointer",
+        "overlay_cancel", "overlay_fullscreen", "overlay_timer", "overlay_purpose", "overlay_window_mode", "overlay_pointer", "overlay_ready",
         "library_list", "library_get", "library_rename", "library_delete", "library_copy", "library_save",
         "library_save_as", "library_reveal", "library_open", "library_pin", "library_drag", "editor_save",
         "editor_copy", "editor_export", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
