@@ -17,7 +17,10 @@ if [ -f Cloud/README.md ]; then cp Cloud/README.md "$app_path/Contents/Resources
 mkdir -p "$app_path/Contents/Resources/Documentation"
 cp README.md FEATURES.md "$app_path/Contents/Resources/Documentation/"
 mkdir -p .build/Still.iconset
-swift scripts/make-icon.swift .build/Still.iconset
+for size in 16 32 128 256 512; do
+  sips -z $size $size Resources/AppIcon.png --out .build/Still.iconset/icon_${size}x${size}.png >/dev/null
+  sips -z $((size*2)) $((size*2)) Resources/AppIcon.png --out .build/Still.iconset/icon_${size}x${size}@2x.png >/dev/null
+done
 iconutil -c icns .build/Still.iconset -o "$app_path/Contents/Resources/Still.icns"
 sign_identity="${STILL_SIGN_IDENTITY:-}"
 if [ -z "$sign_identity" ]; then
