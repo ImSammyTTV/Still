@@ -6,17 +6,27 @@ on:
         description: Version tag, for example v1.1.0
         required: true
 permissions:
-  contents: write
+  contents: read
 env:
+  VERSION: ${{ inputs.version }}
   LINUX_DEPS: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libpipewire-0.3-dev libclang-dev libxcb1-dev libxcb-randr0-dev libdbus-1-dev libgbm-dev libegl-dev libwayland-dev patchelf rpm
 jobs:
-  mac:
-    runs-on: macos-latest
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - name: Check the version
+        run: echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Version must look like v1.2.3"; exit 1; }
+  mac:
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
       - name: Set version
         run: |
-          V="${{ inputs.version }}"; V="${V#v}"
+          V="${VERSION#v}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
       - run: swift test
       - name: Import the signing certificate
@@ -33,14 +43,22 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KP" "$KC" > /dev/null
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/still.p12"
-          echo "STILL_SIGN_IDENTITY=$(security find-identity -p codesigning "$KC" | awk '/Still Self-Signed/ {print $2; exit}')" >> "$GITHUB_ENV"
+          ID=$(security find-identity -p codesigning "$KC" | awk '/Still Self-Signed/ {print $2; exit}')
+          # Never fall back to an ad-hoc signature: users would lose Screen Recording permission on update.
+          test -n "$ID" || { echo "The Still signing certificate wasn't found"; exit 1; }
+          echo "STILL_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
       - name: Build universal app
+        env: { STILL_REQUIRE_SIGNING: '1' }
         run: ./scripts/build.sh "$RUNNER_TEMP/Still.app"
+      - name: Check the signature
+        run: codesign -dvv "$RUNNER_TEMP/Still.app" 2>&1 | grep -q '^Authority=Still Self-Signed' || { echo "Still.app isn't signed with the release certificate"; exit 1; }
       - name: Zip
-        run: V="${{ inputs.version }}"; ditto -c -k --keepParent "$RUNNER_TEMP/Still.app" "Still-${V#v}-mac-universal.zip"
-      - uses: actions/upload-artifact@v7
-        with: { name: mac, path: "Still-*-mac-universal.zip" }
+        run: V="$VERSION"; ditto -c -k --keepParent "$RUNNER_TEMP/Still.app" "Still-${V#v}-mac-universal.zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with: { name: release-mac, path: "Still-*-mac-universal.zip", if-no-files-found: error }
   desktop:
+    needs: check
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -55,8 +73,9 @@ jobs:
         working-directory: Desktop
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: 22 }
       - name: Linux build dependencies
         if: runner.os == 'Linux'
@@ -65,7 +84,7 @@ jobs:
         run: rustup update stable && rustup default stable && rustup target add ${{ matrix.target }}
       - name: Set version
         run: |
-          V="${{ inputs.version }}"; V="${V#v}"
+          V="${VERSION#v}"
           node -e "const f='src-tauri/tauri.conf.json',c=require('./'+f);c.version='$V';require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
           sed -i.bak "0,/^version = .*/s//version = \"$V\"/" src-tauri/Cargo.toml
       - run: npm ci
@@ -80,18 +99,21 @@ jobs:
           mkdir -p ../out
           B=src-tauri/target/${{ matrix.target }}/release/bundle
           find $B -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.sig' \) -exec cp {} ../out/ \;
-          if [ "${{ runner.os }}" = "Windows" ]; then V="${{ inputs.version }}"; cp src-tauri/target/${{ matrix.target }}/release/still.exe "../out/Still-${V#v}-${{ matrix.name }}-portable.exe"; fi
+          if [ "${{ runner.os }}" = "Windows" ]; then V="$VERSION"; cp src-tauri/target/${{ matrix.target }}/release/still.exe "../out/Still-${V#v}-${{ matrix.name }}-portable.exe"; fi
           ls -la ../out
+          # Fail here rather than publish a release with a platform missing.
+          if [ "${{ runner.os }}" = "Windows" ]; then ls ../out/*-setup.exe ../out/*-setup.exe.sig ../out/*-portable.exe >/dev/null
+          else ls ../out/*.AppImage ../out/*.AppImage.sig ../out/*.deb ../out/*.rpm >/dev/null; fi
       # Windows code signing through SignPath Foundation (free for open source). It stays off until
       # the repository variable SIGNPATH_ORGANIZATION_ID and the secret SIGNPATH_API_TOKEN are set.
       - name: Upload unsigned Windows files for signing
         id: unsigned
         if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@v7
-        with: { name: "unsigned-${{ matrix.name }}", path: "out/*.exe" }
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with: { name: "signing-input-${{ matrix.name }}", path: "out/*.exe", if-no-files-found: error }
       - name: Sign with SignPath
         if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: signpath/github-action-submit-signing-request@v2
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
         with:
           connector-url: https://githubactions.connectors.signpath.io
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -108,22 +130,28 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
-          cp ../signed/*.exe ../out/
+          # The signed files replace the unsigned ones; only release-* artifacts are published.
+          cp -f ../signed/*.exe ../out/
           for f in ../out/*-setup.exe; do rm -f "$f.sig"; npx tauri signer sign "$f"; done
-      - uses: actions/upload-artifact@v7
-        with: { name: "${{ matrix.name }}", path: out }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with: { name: "release-${{ matrix.name }}", path: out, if-no-files-found: error }
   publish:
     needs: [mac, desktop]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with: { path: release, merge-multiple: true }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with: { path: release, pattern: "release-*", merge-multiple: true }
       - name: Update feed and checksums
         run: |
-          node Desktop/scripts/latest-json.mjs release "${{ inputs.version }}" "${{ github.repository }}"
+          node Desktop/scripts/latest-json.mjs release "$VERSION" "${{ github.repository }}"
           cd release && sha256sum $(ls | grep -v '\.sig$') > SHA256SUMS
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.version }}" release/* --repo "${{ github.repository }}" --title "Still ${{ inputs.version }}" --generate-notes
+        # Tag the commit that was built, not whatever main points at by now.
+        run: gh release create "$VERSION" release/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Still $VERSION" --generate-notes

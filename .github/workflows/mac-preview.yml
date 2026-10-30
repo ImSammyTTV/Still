@@ -6,7 +6,8 @@ jobs:
   mac:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
       - name: Import release identity
         env:
           MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
@@ -28,7 +29,7 @@ jobs:
           test -n "$STILL_SIGN_IDENTITY"
           ./scripts/build.sh "$RUNNER_TEMP/Still.app"
           ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Still.app" "$RUNNER_TEMP/Still-preview.zip"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: Still-mac-preview
           path: ${{ runner.temp }}/Still-preview.zip

@@ -14,13 +14,15 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: Desktop
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: 22 }
       - name: Linux dependencies
         if: runner.os == 'Linux'
@@ -29,7 +31,7 @@ jobs:
       - run: npm test
       - name: Build
         run: cargo build --manifest-path src-tauri/Cargo.toml
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: '3.13' }
       - name: Start a local Still Cloud server
         run: |
@@ -53,7 +55,10 @@ jobs:
           openbox & sleep 1
           dbus-run-session -- timeout 180 src-tauri/target/debug/still --self-test=selftest-out || true
           cat selftest-out/results.json
-      - uses: actions/upload-artifact@v7
+      - name: Check the results
+        run: |
+          node -e "const r=require('./selftest-out/results.json');const bad=['previewCreated','afterCaptureCopy'].filter(k=>r[k]!==true);if(bad.length){console.error('Self-test failed - '+bad.join(', '));process.exit(1)}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: selftest-${{ matrix.os }}

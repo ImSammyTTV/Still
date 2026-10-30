@@ -5,8 +5,8 @@ cd "$project_root"
 app_path="${1:-$project_root/../Still.app}"
 build_arches=()
 if [ "${STILL_UNIVERSAL:-1}" = "1" ]; then build_arches=(--arch arm64 --arch x86_64); fi
-swift build -c release "${build_arches[@]}"
-binary_dir="$(swift build -c release "${build_arches[@]}" --show-bin-path)"
+swift build -c release ${build_arches[@]+"${build_arches[@]}"}
+binary_dir="$(swift build -c release ${build_arches[@]+"${build_arches[@]}"} --show-bin-path)"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 cp "$binary_dir/Still" "$app_path/Contents/MacOS/Still"
 cp Resources/Info.plist "$app_path/Contents/Info.plist"
@@ -26,7 +26,12 @@ sign_identity="${STILL_SIGN_IDENTITY:-}"
 if [ -z "$sign_identity" ]; then
     sign_identity="$(security find-identity -v -p codesigning | awk '/Apple Development:/ {print $2; exit}')"
 fi
-if [ -z "$sign_identity" ]; then sign_identity="-"; fi
-codesign --force --sign "$sign_identity" --timestamp=none --identifier local.sam.Still "$app_path"
+if [ -z "$sign_identity" ]; then
+    if [ "${STILL_REQUIRE_SIGNING:-0}" = "1" ]; then echo "No signing identity found" >&2; exit 1; fi
+    sign_identity="-"
+fi
+# Hardened Runtime stops other code from injecting itself into Still and borrowing its Screen Recording,
+# camera and microphone access. The entitlements re-allow the camera and microphone.
+codesign --force --sign "$sign_identity" --timestamp=none --options runtime --entitlements Resources/Still.entitlements --identifier local.sam.Still "$app_path"
 codesign --verify --strict "$app_path"
 printf 'Built %s\n' "$app_path"

@@ -24,6 +24,9 @@ for (const file of fs.readdirSync(dir)) {
   const entry = { signature: fs.readFileSync(path.join(dir, file), 'utf8').trim(), url: `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(bundle)}` };
   for (const key of rule[1]) platforms[key] = entry;
 }
+// Every platform must be present, or apps on the missing ones would be told there's no update (or worse).
+const missing = rules.flatMap(([, keys]) => keys).filter(key => !platforms[key]);
+if (missing.length) { console.error(`Missing update bundles for: ${missing.join(', ')}`); process.exit(1); }
 const feed = { version: version.replace(/^v/, ''), notes: `See https://github.com/${repo}/releases/tag/${tag}`, pub_date: new Date().toISOString(), platforms };
 fs.writeFileSync(path.join(dir, 'latest.json'), JSON.stringify(feed, null, 2));
 console.log(Object.keys(platforms).join('\n'));
