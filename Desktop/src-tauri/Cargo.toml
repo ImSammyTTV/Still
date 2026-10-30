@@ -1,6 +1,6 @@
 [package]
 name = "still"
-version = "1.2.3"
+version = "1.2.4"
 description = "Capture, annotate and record your screen"
 authors = ["ImSammyTTV"]
 edition = "2021"
