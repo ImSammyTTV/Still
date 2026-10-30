@@ -40,8 +40,9 @@ Configure backups, storage quotas, monitoring and patching for your deployment. 
 | `STILL_OIDC_CLIENT_SECRET` | OIDC client secret |
 | `STILL_OIDC_ALLOWED_DOMAINS` | Comma-separated verified email domains eligible for first-login provisioning |
 | `STILL_SCIM_TOKEN` | Separate bearer secret for `/scim/v2/Users` provisioning |
+| `STILL_TRUST_PROXY` | Set to `1` only behind a reverse proxy you control (the bundled compose file does), so rate limits use the visitor's address from `X-Forwarded-For` |
 
-OIDC requires discovery, authorization-code with PKCE, and userinfo with verified email. Register `${STILL_PUBLIC_URL}/auth/callback`. Accounts can be provisioned through the team UI or SCIM. SCIM supports Users, activation and deactivation; Groups and role mapping are not implemented. Validate your identity provider integration before relying on it.
+OIDC requires discovery, authorization-code with PKCE, and userinfo with verified email. Register `${STILL_PUBLIC_URL}/auth/callback`. Accounts can be provisioned through the team UI or SCIM. The owner can deactivate or reactivate a member with `PATCH /api/users/<id>` (`{"active": false}`) and issue a new token with `POST /api/users/<id>/token`; both sign that member out everywhere, as does logging out. SCIM supports Users, activation and deactivation; Groups and role mapping are not implemented. Validate your identity provider integration before relying on it.
 
 ## Sharing behavior
 

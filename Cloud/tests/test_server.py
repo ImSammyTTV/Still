@@ -106,6 +106,34 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(self.call('GET',item['media'],auth=None,jar=jar)[0],200)
         self.assertEqual(self.call('GET',f"/api/share/{item['token']}",auth=None)[0],410)
         self.assertEqual(self.call('GET',item['media'],auth=None,jar=jar)[0],200)
+    def test_review_fixes_views_visitor_fields_admin_and_sessions(self):
+        # The owner previewing a one-view link doesn't use up its view.
+        item=self.create(maxViews=1, ocr='secret before redaction')
+        self.assertEqual(self.call('GET',f"/api/share/{item['token']}")[0],200)
+        status, shared, _ = self.call('GET',f"/api/share/{item['token']}",auth=None)
+        self.assertEqual(status,200)
+        # Visitors don't receive recognised text or internal ids.
+        self.assertNotIn('ocr', shared['item']); self.assertNotIn('id', shared['item'])
+        # Admins can't open another member's "Only you" capture.
+        _, user, _=self.call('POST','/api/users',dict(username='m@example.test',name='M'))
+        _, pending, _=self.call('POST','/api/uploads',dict(title='Mine',mime='image/png',size=len(PNG),visibility='private'),auth=user['token'])
+        _, mine, _=self.call('PUT',f"/api/uploads/{pending['id']}/content",PNG,auth=user['token'],headers={'Content-Type':'image/png'})
+        self.assertEqual(self.call('GET',f"/api/share/{mine['token']}")[0],401)
+        # Admins can deactivate a member and reset their token.
+        self.assertEqual(self.call('PATCH',f"/api/users/{user['id']}",dict(active=False))[0],200)
+        self.assertEqual(self.call('GET','/api/me',auth=user['token'])[0],401)
+        self.call('PATCH',f"/api/users/{user['id']}",dict(active=True))
+        status, reset, _ = self.call('POST',f"/api/users/{user['id']}/token",{})
+        self.assertEqual(status,200)
+        self.assertEqual(self.call('GET','/api/me',auth=user['token'])[0],401)
+        self.assertEqual(self.call('GET','/api/me',auth=reset['token'])[0],200)
+        # Logging out ends the session cookie for good.
+        jar={}; origin={'Origin':self.store.public_url}
+        self.call('POST','/api/login',dict(token=OWNER),auth=None,jar=jar,headers=origin)
+        stale=dict(jar)
+        _, me, _ = self.call('GET','/api/me',auth=None,jar=jar)
+        self.call('POST','/api/logout',{},auth=None,jar=jar,headers=origin|{'X-CSRF-Token':me['csrf']})
+        self.assertEqual(self.call('GET','/api/me',auth=None,jar=stale)[0],401)
     def test_private_team_and_cross_account_permissions(self):
         _, user, _=self.call('POST','/api/users',dict(username='member@example.test',name='Member'))
         member=user['token']; private=self.create(visibility='private'); team=self.create(visibility='team')

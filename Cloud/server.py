@@ -10,6 +10,8 @@ import json
 import mimetypes
 import os
 import re
+import signal
+import socketserver
 import secrets
 import sqlite3
 import threading
@@ -38,7 +40,12 @@ def b64(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode().rstrip("=")
 
 def password_hash(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 310_000).hex()
+    return "v2$" + hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 600_000).hex()
+
+def password_matches(password: str, salt: str, stored: str) -> bool:
+    # Links made before v2 used 310,000 iterations; they keep working.
+    if stored.startswith("v2$"): return hmac.compare_digest(password_hash(password, salt), stored)
+    return hmac.compare_digest(hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 310_000).hex(), stored)
 
 class Store:
     def __init__(self, directory: Path, public_url: str, admin_token: str | None = None):
@@ -56,6 +63,9 @@ class Store:
             self.accent = "#087cff"
         self.secret = self._secret("session-secret")
         self.scim_token = os.environ.get("STILL_SCIM_TOKEN", "")
+        # Behind the bundled Caddy proxy every request comes from the proxy's address; trust its
+        # X-Forwarded-For only when told to, so rate limits apply per visitor.
+        self.trust_proxy = os.environ.get("STILL_TRUST_PROXY", "") == "1"
         self.rate_lock = threading.Lock()
         self.rates: dict[str, list[float]] = {}
         with self.db() as db:
@@ -82,6 +92,9 @@ class Store:
                 CREATE INDEX IF NOT EXISTS uploads_owner_created ON uploads(owner, created DESC);
                 CREATE INDEX IF NOT EXISTS comments_upload_created ON comments(upload_id, created);
             """)
+            # Bumped on logout, deactivation and token reset, which ends every signed-in session for that user.
+            if "session_version" not in [c[1] for c in db.execute("PRAGMA table_info(users)")]:
+                db.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0")
             token = admin_token or os.environ.get("STILL_ADMIN_TOKEN")
             if not token:
                 path = self.directory / "admin-token"
@@ -160,6 +173,11 @@ class CloudHTTPServer(ThreadingHTTPServer):
     def __init__(self, address, store):
         self.store = store
         super().__init__(address, Handler)
+    def server_bind(self):
+        # HTTPServer looks up the machine's full DNS name here, which can hang for half a minute on some
+        # networks; the name is never used.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[0], self.server_address[1]
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "StillCloud/1.0"
@@ -220,6 +238,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError: raise HTTPError(400, "Invalid content length.")
         if not 0 <= length <= limit: raise HTTPError(413, "Request is too large.")
         data = self.rfile.read(length)
+        self.body_read = True
         if len(data) != length: raise HTTPError(400, "The request was interrupted.")
         return data
     def json(self):
@@ -232,6 +251,12 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin and origin.rstrip("/") != self.store.public_url:
             raise HTTPError(403, "Cross-origin request rejected.")
+    def client_ip(self):
+        if self.store.trust_proxy:
+            forwarded = self.headers.get("X-Forwarded-For", "")
+            # The proxy appends the address it saw last; earlier entries are whatever the visitor sent.
+            if forwarded: return forwarded.split(",")[-1].strip()[:64]
+        return self.client_address[0]
     def user(self, required=True):
         auth = self.headers.get("Authorization", "")
         with self.store.db() as db:
@@ -239,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = db.execute("SELECT * FROM users WHERE token_hash=? AND active=1", (digest(auth[7:]),)).fetchone()
             else:
                 session = self.signed_cookie("still_session")
-                result = db.execute("SELECT * FROM users WHERE id=? AND active=1", ((session or {}).get("uid", ""),)).fetchone()
+                result = db.execute("SELECT * FROM users WHERE id=? AND active=1 AND session_version=?", ((session or {}).get("uid", ""), (session or {}).get("v", 0))).fetchone()
                 if result and self.command not in ("GET", "HEAD"):
                     self.same_origin()
                     if not session or not hmac.compare_digest(self.headers.get("X-CSRF-Token", ""), session.get("csrf", "")):
@@ -271,7 +296,8 @@ class Handler(BaseHTTPRequestHandler):
         if row["deleted"] or (row["expires"] and row["expires"] <= time.time()): raise HTTPError(410, "This link has expired or was removed.")
         user = self.user(required=False)
         owner = bool(user and (user["id"] == row["owner"] or user["role"] == "admin"))
-        if row["visibility"] == "private" and not owner: raise HTTPError(401, "Sign in as the owner to view this capture.", loginRequired=True)
+        # "Only you" means only the person who uploaded it, not every admin.
+        if row["visibility"] == "private" and not (user and user["id"] == row["owner"]): raise HTTPError(401, "Sign in as the owner to view this capture.", loginRequired=True)
         if row["visibility"] == "team" and not user: raise HTTPError(401, "Sign in to your team to view this capture.", loginRequired=True)
         if row["password_hash"] and not owner:
             grant = self.signed_cookie("still_grant_" + row["id"])
@@ -285,6 +311,13 @@ class Handler(BaseHTTPRequestHandler):
             if not visited: raise HTTPError(410, "This link reached its view limit.")
         return row, user, owner
     def dispatch(self):
+        self.body_read = False
+        try:
+            self.route()
+        finally:
+            # A request body nobody read would be parsed as the next request on a kept-alive connection.
+            if not self.body_read and self.headers.get("Content-Length", "0") not in ("", "0"): self.close_connection = True
+    def route(self):
         try:
             if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) > 1:
                 raise HTTPError(400, "Use a single Content-Length header.")
@@ -298,7 +331,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, content, "text/javascript; charset=utf-8" if name.endswith("js") else "text/css; charset=utf-8")
             if path == "/api/health": return self.respond(200, {"status": "ok", "name": self.store.brand, "oidc": bool(os.environ.get("STILL_OIDC_ISSUER"))})
             if path == "/api/login" and self.command == "POST": return self.login()
-            if path == "/api/logout" and self.command == "POST": self.user(); return self.respond(200, {"ok": True}, cookies=[self.cookie("still_session", "", 0)])
+            if path == "/api/logout" and self.command == "POST":
+                user = self.user()
+                with self.store.db() as db: db.execute("UPDATE users SET session_version=session_version+1 WHERE id=?", (user["id"],))
+                return self.respond(200, {"ok": True}, cookies=[self.cookie("still_session", "", 0)])
             if path == "/api/me":
                 user = self.user(); session = self.signed_cookie("still_session")
                 return self.respond(200, {"user": self.public_user(user), "csrf": (session or {}).get("csrf", ""), "brand": self.store.brand, "accent": self.store.accent, "oidc": bool(os.environ.get("STILL_OIDC_ISSUER"))})
@@ -315,6 +351,8 @@ class Handler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/uploads/([a-f0-9]{32})(?:/(content|restore))?", path)
             if match: return self.upload_action(*match.groups())
             if path == "/api/users": return self.users()
+            match = re.fullmatch(r"/api/users/([a-f0-9]{32})(?:/(token))?", path)
+            if match: return self.user_action(*match.groups())
             if path == "/api/audit":
                 user = self.user()
                 if user["role"] != "admin": raise HTTPError(403, "Owner access required.")
@@ -345,12 +383,12 @@ class Handler(BaseHTTPRequestHandler):
         html = (HERE/"static"/"index.html").read_text().replace("{{PAGE}}", page).replace("{{TOKEN}}", token)
         self.respond(200, html, "text/html; charset=utf-8")
     def login(self):
-        self.same_origin(); self.store.rate("login:" + self.client_address[0], 12)
+        self.same_origin(); self.store.rate("login:" + self.client_ip(), 12)
         token = str(self.json().get("token", ""))
         with self.store.db() as db: user = db.execute("SELECT * FROM users WHERE token_hash=? AND active=1", (digest(token),)).fetchone()
         if not user: raise HTTPError(401, "That token is not valid.")
         csrf = secrets.token_urlsafe(24)
-        session = self.store.sign({"uid": user["id"], "csrf": csrf, "exp": time.time()+86400})
+        session = self.store.sign({"uid": user["id"], "v": user["session_version"], "csrf": csrf, "exp": time.time()+86400})
         self.respond(200, {"ok": True}, cookies=[self.cookie("still_session", session)])
     def uploads(self, query):
         user = self.user()
@@ -374,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
         allowed = {"image/png", "image/jpeg", "image/gif", "image/tiff", "image/heic", "video/mp4", "video/quicktime"}
         if mime not in allowed: raise HTTPError(400, "This file type is not supported.")
         size = int(data.get("size", 0))
-        if not 0 < size <= int(os.environ.get("STILL_MAX_UPLOAD_BYTES", str(4*1024**3))): raise HTTPError(413, "File is too large or empty.")
+        if not 0 < size <= int(os.environ.get("STILL_MAX_UPLOAD_BYTES") or 4*1024**3): raise HTTPError(413, "File is too large or empty.")
         visibility = data.get("visibility", "link")
         if visibility not in ("link", "team", "private"): raise HTTPError(400, "Invalid access setting.")
         days = max(0, min(3650, int(data.get("expiryDays", 7))))
@@ -397,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
             hasher = hashlib.sha256(); first = b""
             try:
                 with partial.open("xb") as file:
-                    remaining = row["size"]
+                    remaining = row["size"]; self.body_read = True
                     while remaining:
                         chunk = self.rfile.read(min(1024*1024, remaining))
                         if not chunk: raise HTTPError(400, "Upload interrupted. Create a new upload and try again.")
@@ -448,11 +486,11 @@ class Handler(BaseHTTPRequestHandler):
         return False
     def share_api(self, token, action):
         if action == "unlock" and self.command == "POST":
-            self.same_origin(); self.store.rate("unlock:"+self.client_address[0]+":"+token, 10)
+            self.same_origin(); self.store.rate("unlock:"+self.client_ip()+":"+token, 10)
             with self.store.db() as db: row = db.execute("SELECT * FROM uploads WHERE token=? AND status='ready' AND deleted IS NULL", (token,)).fetchone()
             if not row or not row["password_hash"]: raise HTTPError(404, "Capture not found.")
             password = str(self.json().get("password", ""))[:500]
-            if not hmac.compare_digest(password_hash(password, row["password_salt"]), row["password_hash"]): raise HTTPError(401, "Incorrect password.", passwordRequired=True)
+            if not password_matches(password, row["password_salt"], row["password_hash"]): raise HTTPError(401, "Incorrect password.", passwordRequired=True)
             value = self.store.sign({"id": row["id"], "version": row["password_hash"][:16], "exp": time.time()+86400})
             return self.respond(200, {"ok": True}, cookies=[self.cookie("still_grant_"+row["id"], value)])
         row, user, owner = self.share(token)
@@ -462,7 +500,7 @@ class Handler(BaseHTTPRequestHandler):
                 with self.store.db() as db: comments = [dict(x) for x in db.execute("SELECT id,parent_id,author,text,created,seconds,x,y,resolved FROM comments WHERE upload_id=? AND deleted IS NULL ORDER BY created", (row["id"],))]
                 return self.respond(200, {"comments": comments})
             if self.command != "POST": raise HTTPError(405, "Method not allowed.")
-            self.same_origin(); self.store.rate("comment:"+self.client_address[0], 20)
+            self.same_origin(); self.store.rate("comment:"+self.client_ip(), 20)
             viewer = self.signed_cookie("still_viewer")
             if not viewer or self.headers.get("X-Share-CSRF", "") != viewer.get("csrf"): raise HTTPError(403, "Refresh this page before commenting.")
             data = self.json(); text = str(data.get("text", "")).strip()[:4000]
@@ -486,11 +524,16 @@ class Handler(BaseHTTPRequestHandler):
             db.execute("BEGIN IMMEDIATE")
             current = db.execute("SELECT views,max_views FROM uploads WHERE id=?", (row["id"],)).fetchone()
             exists = db.execute("SELECT 1 FROM visits WHERE upload_id=? AND viewer=?", (row["id"], viewer["id"])).fetchone()
-            if not exists:
+            # The owner checking their own link doesn't use up its views.
+            if not exists and not owner:
                 if current["max_views"] and current["views"] >= current["max_views"] and not owner: raise HTTPError(410, "This link reached its view limit.")
                 db.execute("INSERT INTO visits VALUES(?,?,?)", (row["id"], viewer["id"], time.time()))
                 db.execute("UPDATE uploads SET views=views+1 WHERE id=?", (row["id"],))
-        self.respond(200, {"item": self.public_upload(row), "owner": owner, "csrf": viewer["csrf"], "brand": self.store.brand, "accent": self.store.accent}, cookies=[self.cookie("still_viewer", self.store.sign(viewer), 30*86400)])
+        item = self.public_upload(row)
+        # Visitors get what the viewer shows; recognised text (which can include text that was later
+        # redacted), tags and internal ids stay with the owner.
+        if not owner: item = {k: v for k, v in item.items() if k not in ("id", "ocr", "tags", "download", "deleted")}
+        self.respond(200, {"item": item, "owner": owner, "csrf": viewer["csrf"], "brand": self.store.brand, "accent": self.store.accent}, cookies=[self.cookie("still_viewer", self.store.sign(viewer), 30*86400)])
     def comment_action(self, comment_id):
         user = self.user()
         with self.store.db() as db:
@@ -551,6 +594,25 @@ class Handler(BaseHTTPRequestHandler):
             db.execute("INSERT INTO users(id,username,name,role,token_hash) VALUES(?,?,?,?,?)", (user_id, username, str(data.get("name", username))[:100], role, digest(token)))
             self.store.audit(db, owner["id"], "user.create", user_id)
         self.respond(201, {"id": user_id, "token": token})
+    def user_action(self, user_id, action):
+        """Owner-only: deactivate or reactivate a member, or replace their token. Either ends their sessions."""
+        owner = self.user()
+        if owner["role"] != "admin": raise HTTPError(403, "Owner access required.")
+        with self.store.db() as db:
+            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row: raise HTTPError(404, "User not found.")
+            if action == "token" and self.command == "POST":
+                token = secrets.token_urlsafe(32)
+                db.execute("UPDATE users SET token_hash=?, session_version=session_version+1 WHERE id=?", (digest(token), user_id))
+                self.store.audit(db, owner["id"], "user.token_reset", user_id)
+                return self.respond(200, {"token": token})
+            if action is None and self.command == "PATCH":
+                if user_id == owner["id"]: raise HTTPError(400, "You can’t deactivate your own account.")
+                active = bool(self.json().get("active", True))
+                db.execute("UPDATE users SET active=?, session_version=session_version+1 WHERE id=?", (int(active), user_id))
+                self.store.audit(db, owner["id"], "user.activate" if active else "user.deactivate", user_id)
+                return self.respond(200, {"ok": True, "active": active})
+        raise HTTPError(405, "Method not allowed.")
     def oidc(self, path, query):
         issuer = os.environ.get("STILL_OIDC_ISSUER", "").rstrip("/")
         client_id = os.environ.get("STILL_OIDC_CLIENT_ID", "")
@@ -586,7 +648,7 @@ class Handler(BaseHTTPRequestHandler):
                 user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
             if not user["active"]: raise HTTPError(403, "Your account is inactive.")
             db.execute("UPDATE users SET oidc_subject=? WHERE id=?", (subject, user["id"]))
-        session = self.store.sign({"uid": user["id"], "csrf": secrets.token_urlsafe(24), "exp": time.time()+86400})
+        session = self.store.sign({"uid": user["id"], "v": user["session_version"], "csrf": secrets.token_urlsafe(24), "exp": time.time()+86400})
         self.respond(302, b"", cookies=[self.cookie("still_session", session), self.cookie("still_oidc", "", 0)], extra={"Location": "/"})
     def scim(self, path, query):
         token = self.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -719,6 +781,8 @@ def main():
         args.ready_file.chmod(0o600)
     print(f"Still Cloud listening on {args.host}:{server.server_port}", flush=True)
     print("Owner token is stored in the private data/admin-token file. No capture uploads automatically.", flush=True)
+    def stop(*_): raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, stop)  # docker stop sends SIGTERM to PID 1
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()

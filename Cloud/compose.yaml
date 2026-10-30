@@ -5,6 +5,15 @@ services:
     environment:
       STILL_PUBLIC_URL: ${STILL_PUBLIC_URL}
       STILL_BRAND: ${STILL_BRAND:-Still Cloud}
+      # Requests arrive through the proxy below, so use its X-Forwarded-For for per-visitor rate limits.
+      STILL_TRUST_PROXY: "1"
+      STILL_ADMIN_TOKEN: ${STILL_ADMIN_TOKEN:-}
+      STILL_SCIM_TOKEN: ${STILL_SCIM_TOKEN:-}
+      STILL_MAX_UPLOAD_BYTES: ${STILL_MAX_UPLOAD_BYTES:-}
+      STILL_OIDC_ISSUER: ${STILL_OIDC_ISSUER:-}
+      STILL_OIDC_CLIENT_ID: ${STILL_OIDC_CLIENT_ID:-}
+      STILL_OIDC_CLIENT_SECRET: ${STILL_OIDC_CLIENT_SECRET:-}
+      STILL_OIDC_ALLOWED_DOMAINS: ${STILL_OIDC_ALLOWED_DOMAINS:-}
     volumes:
       - captures:/data
     expose:
