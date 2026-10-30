@@ -31,7 +31,8 @@ async function load() {
     tile.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       popupMenu({ x: e.clientX, y: e.clientY }, [
-        { label: item.kind === 'recording' ? 'Play' : 'Annotate', icon: item.kind === 'recording' ? 'play' : 'pencil', action: () => still.invoke('library:open', item.id) },
+        { label: item.kind === 'recording' ? 'Trim and Export…' : 'Annotate', icon: item.kind === 'recording' ? 'scissors' : 'pencil', action: () => still.invoke('library:open', item.id) },
+        ...(item.kind === 'recording' ? [{ label: 'Open in Default Player', icon: 'play', action: () => still.invoke('library:play', item.id) }] : []),
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },
         { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved'), (e) => toast(`Couldn’t save: ${e}`)) },
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${e}`)) },

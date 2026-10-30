@@ -2,16 +2,18 @@ mod capture;
 mod cloud;
 mod library;
 mod settings;
+mod video;
 
 use capture::Grab;
 use image::RgbaImage;
 use library::{Item, Library};
 use serde_json::{json, Value};
 use settings::Settings;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::menu::{IconMenuItemBuilder, Menu, MenuBuilder, SubmenuBuilder};
+use tauri::menu::{IconMenuItem, IconMenuItemBuilder, Menu, MenuBuilder, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -33,6 +35,8 @@ struct Session {
     update: Value,
     pending_update: Option<Arc<tauri_plugin_updater::Update>>,
     selftest: Option<PathBuf>,
+    stop_item: Option<IconMenuItem<tauri::Wry>>,
+    export_targets: HashMap<String, PathBuf>,
 }
 
 struct State { settings: Mutex<Settings>, library: Mutex<Library>, session: Mutex<Session> }
@@ -99,6 +103,14 @@ fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
         .unwrap_or((1180.0, 800.0));
     focus_or(app, &label, || glass(builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" } })))
         .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false).center().build().ok());
+}
+
+/// Recordings open here rather than in the image editor.
+fn open_video(app: &AppHandle, id: &str) {
+    let label = format!("video-{id}");
+    let title = st(app).library.lock().unwrap().get(id).map(|i| i.title).unwrap_or_else(|| "Still — Trim Video".into());
+    close_preview(app, id);
+    focus_or(app, &label, || glass(builder(app, &label, "video.html", json!({ "id": id }))).title(title).inner_size(960.0, 700.0).min_inner_size(720.0, 560.0).decorations(false).center().build().ok());
 }
 
 // ---- Floating Preview -------------------------------------------------------------------------------
@@ -349,6 +361,7 @@ fn window_gone(app: &AppHandle, label: &str) {
         // Closing Settings while recording a shortcut would otherwise leave every shortcut unregistered.
         "settings" => register_shortcuts(app),
         "hud" => { if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); } }
+        _ if label.starts_with("video-") => { st(app).session.lock().unwrap().export_targets.remove(label); }
         _ if label.starts_with("overlay-") => {
             let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
             if !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
@@ -406,6 +419,16 @@ fn action_key(accel: &str, shortcuts: &Value) -> String {
 fn build_tray_menu(app: &AppHandle) {
     let Some(tray) = app.tray_by_id("still") else { return };
     if let Ok(menu) = tray_menu(app) { let _ = tray.set_menu(Some(menu)); }
+    if st(app).session.lock().unwrap().recording.is_none() { let _ = tray.set_tooltip(Some("Still")); let _ = tray.set_title(None::<&str>); }
+}
+
+/// The running time, wherever the platform can show it: the tooltip on Windows, the title next to the icon on
+/// Linux (where the panel supports it) and the Stop item on both.
+fn show_recording_time(app: &AppHandle, seconds: u64, paused: bool) {
+    let stop = { let s = st(app).session.lock().unwrap(); if s.recording.is_none() { return; } s.stop_item.clone() };
+    let (menu, tooltip) = video::tray_status(seconds, paused);
+    if let Some(tray) = app.tray_by_id("still") { let _ = tray.set_tooltip(Some(tooltip)); let _ = tray.set_title(Some(format!(" {}", video::clock(seconds)))); }
+    if let Some(stop) = stop { let _ = stop.set_text(menu); }
 }
 
 /// The tray shows a plain ripple glyph, like other menu bar and tray icons: white on a dark taskbar or
@@ -436,7 +459,7 @@ fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
         "history" => include_bytes!("../icons/menu/history.png"), "restore" => include_bytes!("../icons/menu/restore.png"),
         "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
         "update" => include_bytes!("../icons/menu/update.png"), "settings" => include_bytes!("../icons/menu/settings.png"),
-        "quit" => include_bytes!("../icons/menu/quit.png"), _ => return None,
+        "quit" => include_bytes!("../icons/menu/quit.png"), "stop" => include_bytes!("../icons/menu/stop.png"), _ => return None,
     };
     tauri::image::Image::from_bytes(bytes).ok()
 }
@@ -463,15 +486,19 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         Some("downloading") => item("update-busy", "Downloading Update…", "update", None, false)?,
         _ => item("update-check", "Check for Updates…", "update", None, true)?,
     };
-    MenuBuilder::new(app)
+    let stop = if recording { Some(item("record", "Stop Recording", "stop", accel("record"), true)?) } else { None };
+    st(app).session.lock().unwrap().stop_item = stop.clone();
+    let mut menu = MenuBuilder::new(app);
+    if let Some(stop) = &stop { menu = menu.item(stop).separator(); }
+    menu = menu
         .item(&item("allInOne", "Capture Bar", "allInOne", accel("allInOne"), true)?).separator()
         .item(&item("area", "Capture Area", "area", accel("area"), true)?)
         .item(&item("window", "Capture Window", "window", accel("window"), true)?)
         .item(&item("fullscreen", "Capture Fullscreen", "fullscreen", accel("fullscreen"), true)?)
         .item(&timers)
-        .item(&item("text", "Capture Text (OCR)", "text", accel("text"), true)?)
-        .item(&item("record", if recording { "Stop Recording" } else { "Record Screen" }, "record", accel("record"), true)?)
-        .separator()
+        .item(&item("text", "Capture Text (OCR)", "text", accel("text"), true)?);
+    if !recording { menu = menu.item(&item("record", "Record Screen", "record", accel("record"), true)?); }
+    menu.separator()
         .item(&item("open-image", "Open Image…", "open", None, true)?)
         .item(&item("history", "Capture History", "history", accel("history"), true)?)
         .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
@@ -717,7 +744,12 @@ fn open_path(file: &Path) {
 #[tauri::command]
 async fn library_open(app: AppHandle, id: String) {
     let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (i.kind.clone(), lib.file(&i))) };
-    match found { Some((kind, file)) if kind == "recording" => open_path(&file), Some(_) => open_editor(&app, Some(&id), false), None => {} }
+    match found { Some((kind, _)) if kind == "recording" => open_video(&app, &id), Some(_) => open_editor(&app, Some(&id), false), None => {} }
+}
+#[tauri::command]
+async fn library_play(app: AppHandle, id: String) {
+    let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
+    if let Some(f) = file { open_path(&f); }
 }
 #[tauri::command]
 async fn library_pin(app: AppHandle, id: String) {
@@ -871,6 +903,50 @@ fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<()
     if setting(&app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(&app, &item, false); }
     broadcast(&app, "library:changed", Value::Null);
     Ok(())
+}
+
+#[tauri::command]
+async fn recording_tick(app: AppHandle, seconds: u64, paused: bool) { show_recording_time(&app, seconds, paused); }
+
+// ---- Video editor -------------------------------------------------------------------------------
+
+// The page never names a path to write to: it asks for a save dialog, and this window's chosen file waits
+// here until the finished export arrives.
+fn video_source(app: &AppHandle, window: &tauri::Window) -> Result<(Item, PathBuf), String> {
+    let id = window.label().strip_prefix("video-").ok_or("This window has no recording.")?;
+    let lib = st(app).library.lock().unwrap();
+    let item = lib.get(id).ok_or("That recording no longer exists.")?;
+    let file = lib.file(&item);
+    Ok((item, file))
+}
+fn take_export_target(app: &AppHandle, window: &tauri::Window) -> Result<PathBuf, String> {
+    st(app).session.lock().unwrap().export_targets.remove(window.label()).ok_or_else(|| "Choose where to save the export first.".to_string())
+}
+#[tauri::command]
+async fn video_export_target(app: AppHandle, window: tauri::Window, ext: String) -> Result<Option<String>, String> {
+    if !video::EXPORT_TYPES.contains(&ext.as_str()) { return Err(format!("Still can’t export .{ext} files.")); }
+    let (item, source) = video_source(&app, &window)?;
+    let folder = export_folder(&app);
+    let suggested = unique_path(&folder, &video::export_name(&item.title, &ext), &ext).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let Some(chosen) = app.dialog().file().set_directory(folder).set_file_name(suggested).add_filter(ext.to_uppercase(), &[ext.as_str()]).blocking_save_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
+    let target = video::export_path(chosen, &ext);
+    if video::is_same_file(&target, &source) { return Err("That’s the original recording. Choose another name so it’s kept.".into()); }
+    st(&app).session.lock().unwrap().export_targets.insert(window.label().to_string(), target.clone());
+    Ok(Some(target.to_string_lossy().to_string()))
+}
+#[tauri::command]
+async fn video_export_save(app: AppHandle, window: tauri::Window, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected the exported file".into()) };
+    let target = take_export_target(&app, &window)?;
+    video::save_bytes(&private_temp(), bytes, &target)?;
+    Ok(target.to_string_lossy().to_string())
+}
+#[tauri::command]
+async fn video_export_copy(app: AppHandle, window: tauri::Window) -> Result<String, String> {
+    let (_, source) = video_source(&app, &window)?;
+    let target = take_export_target(&app, &window)?;
+    video::save_copy(&private_temp(), &source, &target)?;
+    Ok(target.to_string_lossy().to_string())
 }
 
 // ---- Sharing (self-hosted Still Cloud) -----------------------------------------------------------
@@ -1066,7 +1142,12 @@ pub fn run() {
             TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))
                 .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))
-                .on_tray_icon_event(|tray, e| if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e { run_action(tray.app_handle(), "area"); })
+                .on_tray_icon_event(|tray, e| if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                    // While recording, a click stops it, like the Mac's menu bar button.
+                    let app = tray.app_handle();
+                    let recording = st(app).session.lock().unwrap().recording.is_some();
+                    run_action(app, if recording { "record" } else { "area" });
+                })
                 .build(app)?;
             register_shortcuts(&handle);
             apply_login_item(&handle);
@@ -1092,10 +1173,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
-            recording_started, recording_cancel, recording_error, recording_save, update_status, update_check, update_install,
+            recording_started, recording_cancel, recording_error, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
+            update_status, update_check, update_install,
             cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data
         ])
         .build(tauri::generate_context!())
