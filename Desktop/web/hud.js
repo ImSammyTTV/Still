@@ -3,6 +3,28 @@
 const opts = window.__STILL_PARAMS__ || {};
 let recorder, streams = [], chunks = [], cropTimer, audioContext, ext = 'webm';
 let start = 0, pausedAt = 0, pausedTotal = 0, paused = false, cancelled = false, finishing = false, trayTime = '';
+let media = null, triedWebm = false, failure = '';
+
+// The recorder can fail after it has started (most often an MP4 encoder that this machine doesn't really have).
+// Without a handler that failure was silent: the stop produced no data and the HUD quietly cancelled.
+function startRecorder(type) {
+  ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
+  recorder = new MediaRecorder(media, { mimeType: type || undefined, videoBitsPerSecond: 12_000_000 });
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = finish;
+  recorder.onerror = (e) => {
+    const reason = (e.error && (e.error.message || e.error.name)) || 'The video encoder stopped unexpectedly.';
+    if (!chunks.length && ext === 'mp4' && !triedWebm) {
+      // Nothing recorded yet, so start over in WebM, which every engine can encode. The failed recorder's own
+      // stop event follows this error; ignoring it keeps the two recorders from both finishing.
+      triedWebm = true; recorder.onstop = null; recorder.ondataavailable = null;
+      setTimeout(() => { startRecorder(pickType('webm')); recorder.start(1000); start = performance.now(); pausedTotal = 0; toast('MP4 isn’t available here, so this is recording as WebM'); }, 0);
+      return;
+    }
+    failure = reason;
+    stop();
+  };
+}
 refreshIcons();
 
 setInterval(() => {
@@ -54,10 +76,8 @@ async function begin() {
     for (const t of sources) audioContext.createMediaStreamSource(new MediaStream([t])).connect(mix);
     audio.push(...mix.stream.getAudioTracks());
   }
-  const type = pickType(o.format); ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
-  recorder = new MediaRecorder(new MediaStream([videoTrack, ...audio]), { mimeType: type || undefined, videoBitsPerSecond: 12_000_000 });
-  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-  recorder.onstop = finish;
+  media = new MediaStream([videoTrack, ...audio]);
+  startRecorder(pickType(o.format));
   track.addEventListener('ended', () => stop());
   await still.invoke('recording:prepared').catch(() => {}); // The camera and overlays are extras: never a reason not to record.
   for (let n = o.countdown || 0; n > 0; n--) { $('#time').textContent = `Starts in ${n}`; await new Promise((res) => setTimeout(res, 1000)); if (cancelled || finishing) break; }
@@ -76,11 +96,18 @@ async function finish() {
   still.send('recording:finished'); // After the recorder, so the bubble doesn't vanish in the last frames.
   clearInterval(cropTimer);
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); audioContext?.close();
-  if (cancelled || !chunks.length) return still.invoke('recording:cancel');
+  if (cancelled) return still.invoke('recording:cancel');
+  // No data is a failure to report, never something to drop quietly.
+  if (!chunks.length) return still.invoke('recording:error', failure || 'No video was captured. Try the WebM format in Settings → Recording.', 'save');
   $('#time').textContent = 'Saving…';
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
-  const bytes = new Uint8Array(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer());
-  await still.raw('recording_save', bytes, { 'x-ext': ext, 'x-duration': String(duration) });
+  try {
+    const bytes = new Uint8Array(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer());
+    await still.raw('recording_save', bytes, { 'x-ext': ext, 'x-duration': String(duration) });
+  } catch (error) {
+    // The HUD would otherwise sit on "Saving…" for good with nothing to show for the recording.
+    await still.invoke('recording:error', `${failure ? failure + ' ' : ''}${error && error.message ? error.message : String(error)}`, 'save');
+  }
 }
 
 function togglePause() {
@@ -100,4 +127,5 @@ $('#pause').onclick = () => togglePause();
 $('#cancel').onclick = () => { cancelled = true; stop(); };
 $('#restart').onclick = () => { if (!recorder) return; chunks = []; recorder.stop(); recorder.onstop = () => { chunks = []; recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
+if (opts.stopShortcut) still.invoke('shortcut:label', opts.stopShortcut).then((label) => { const stop = $('#stop'); stop.title = `Stop and save (${label})`; stop.setAttribute('aria-label', stop.title); }).catch(() => {});
 begin().catch((error) => still.invoke('recording:error', error.message || String(error)));

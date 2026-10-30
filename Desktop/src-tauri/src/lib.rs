@@ -484,7 +484,8 @@ fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<Pat
 fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64, selected_window: bool) {
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
-    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec });
+    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
+        "stopShortcut": setting(app, "shortcuts")["record"] });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     {
         let mut s = st(app).session.lock().unwrap();
@@ -1201,7 +1202,10 @@ async fn camera_failed(app: AppHandle, message: String) {
 #[tauri::command]
 async fn recording_cancel(app: AppHandle) { stop_recording_state(&app); }
 #[tauri::command]
-async fn recording_error(app: AppHandle, message: String) { stop_recording_state(&app); notify(&app, "Recording couldn’t start", &message); }
+async fn recording_error(app: AppHandle, message: String, stage: Option<String>) {
+    stop_recording_state(&app);
+    notify(&app, if stage.as_deref() == Some("save") { "Recording couldn’t be saved" } else { "Recording couldn’t start" }, &message);
+}
 #[tauri::command]
 fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected video bytes".into()) };

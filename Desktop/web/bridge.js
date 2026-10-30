@@ -22,7 +22,7 @@
     'open:demo': ['open_demo'], 'capture': ['capture_action', 'action'],
     'ocr:result': ['ocr_result', 'text', 'error'],
     'recording:prepared': ['recording_prepared'], 'recording:started': ['recording_started'], 'recording:listen': ['recording_listen', 'on'], 'recording:finished': ['recording_finished'],
-    'recording:cancel': ['recording_cancel'], 'recording:error': ['recording_error', 'message'], 'camera:failed': ['camera_failed', 'message'],
+    'recording:cancel': ['recording_cancel'], 'recording:error': ['recording_error', 'message', 'stage'], 'camera:failed': ['camera_failed', 'message'],
     'recording:tick': ['recording_tick', 'seconds', 'paused'], 'video:target': ['video_export_target', 'ext'], 'video:copy': ['video_export_copy'],
     'cloud:get': ['cloud_get'], 'cloud:connect': ['cloud_connect', 'endpoint', 'token'], 'cloud:disconnect': ['cloud_disconnect'],
     'drive:get': ['drive_get'], 'drive:connect': ['drive_connect'], 'drive:disconnect': ['drive_disconnect'],
