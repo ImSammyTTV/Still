@@ -351,16 +351,16 @@ function editText(mark, at) {
   finishTextEdit();
   const target = mark || { type: 'text', x: at.x, y: at.y, text: '', color, size: Math.round(prefs.annotate?.font || 28) * Math.max(1, image.naturalWidth / 1600), stroke, style: styles.text };
   const r = stage.getBoundingClientRect(), L = layout(), s = displayScale(), main = $('main').getBoundingClientRect();
-  const area = el('textarea', { class: 'text-edit', spellcheck: 'false' });
+  const area = el('textarea', { class: 'text-edit', spellcheck: 'false', rows: '1' });
   area.value = target.text;
   Object.assign(area.style, {
     left: `${r.left - main.left + (target.x - L.base.x + L.ox) * s}px`, top: `${r.top - main.top + (target.y - L.base.y + L.oy) * s}px`,
     fontSize: `${target.size * s}px`, fontWeight: M.textWeight(target), color: M.textInk(target), fontFamily: fontFamily(), minWidth: '40px'
   });
   const look = M.textStyle(target);
-  if (look === 'label' || look === 'bubble') area.style.background = target.color;
+  if (look === 'label' || look === 'bubble') Object.assign(area.style, { background: target.color, boxShadow: `0 0 0 ${target.size * s * 0.2}px ${target.color}`, borderRadius: '1px' });
   if (look === 'outline') area.style.webkitTextStroke = `${target.size * s * 0.04}px ${target.color}`;
-  const grow = () => { area.style.height = 'auto'; area.style.height = `${area.scrollHeight}px`; area.style.width = 'auto'; area.style.width = `${Math.max(40, area.scrollWidth + 8)}px`; };
+  const grow = () => { area.style.height = 'auto'; area.style.height = `${area.scrollHeight}px`; area.style.width = '0'; area.style.width = `${Math.max(40, area.scrollWidth + 8)}px`; };
   area.addEventListener('input', grow);
   area.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) finishTextEdit(); });
   $('main').append(area); grow(); setTimeout(() => area.focus(), 0);
