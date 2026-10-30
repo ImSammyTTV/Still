@@ -7,7 +7,7 @@ const SHORTCUTS = [
   ['allInOne', 'Capture Bar'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Fullscreen'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
-let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false };
+let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' };
 
 const set = async (patch) => { prefs = { ...prefs, ...(await still.invoke('settings:set', patch)) }; };
 const group = (title, rows, hint) => [title ? el('div', { class: 'group-title' }, title) : null, el('div', { class: 'group' }, rows), hint ? el('div', { class: 'hint' }, hint) : null];
@@ -119,8 +119,18 @@ const pages = {
       try { const name = await still.invoke('cloud:connect', endpoint.value, token.value); cloudState = { connected: true, hasToken: true }; prefs = await still.invoke('settings:get'); render(); toast(`Connected as ${name}`); }
       catch (error) { status.textContent = String(error); status.style.color = 'var(--red)'; }
     } }, 'Connect');
+    const driveButton = el('button', { class: 'btn', onclick: async (event) => {
+      if (driveState.connected) { await still.invoke('drive:disconnect'); }
+      else { event.target.disabled = true; event.target.textContent = 'Waiting for your browser…'; try { await still.invoke('drive:connect'); } catch (error) { toast(String(error)); } }
+      driveState = await still.invoke('drive:get'); prefs = await still.invoke('settings:get'); render();
+    } }, driveState.connected ? 'Disconnect' : 'Connect');
     const disconnect = el('button', { class: 'btn', onclick: async () => { await still.invoke('cloud:disconnect'); cloudState = { connected: false, hasToken: false }; prefs = await still.invoke('settings:get'); render(); } }, 'Disconnect');
     return [
+      group('Upload to', [
+        select('Destination', 'cloud.provider', [['still', 'Still Cloud'], ['drive', 'Google Drive']]),
+        driveState.available ? row(driveState.connected ? `Google Drive: ${driveState.email}` : 'Google Drive', driveButton) : row('Google Drive', el('span', { style: 'color:var(--text-2)' }, 'Not available in this build')),
+        driveState.connected ? select('Who can open Drive links', 'cloud.driveAccess', [['link', 'Anyone with the link'], ['private', 'Only me']]) : null
+      ], 'Files go into a Still folder in your Drive. Still can only see files it put there.'),
       group('Server', [row('Server address', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
         'Run your own Still Cloud server (see Cloud/README.md in the project). Uploads only happen when you press Upload or turn on automatic upload. The token is stored in your user profile, readable only by you.'),
       group('Uploads', [
@@ -199,6 +209,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   prefs = await applyTheme();
   if (localStorage.getItem('stillSetupComplete') !== '1') current = 'Setup';
   updateStatus = await still.invoke('update:status');
+  driveState = await still.invoke('drive:get');
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings…', 'aria-label': 'Search settings categories', autocomplete: 'off' });
   const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');

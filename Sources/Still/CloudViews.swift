@@ -9,8 +9,23 @@ struct CloudSettingsView: View {
     @State private var token = ""
     @State private var status = ""
     @State private var testing = false
+    @State private var driveBusy = false
+    @State private var driveConnected = GoogleDrive.refreshToken != nil
+    @State private var driveStatus = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            card("Upload To") {
+                HStack { Text("Destination"); Spacer(); Picker("Destination", selection: $prefs.cloudProvider) { Text("Still Cloud").tag("still"); Text("Google Drive").tag("drive") }.labelsHidden().fixedSize() }
+                if GoogleDrive.available {
+                    HStack {
+                        Text(driveConnected ? "Google Drive: \(prefs.driveEmail)" : "Google Drive"); Spacer()
+                        Button(driveBusy ? "Waiting for your browser…" : driveConnected ? "Disconnect" : "Connect") { toggleDrive() }.disabled(driveBusy)
+                    }
+                    if driveConnected { HStack { Text("Who can open Drive links"); Spacer(); Picker("Who can open Drive links", selection: $prefs.driveAccess) { Text("Anyone with the link").tag("link"); Text("Only me").tag("private") }.labelsHidden().fixedSize() } }
+                    Text("Files go into a Still folder in your Drive. Still can only see files it put there.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else { Text("Google Drive isn’t available in this build.").font(.system(size: 10)).foregroundStyle(.secondary) }
+                if !driveStatus.isEmpty { Text(driveStatus).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
             card("Account") {
                 TextField("Server URL", text: $endpoint, prompt: Text("https://captures.example.com")).textFieldStyle(.roundedBorder).accessibilityLabel("Cloud server URL")
                 SecureField("Personal Access Token", text: $token, prompt: Text("Stored securely in Keychain")).textFieldStyle(.roundedBorder)
@@ -29,6 +44,19 @@ struct CloudSettingsView: View {
                 if let message = local.message { Text(message).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
         }.onAppear { endpoint = prefs.cloudEndpoint }.onChange(of: prefs.cloudEndpoint) { _, value in endpoint = value }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
+    }
+    private func toggleDrive() {
+        driveBusy = true; driveStatus = ""
+        Task {
+            if driveConnected {
+                await GoogleDrive.disconnect()
+                prefs.cloudProvider = "still"; prefs.driveEmail = ""; prefs.driveFolder = ""; driveConnected = false
+            } else {
+                do { prefs.driveEmail = try await GoogleDrive.connect(); prefs.cloudProvider = "drive"; driveConnected = true }
+                catch { driveStatus = error.localizedDescription }
+            }
+            driveBusy = false
+        }
     }
     private func connect() {
         testing = true; status = ""
@@ -56,6 +84,7 @@ struct CloudSettingsView: View {
     @Published var progress: Double = 0
     @Published var error: String?
     var completed: (() -> Void)?
+    var usesDrive: Bool { Preferences.shared.cloudProvider == "drive" }
     private var task: Task<Void, Never>?
     init(file: URL, item: CaptureItem?, library: Library, title: String, temporary: Bool = false) { self.file = file; self.item = item; self.library = library; self.title = title; self.temporary = temporary }
     func upload() {
@@ -63,6 +92,14 @@ struct CloudSettingsView: View {
         task = Task { [weak self] in
             guard let self else { return }
             do {
+                if usesDrive {
+                    let prefs = Preferences.shared
+                    let result = try await GoogleDrive.upload(file, title: title, public: prefs.driveAccess == "link", folder: prefs.driveFolder, progress: { [weak self] value in Task { @MainActor in self?.progress = value } })
+                    prefs.driveFolder = result.folder
+                    if let item { library.setCloudURL(item, url: result.link) }
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result.link.absoluteString, forType: .string); library.toast("Uploaded to Google Drive. Link copied to clipboard.")
+                    if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?(); return
+                }
                 let client = try CloudClient(endpoint: Preferences.shared.cloudEndpoint)
                 var options = CloudOptions(title: title); options.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }; options.expiryDays = expiry; options.password = password; options.visibility = visibility; options.maxViews = max(0, Int(views) ?? 0)
                 if let item { options.ocr = item.recognizedText ?? ""; let metadata = library.recordingMetadata(item); options.transcript = metadata.transcript ?? ""; options.captions = metadata.captions ?? "" }
@@ -84,19 +121,21 @@ struct CloudUploadView: View {
     @ObservedObject var model: CloudUploadModel
     var body: some View {
         VStack(alignment: .leading, spacing: 17) {
-            Text(model.uploading ? "Uploading…" : "Upload to Cloud").font(.system(size: 17, weight: .semibold))
+            Text(model.uploading ? "Uploading…" : model.usesDrive ? "Upload to Google Drive" : "Upload to Cloud").font(.system(size: 17, weight: .semibold))
             if model.uploading {
                 ProgressView(value: model.progress).frame(width: 340); Text("\(Int(model.progress*100))%").monospacedDigit().foregroundStyle(.secondary)
                 HStack { Spacer(); Button("Cancel Upload") { model.cancel() } }
             } else {
                 Form {
                     TextField("Name", text: $model.title)
+                    if !model.usesDrive {
                     TextField("Tags", text: $model.tags, prompt: Text("Design, feedback…"))
                     Picker("Access", selection: $model.visibility) { Text("Anyone with the link").tag("link"); Text("Team members").tag("team"); Text("Only you").tag("private") }
                     Picker("Expires", selection: $model.expiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }
                     SecureField("Password", text: $model.password)
                     TextField("View limit", text: $model.views)
                     Text("Set the view limit to 0 for unlimited views.").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
                 }.frame(width: 370)
                 if let error = model.error { Text(error).foregroundStyle(.red).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true) }
                 HStack { Spacer(); Button("Cancel") { model.cancel() }.keyboardShortcut(.cancelAction); Button("Upload & Copy Link") { model.upload() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(model.title.trimmingCharacters(in: .whitespaces).isEmpty) }

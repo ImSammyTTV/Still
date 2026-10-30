@@ -467,13 +467,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch { model.error = error.localizedDescription }
     }
     private func presentUpload(file: URL, item: CaptureItem?, title: String, temporary: Bool = false) {
-        guard !Preferences.shared.cloudEndpoint.isEmpty else {
+        let usesDrive = Preferences.shared.cloudProvider == "drive"
+        guard usesDrive ? GoogleDrive.refreshToken != nil : !Preferences.shared.cloudEndpoint.isEmpty else {
             if temporary { try? FileManager.default.removeItem(at: file) }
-            library.page = "Cloud"; showMain(); library.toast("Connect a Cloud server first"); return
+            library.page = "Cloud"; showMain(); library.toast(usesDrive ? "Connect Google Drive first" : "Connect a Cloud server first"); return
         }
         let id = UUID(), model = CloudUploadModel(file: file, item: item, library: library, title: title, temporary: temporary)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 390), styleMask: [.titled], backing: .buffered, defer: false)
-        window.title = "Upload to Cloud"; window.isReleasedWhenClosed = false
+        window.title = usesDrive ? "Upload to Google Drive" : "Upload to Cloud"; window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: CloudUploadView(model: model)); window.center()
         cloudWindows[id] = window; cloudUploads[id] = model
         model.completed = { [weak self, weak window] in window?.close(); self?.cloudWindows[id] = nil; self?.cloudUploads[id] = nil }

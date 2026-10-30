@@ -48,7 +48,10 @@ jobs:
           test -n "$ID" || { echo "The Still signing certificate wasn't found"; exit 1; }
           echo "STILL_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
       - name: Build universal app
-        env: { STILL_REQUIRE_SIGNING: '1' }
+        env:
+          STILL_REQUIRE_SIGNING: '1'
+          STILL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          STILL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: ./scripts/build.sh "$RUNNER_TEMP/Still.app"
       - name: Check the signature
         run: codesign -dvv "$RUNNER_TEMP/Still.app" 2>&1 | grep -q '^Authority=Still Self-Signed' || { echo "Still.app isn't signed with the release certificate"; exit 1; }
@@ -91,6 +94,8 @@ jobs:
       - run: npm test
       - name: Build
         env:
+          STILL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          STILL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }} ${{ runner.os == 'Windows' && '--bundles nsis' || '--bundles appimage,deb,rpm' }}

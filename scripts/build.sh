@@ -10,6 +10,8 @@ binary_dir="$(swift build -c release ${build_arches[@]+"${build_arches[@]}"} --s
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 cp "$binary_dir/Still" "$app_path/Contents/MacOS/Still"
 cp Resources/Info.plist "$app_path/Contents/Info.plist"
+# Google Drive sign-in details, set when building releases.
+/usr/libexec/PlistBuddy -c "Add :StillGoogleClientID string ${STILL_GOOGLE_CLIENT_ID:-}" -c "Add :StillGoogleClientSecret string ${STILL_GOOGLE_CLIENT_SECRET:-}" "$app_path/Contents/Info.plist"
 mkdir -p "$app_path/Contents/Resources/Cloud"
 cp Cloud/server.py "$app_path/Contents/Resources/Cloud/"
 cp -R Cloud/static "$app_path/Contents/Resources/Cloud/"

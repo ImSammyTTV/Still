@@ -1,5 +1,6 @@
 mod capture;
 mod cloud;
+mod drive;
 mod library;
 mod settings;
 
@@ -877,15 +878,15 @@ fn recording_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<()
 
 fn token_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("cloud-token")) }
 fn cloud_token(app: &AppHandle) -> String { token_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
-fn save_token(app: &AppHandle, token: &str) -> Result<(), String> {
-    let file = token_file(app).ok_or("No settings folder")?;
+fn save_token(app: &AppHandle, token: &str) -> Result<(), String> { write_private(&token_file(app).ok_or("No settings folder")?, token) }
+fn write_private(file: &Path, token: &str) -> Result<(), String> {
     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
     // Only your account can read the token, from the moment the file exists.
     let mut options = std::fs::OpenOptions::new(); options.write(true).create(true).truncate(true);
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
     use std::io::Write;
-    options.open(&file).and_then(|mut f| f.write_all(token.as_bytes())).map_err(|e| e.to_string())?;
-    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)); }
+    options.open(file).and_then(|mut f| f.write_all(token.as_bytes())).map_err(|e| e.to_string())?;
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600)); }
     Ok(())
 }
 fn cloud_client(app: &AppHandle) -> Result<cloud::Cloud, String> {
@@ -897,8 +898,20 @@ fn cloud_options(app: &AppHandle, title: String, text: String) -> cloud::Options
     cloud::Options { title, text, password: String::new(), expiry_days: setting(app, "cloud.expiryDays").as_i64().unwrap_or(7),
         visibility: setting(app, "cloud.visibility").as_str().unwrap_or("link").to_string() }
 }
+fn drive_token_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("drive-token")) }
+fn drive_token(app: &AppHandle) -> String { drive_token_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
+async fn drive_share(app: &AppHandle, file: &Path, title: &str) -> Result<String, String> {
+    let token = drive_token(app);
+    if token.is_empty() { return Err("Connect Google Drive in Settings → Cloud first.".into()); }
+    let folder = setting(app, "cloud.driveFolder").as_str().unwrap_or("").to_string();
+    let public = setting(app, "cloud.driveAccess").as_str().unwrap_or("link") == "link";
+    let uploaded = drive::upload(&token, &folder, file, title, public).await?;
+    if uploaded.folder != folder { st(app).settings.lock().unwrap().update(&json!({ "cloud": { "driveFolder": uploaded.folder } })); }
+    Ok(uploaded.link)
+}
 async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> Result<String, String> {
-    let result = match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) };
+    let result = if setting(app, "cloud.provider").as_str() == Some("drive") { drive_share(app, &file, &title).await }
+        else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) } };
     match &result {
         Ok(link) => { let _ = app.clipboard().write_text(link.clone()); notify(app, "Link copied", link); }
         Err(e) => notify(app, "Upload failed", e),
@@ -927,6 +940,23 @@ async fn cloud_connect(app: AppHandle, endpoint: String, token: String) -> Resul
 async fn cloud_disconnect(app: AppHandle) {
     if let Some(f) = token_file(&app) { let _ = std::fs::remove_file(f); }
     st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": "", "autoUpload": false } }));
+}
+#[tauri::command]
+async fn drive_get(app: AppHandle) -> Value { json!({ "available": drive::available(), "connected": !drive_token(&app).is_empty(), "email": setting(&app, "cloud.driveEmail") }) }
+#[tauri::command]
+async fn drive_connect(app: AppHandle) -> Result<String, String> {
+    let connected = drive::connect().await?;
+    let file = drive_token_file(&app).ok_or("No settings folder")?;
+    write_private(&file, &connected.refresh_token)?;
+    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "provider": "drive", "driveEmail": connected.email } }));
+    Ok(connected.email)
+}
+#[tauri::command]
+async fn drive_disconnect(app: AppHandle) {
+    let token = drive_token(&app);
+    if let Some(f) = drive_token_file(&app) { let _ = std::fs::remove_file(f); }
+    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "provider": "still", "driveEmail": "", "driveFolder": "" } }));
+    if !token.is_empty() { drive::revoke(&token).await; }
 }
 #[tauri::command]
 async fn cloud_upload(app: AppHandle, id: String) -> Result<String, String> { upload_item(&app, &id).await }
@@ -1096,7 +1126,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_started, recording_cancel, recording_error, recording_save, update_status, update_check, update_install,
-            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data
+            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")

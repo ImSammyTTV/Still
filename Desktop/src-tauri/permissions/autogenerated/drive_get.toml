@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-drive-get"
+description = "Enables the drive_get command without any pre-configured scope."
+commands.allow = ["drive_get"]
+
+[[permission]]
+identifier = "deny-drive-get"
+description = "Denies the drive_get command without any pre-configured scope."
+commands.deny = ["drive_get"]

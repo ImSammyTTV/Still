@@ -18,6 +18,9 @@
     "allow-open-history-cmd",
     "allow-update-status",
     "allow-update-check",
-    "allow-update-install"
+    "allow-update-install",
+    "allow-drive-get",
+    "allow-drive-connect",
+    "allow-drive-disconnect"
   ]
 }

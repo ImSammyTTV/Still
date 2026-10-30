@@ -120,6 +120,8 @@ macOS reserves `⇧⌘4` for its screenshot tool. To use it with Still, turn off
 
 Screenshots and text recognition stay on your computer unless you upload them. Still Cloud is an optional server you run yourself, with share links, comments, passwords, expiry, and team access.
 
+You can also send uploads to **Google Drive**: connect it in **Settings → Cloud**, and captures go into a Still folder in your Drive with the link copied for you. Still can only see the files it put there.
+
 [Set up Still Cloud →](Cloud/README.md)
 
 Connect it in **Settings → Cloud**, then choose **Upload**. Uploads include recognised text and any recording transcript so your server can search them. Auto-upload is a separate opt-in setting.

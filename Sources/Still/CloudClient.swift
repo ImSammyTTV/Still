@@ -29,6 +29,9 @@ enum CloudKeychain {
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
+    static func remove(endpoint: String) {
+        SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: endpoint] as CFDictionary)
+    }
     static func save(_ token: String, endpoint: String) throws {
         let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: endpoint]
         let data = Data(token.utf8)
