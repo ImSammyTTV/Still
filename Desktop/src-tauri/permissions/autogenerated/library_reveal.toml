@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-library-reveal"
+description = "Enables the library_reveal command without any pre-configured scope."
+commands.allow = ["library_reveal"]
+
+[[permission]]
+identifier = "deny-library-reveal"
+description = "Denies the library_reveal command without any pre-configured scope."
+commands.deny = ["library_reveal"]

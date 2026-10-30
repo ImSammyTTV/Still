@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cloud-get"
+description = "Enables the cloud_get command without any pre-configured scope."
+commands.allow = ["cloud_get"]
+
+[[permission]]
+identifier = "deny-cloud-get"
+description = "Denies the cloud_get command without any pre-configured scope."
+commands.deny = ["cloud_get"]

@@ -725,7 +725,9 @@ async fn editor_save(app: AppHandle, id: String, data_url: String, project: Valu
     let image = capture::decode(&bytes).ok_or("Bad image")?;
     let (encoded, ext) = encode(&app, &image);
     let mut lib = st(&app).library.lock().unwrap();
-    let id = if !id.is_empty() && lib.get(&id).is_some() { lib.replace_file(&id, &encoded, ext)?; id }
+    // An editor whose capture was deleted mustn't quietly re-create it on autosave.
+    if !id.is_empty() && lib.get(&id).is_none() { return Err("That capture no longer exists.".into()); }
+    let id = if !id.is_empty() { lib.replace_file(&id, &encoded, ext)?; id }
         else { let (w, h) = image.dimensions(); lib.add(&encoded, "screenshot", ext, None, w, h)?.id };
     lib.save_project(&id, &project)?;
     drop(lib);

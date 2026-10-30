@@ -429,15 +429,30 @@ function flatten() {
   return out.toDataURL('image/png');
 }
 const project = () => ({ version: 1, ...doc });
+let captureGone = false;
 async function persist() {
-  if (!itemId || !dirty) return;
+  if (!itemId || !dirty || captureGone) return;
   dirty = false;
   // If saving fails, keep the edits marked unsaved and say so.
   try { await still.invoke('editor:save', itemId, flatten(), project()); }
-  catch (e) { dirty = true; toast(`Couldn’t save your changes: ${e}`); throw e; }
+  catch (e) {
+    dirty = true;
+    // The capture was deleted from History: stop autosaving rather than bring it back.
+    if (String(e).includes('no longer exists')) { captureGone = true; toast('This capture was deleted. Use Save to keep a copy.'); return; }
+    toast(`Couldn’t save your changes: ${e}`); throw e;
+  }
 }
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => persist().catch(() => {}), 900); }
-addEventListener('beforeunload', () => { if (itemId && dirty) still.invoke('editor:save', itemId, flatten(), project()); });
+// Closing the window (the close button, Alt+F4, Ctrl+W) waits for the last edits to be saved first;
+// a save fired from beforeunload could be cut off when the page goes away.
+window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async (event) => {
+  if (!itemId || !dirty || captureGone) return;
+  event.preventDefault();
+  clearTimeout(saveTimer);
+  try { await persist(); } catch { return; }
+  window.__TAURI__.webviewWindow.getCurrentWebviewWindow().destroy();
+});
+addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); still.send('window:close'); } });
 
 $('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:copy', flatten()); toast('Copied to clipboard'); };
 $('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${e}`); } };

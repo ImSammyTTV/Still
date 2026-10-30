@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hud",
+  "description": "The recording controls",
+  "windows": [
+    "hud"
+  ],
+  "permissions": [
+    "allow-recording-started",
+    "allow-recording-cancel",
+    "allow-recording-error",
+    "allow-recording-save"
+  ]
+}

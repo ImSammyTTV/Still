@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Settings and onboarding",
+  "windows": [
+    "settings"
+  ],
+  "permissions": [
+    "allow-settings-set",
+    "allow-settings-reset",
+    "allow-settings-choose-folder",
+    "allow-shortcuts-pause",
+    "allow-capture-action",
+    "allow-cloud-get",
+    "allow-cloud-connect",
+    "allow-cloud-disconnect",
+    "allow-open-demo",
+    "allow-open-history-cmd",
+    "allow-update-status",
+    "allow-update-check",
+    "allow-update-install"
+  ]
+}

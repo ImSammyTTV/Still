@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ocr-result"
+description = "Enables the ocr_result command without any pre-configured scope."
+commands.allow = ["ocr_result"]
+
+[[permission]]
+identifier = "deny-ocr-result"
+description = "Denies the ocr_result command without any pre-configured scope."
+commands.deny = ["ocr_result"]

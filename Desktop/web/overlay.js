@@ -8,9 +8,8 @@ const bounds = () => ({ x: 0, y: 0, w: config.width, h: config.height });
 // The frozen screen and window frames arrive in physical pixels; the page works in CSS pixels.
 let pixelScale = 1;
 function init(data) {
-  config = { ...data, width: innerWidth, height: innerHeight };
-  pixelScale = data.imageWidth / innerWidth;
-  config.windows = (data.windows || []).map((w) => ({ ...w, x: w.x / pixelScale, y: w.y / pixelScale, w: w.w / pixelScale, h: w.h / pixelScale }));
+  config = { ...data, rawWindows: data.windows || [], width: innerWidth, height: innerHeight };
+  scaleWindows();
   purpose = data.purpose === 'record' ? 'record' : data.purpose;
   if (data.primary) document.body.classList.add('primary');
   if (data.last) region = data.last;
@@ -18,7 +17,13 @@ function init(data) {
   image.src = still.fileUrl(data.imagePath);
   refreshIcons();
 }
-addEventListener('resize', () => { if (config) { config.width = innerWidth; config.height = innerHeight; pixelScale = config.imageWidth / innerWidth; } });
+// Window frames stay in physical pixels in config.rawWindows and are re-scaled whenever the page's size
+// or the display scaling changes, so hover outlines keep lining up with the real windows.
+function scaleWindows() {
+  pixelScale = config.imageWidth / innerWidth;
+  config.windows = (config.rawWindows || []).map((w) => ({ ...w, x: w.x / pixelScale, y: w.y / pixelScale, w: w.w / pixelScale, h: w.h / pixelScale }));
+}
+addEventListener('resize', () => { if (config) { config.width = innerWidth; config.height = innerHeight; scaleWindows(); } });
 init(window.__STILL_PARAMS__.init);
 still.on('overlay:purpose', (next) => { purpose = next; if (next !== 'screenshot') setWindowMode(false, true); updateBar(); });
 still.on('overlay:windowMode', (on) => setWindowMode(on, true));

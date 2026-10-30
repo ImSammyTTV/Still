@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-library-pin"
+description = "Enables the library_pin command without any pre-configured scope."
+commands.allow = ["library_pin"]
+
+[[permission]]
+identifier = "deny-library-pin"
+description = "Denies the library_pin command without any pre-configured scope."
+commands.deny = ["library_pin"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-overlay-cancel"
+description = "Enables the overlay_cancel command without any pre-configured scope."
+commands.allow = ["overlay_cancel"]
+
+[[permission]]
+identifier = "deny-overlay-cancel"
+description = "Denies the overlay_cancel command without any pre-configured scope."
+commands.deny = ["overlay_cancel"]

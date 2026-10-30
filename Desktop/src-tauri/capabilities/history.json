@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "history",
+  "description": "Capture History",
+  "windows": [
+    "history"
+  ],
+  "permissions": [
+    "allow-library-list",
+    "allow-library-copy",
+    "allow-library-delete",
+    "allow-library-drag",
+    "allow-library-open",
+    "allow-library-pin",
+    "allow-library-rename",
+    "allow-library-reveal",
+    "allow-library-save",
+    "allow-library-save-as",
+    "allow-cloud-upload"
+  ]
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-edit"
+description = "Enables the preview_edit command without any pre-configured scope."
+commands.allow = ["preview_edit"]
+
+[[permission]]
+identifier = "deny-preview-edit"
+description = "Denies the preview_edit command without any pre-configured scope."
+commands.deny = ["preview_edit"]
