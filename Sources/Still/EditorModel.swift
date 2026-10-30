@@ -145,6 +145,8 @@ final class EditorModel: ObservableObject {
     func save() {
         do {
             let image = try flattened()
+            // The capture was deleted from history while this editor was open: save it as a new one.
+            if let current = item, !library.items.contains(where: { $0.id == current.id }) { item = nil }
             if item == nil { item = try library.add(image: image, title: isSample ? "Sample annotation" : "Edited image") }
             if let item { try library.update(item, image: image, document: document()) }
             dirty = false

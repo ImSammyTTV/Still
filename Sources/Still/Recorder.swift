@@ -2,6 +2,7 @@ import AppKit
 import ScreenCaptureKit
 import AVFoundation
 import ApplicationServices
+import Carbon
 import StillCore
 
 @MainActor final class Recorder: NSObject, ObservableObject, SCContentSharingPickerObserver, SCRecordingOutputDelegate, SCStreamDelegate {
@@ -109,8 +110,11 @@ import StillCore
         if paused { guard let filter else { return }; starting = true; paused = false; Task { await start(filter) } }
         else { pausing = true; stopMonitoring(); Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
     }
+    /// Stop was pressed while a resumed segment was still starting; stop as soon as it has.
+    private var stopWhenStarted = false
     func stop() {
         guard recording, !stopping, !pausing else { return }
+        if starting { stopWhenStarted = true; return }
         stopping = true; stopMonitoring()
         if paused { Task { await finishAll() } }
         else { Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
@@ -119,6 +123,7 @@ import StillCore
         Task { @MainActor in
             guard recordingOutput === self.output else { return }
             self.choosing = false; self.starting = false; self.recording = true; self.paused = false
+            if self.stopWhenStarted { self.stopWhenStarted = false; DispatchQueue.main.async { self.stop() } }
             if self.startedAt == nil { self.startedAt = Date() }
             self.segmentStartedAt = Date()
             if let cameraDate = self.camera?.startedAt { self.segmentCameraOffset = max(0, Date().timeIntervalSince(cameraDate)); self.metadata.cameraOffset = 0 }
@@ -183,6 +188,8 @@ import StillCore
                 let flags = event.modifierFlags, characters = event.charactersIgnoringModifiers ?? ""
                 Task { @MainActor in
                     guard let self, self.recording, !self.paused else { return }
+                    // Never record what is typed into a password field.
+                    if IsSecureEventInputEnabled() { return }
                     if Preferences.shared.recordingCommandKeysOnly && !flags.contains(.command) && !flags.contains(.control) && !flags.contains(.option) { return }
                     var text = ""; if flags.contains(.control) { text += "⌃" }; if flags.contains(.option) { text += "⌥" }; if flags.contains(.shift) { text += "⇧" }; if flags.contains(.command) { text += "⌘" }
                     text += characters.uppercased(); self.metadata.keys.append(KeySample(time: self.currentTime, text: String(text.prefix(50))))
@@ -192,7 +199,7 @@ import StillCore
     }
     private func stopMonitoring() { timer?.invalidate(); timer = nil; if let globalMonitor { NSEvent.removeMonitor(globalMonitor); self.globalMonitor = nil }; if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil } }
     private func deactivatePicker() { SCContentSharingPicker.shared.remove(self); SCContentSharingPicker.shared.isActive = false }
-    private func reset() { stopMonitoring(); stream = nil; output = nil; outputURL = nil; filter = nil; recording = false; choosing = false; starting = false; stopping = false; pausing = false; paused = false; startedAt = nil; segmentStartedAt = nil; captureRegion = nil; finalizing = false; cameraSession = nil; deactivatePicker() }
+    private func reset() { stopMonitoring(); stream = nil; output = nil; outputURL = nil; filter = nil; recording = false; choosing = false; starting = false; stopping = false; pausing = false; paused = false; stopWhenStarted = false; startedAt = nil; segmentStartedAt = nil; captureRegion = nil; finalizing = false; cameraSession = nil; deactivatePicker() }
     private func fail(_ error: Error) {
         guard stream != nil || choosing || starting || recording || finalizing else { return }
         let old = stream, urls = segments+(outputURL.map { [$0] } ?? [])+cameraSegments

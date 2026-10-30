@@ -12,8 +12,9 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         let pid = ProcessInfo.processInfo.processIdentifier
         if Preferences.shared.captureOwnWindows {
             // Keep Still's normal windows (Settings, editor, History) in the shot; leave out its floating
-            // previews, pins, recording controls and the capture overlay. Desktop covers stay visible.
-            let floating = content.windows.filter { $0.owningApplication?.processID == pid && $0.windowLayer != 0 && !DesktopCover.shared.windowIDs.contains($0.windowID) }
+            // previews, pins, recording controls and the capture overlay. Desktop covers, Still's open menus
+            // and its menu bar icon stay visible.
+            let floating = content.windows.filter { $0.owningApplication?.processID == pid && ![0, 25, 101].contains($0.windowLayer) && !DesktopCover.shared.windowIDs.contains($0.windowID) }
             return SCContentFilter(display: display, excludingWindows: floating)
         }
         let own = content.applications.filter { $0.processID == pid }
@@ -68,6 +69,8 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
                 return
             }
             images = shots
+            // Still's own menu was in the grab; close it now so the overlay can take the pointer.
+            AppController.shared.closeMenus()
             for screen in NSScreen.screens {
                 let panel = SelectionPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
                 panel.title = "Capture Selection"
@@ -75,6 +78,8 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
                 panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.acceptsMouseMovedEvents = true
                 // A clear window lets clicks fall through; the overlay must catch every one.
                 panel.ignoresMouseEvents = false
+                // Stay up if you switch apps mid-selection; otherwise Still would stay "busy" with no overlay.
+                panel.hidesOnDeactivate = false
                 let view = SelectionSurface(screen: screen, coordinator: self)
                 view.frame = CGRect(origin: .zero, size: screen.frame.size)
                 if let shot = shots[ObjectIdentifier(screen)] { view.setSnapshot(shot) }
@@ -96,7 +101,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.minY+28, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Capture Bar"
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue+1); panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.contentView = host
+        panel.contentView = host; panel.hidesOnDeactivate = false
         panel.orderFrontRegardless(); bar = panel
     }
     func setDimensions() {
@@ -157,7 +162,7 @@ struct OverlayWindow {
             // Normal windows always; menus, Spotlight and other pop-ups when allowed (not the Dock, menu bar or
             // screen-wide system layers); Still's own normal windows when allowed, never its overlays.
             let popup = pickPopups && layer > 0 && layer < 1000 && ![20, 24, 25].contains(layer) && !["Dock", "Window Server"].contains(ownerName)
-            guard layer == 0 || popup, owner != own || (captureOwn && layer == 0),
+            guard layer == 0 || popup, owner != own || (captureOwn && (layer == 0 || layer == 101)),
                   let id = info[kCGWindowNumber as String] as? CGWindowID, let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds), frame.width > 40, frame.height > 40,
                   ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0 else { return nil }
@@ -313,6 +318,9 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         refresh()
     }
     override func mouseUp(with event: NSEvent) {
+        // Only a press that started a selection here can finish one (a click on empty space in window
+        // mode must not capture the remembered area).
+        guard anchor != nil else { return }
         if region.width > 2, region.height > 2 { coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height)); coordinator.finish(on: display, rect: region) }
         else if let fixedSize { coordinator.finish(on: display, rect: CGRect(origin: anchor ?? .zero, size: fixedSize).intersection(bounds)) }
         anchor = nil; refresh()

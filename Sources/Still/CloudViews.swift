@@ -16,12 +16,12 @@ struct CloudSettingsView: View {
                 SecureField("Personal Access Token", text: $token, prompt: Text("Stored securely in Keychain")).textFieldStyle(.roundedBorder)
                 HStack { Button(testing ? "Connecting…" : "Save & Test Connection") { connect() }.disabled(testing || endpoint.isEmpty); Spacer(); Button("Open Cloud") { if let url = URL(string: prefs.cloudEndpoint), !prefs.cloudEndpoint.isEmpty { NSWorkspace.shared.open(url) } }.disabled(prefs.cloudEndpoint.isEmpty) }
                 if !status.isEmpty { Text(status).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                Button("Copy Saved Token") { if let secret = CloudKeychain.token(for: prefs.cloudEndpoint) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(secret, forType: .string); library.toast("Personal token copied") } }.buttonStyle(.link).font(.system(size: 10)).disabled(prefs.cloudEndpoint.isEmpty)
+                Button("Copy Saved Token") { if let secret = CloudKeychain.token(for: prefs.cloudEndpoint) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(secret, forType: .string); NSPasteboard.general.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")); library.toast("Personal token copied") } }.buttonStyle(.link).font(.system(size: 10)).disabled(prefs.cloudEndpoint.isEmpty)
             }
             card("Upload") {
                 Toggle("Ask for name & show advanced options", isOn: $prefs.askUploadOptions)
                 HStack { Text("Default link expiration"); Spacer(); Picker("Default link expiration", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }.labelsHidden().fixedSize() }
-                Text("Use Option while clicking Upload to set a password, access level, tags or view limit for a capture.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Use Option while clicking Upload to set a password, access level, tags or view limit for a capture. Uploads include any text Still recognised in the capture and a recording’s transcript, so your server can search them.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             card("Local Server") {
                 Text("Run an independent server on this Mac for testing. Local links work on this Mac while Still is running. Use your own hosted server for links other people can open.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -110,16 +110,21 @@ import StillCore
         guard panel.runModal() == .OK, let url = panel.url else { return }
         player.pause(); exporting = true; exportProgress = 0
         let settings = self.settings, metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
+        // Export to a temporary file and only then replace the destination, so a failed or cancelled
+        // export never destroys a file you chose to replace.
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("Still-export-\(UUID()).\(gif ? "gif" : "mp4")")
         exportTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let prepared = try await VideoEngine.prepare(url: source, settings: settings, metadata: metadata, cameraURL: camera)
                 let progress: @Sendable (Double) -> Void = { [weak self] value in Task { @MainActor in self?.exportProgress = value } }
-                if gif { try await VideoEngine.gif(prepared, to: url, fps: Preferences.shared.gifFPS, width: Preferences.shared.gifWidth, progress: progress) }
-                else { try await VideoEngine.export(prepared, to: url, progress: progress) }
+                if gif { try await VideoEngine.gif(prepared, to: temp, fps: Preferences.shared.gifFPS, width: Preferences.shared.gifWidth, progress: progress) }
+                else { try await VideoEngine.export(prepared, to: temp, progress: progress) }
+                if FileManager.default.fileExists(atPath: url.path) { _ = try FileManager.default.replaceItemAt(url, withItemAt: temp) }
+                else { try FileManager.default.moveItem(at: temp, to: url) }
                 library.toast("Exported \(url.lastPathComponent)")
-            } catch is CancellationError { try? FileManager.default.removeItem(at: url) }
-            catch { self.error = error.localizedDescription; try? FileManager.default.removeItem(at: url) }
+            } catch is CancellationError { try? FileManager.default.removeItem(at: temp) }
+            catch { self.error = error.localizedDescription; try? FileManager.default.removeItem(at: temp) }
             exporting = false; exportTask = nil
         }
     }

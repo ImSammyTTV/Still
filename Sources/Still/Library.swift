@@ -31,15 +31,36 @@ final class Library: ObservableObject {
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Still/Captures", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.root.path)
             let index = self.root.appendingPathComponent("index.json")
             if FileManager.default.fileExists(atPath: index.path) {
-                let decoded = try JSONDecoder().decode([CaptureItem].self, from: Data(contentsOf: index))
-                items = decoded.filter { !$0.filename.contains("/") && FileManager.default.fileExists(atPath: self.root.appendingPathComponent($0.filename).path) }
+                if let decoded = try? JSONDecoder().decode([CaptureItem].self, from: Data(contentsOf: index)) {
+                    items = decoded.filter { !$0.filename.contains("/") && FileManager.default.fileExists(atPath: self.root.appendingPathComponent($0.filename).path) }
+                } else {
+                    // A damaged index must never be overwritten by the next capture: keep it aside and rebuild the
+                    // history from the capture files themselves, so nothing is orphaned.
+                    let stamp = Int(Date().timeIntervalSince1970)
+                    try? FileManager.default.moveItem(at: index, to: self.root.appendingPathComponent("index-damaged-\(stamp).json"))
+                    items = rebuiltItems()
+                    try? persist()
+                    message = "Capture history was damaged and has been rebuilt from your capture files."
+                }
             }
         } catch { message = "Couldn’t load capture history: \(error.localizedDescription)" }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.objectWillChange.send() } }
     }
 
+    /// Every capture file in the folder, newest first, for when the index can't be read.
+    private func rebuiltItems() -> [CaptureItem] {
+        let keys: [URLResourceKey] = [.creationDateKey]
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys)) ?? []
+        return files.filter { ["png", "mp4", "gif"].contains($0.pathExtension.lowercased()) }
+            .sorted { ((try? $0.resourceValues(forKeys: Set(keys)).creationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: Set(keys)).creationDate) ?? .distantPast) }
+            .map { file in
+                let video = file.pathExtension.lowercased() != "png", image = video ? nil : ImageRenderer.load(file)
+                return CaptureItem(filename: file.lastPathComponent, title: "Recovered capture", isVideo: video, width: image?.width ?? 0, height: image?.height ?? 0)
+            }
+    }
     var filtered: [CaptureItem] {
         items.filter { (page != "recordings" || $0.isVideo) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)) }
     }

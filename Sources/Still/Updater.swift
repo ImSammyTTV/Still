@@ -7,10 +7,16 @@ import CryptoKit
     private let repository = "ImSammyTTV/Still"
     private var checking = false
     private var timer: Timer?
+    /// Every release is signed with the project's own certificate. An update must carry the same signature,
+    /// so a tampered or substituted download is never installed (the checksum alone only proves integrity).
+    static let releaseRequirement = #"identifier "local.sam.Still" and certificate root = H"1ab04d5c40093d821eb23c1655fe959439cc467b""#
+    /// Only an installed Still.app updates itself; a development build run from .build never does.
+    private var installedApp: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
 
     func start() {
+        guard installedApp else { return }
         guard UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true else { return }
         DispatchQueue.main.asyncAfter(deadline: .now()+15) { self.check(manual: false) }
         timer = Timer.scheduledTimer(withTimeInterval: 6*60*60, repeats: true) { _ in Task { @MainActor in self.check(manual: false) } }
@@ -18,6 +24,7 @@ import CryptoKit
 
     func check(manual: Bool) {
         guard !checking else { return }
+        guard installedApp else { if manual { info("Updates are off for this build", "Only Still.app in Applications updates itself.") }; return }
         checking = true
         Task {
             defer { checking = false }
@@ -30,7 +37,7 @@ import CryptoKit
         }
     }
 
-    private struct Release { let version: String; let notes: String; let zip: URL; let sums: URL? }
+    private struct Release { let version: String; let notes: String; let zip: URL; let sums: URL }
 
     private func latestRelease() async throws -> Release? {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
@@ -42,8 +49,8 @@ import CryptoKit
         let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
         guard Self.isNewer(version, than: currentVersion) else { return nil }
         let url = { (match: (String) -> Bool) in assets.first(where: { match($0["name"] as? String ?? "") }).flatMap { ($0["browser_download_url"] as? String).flatMap(URL.init(string:)) } }
-        guard let zip = url({ $0.hasSuffix("mac-universal.zip") }) else { return nil }
-        return Release(version: version, notes: json["body"] as? String ?? "", zip: zip, sums: url({ $0 == "SHA256SUMS" }))
+        guard let zip = url({ $0.hasSuffix("mac-universal.zip") }), let sums = url({ $0 == "SHA256SUMS" }) else { return nil }
+        return Release(version: version, notes: json["body"] as? String ?? "", zip: zip, sums: sums)
     }
 
     static func isNewer(_ a: String, than b: String) -> Bool {
@@ -71,22 +78,29 @@ import CryptoKit
         Task {
             do {
                 let (zip, _) = try await URLSession.shared.download(from: release.zip)
-                if let sums = release.sums {
-                    let (sumData, _) = try await URLSession.shared.data(from: sums)
-                    let expected = String(decoding: sumData, as: UTF8.self).split(separator: "\n").first(where: { $0.hasSuffix(release.zip.lastPathComponent) })?.split(separator: " ").first.map(String.init)
-                    let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-                    guard expected == actual else { throw NSError(domain: "Still", code: 10, userInfo: [NSLocalizedDescriptionKey: "The download didn’t match its checksum, so nothing was installed."]) }
-                }
+                let (sumData, _) = try await URLSession.shared.data(from: release.sums)
+                let expected = String(decoding: sumData, as: UTF8.self).split(separator: "\n").first(where: { $0.hasSuffix(release.zip.lastPathComponent) })?.split(separator: " ").first.map(String.init)
+                let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
+                guard let expected, expected == actual else { throw NSError(domain: "Still", code: 10, userInfo: [NSLocalizedDescriptionKey: "The download didn’t match its checksum, so nothing was installed."]) }
                 let work = FileManager.default.temporaryDirectory.appendingPathComponent("Still-update-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
                 try run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
                 let app = work.appendingPathComponent("Still.app")
                 guard FileManager.default.fileExists(atPath: app.path) else { throw NSError(domain: "Still", code: 11, userInfo: [NSLocalizedDescriptionKey: "The update didn’t contain Still.app."]) }
+                do { try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "-R=\(Self.releaseRequirement)", app.path]) }
+                catch { throw NSError(domain: "Still", code: 13, userInfo: [NSLocalizedDescriptionKey: "The update isn’t signed by the Still project, so nothing was installed."]) }
                 try run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
-                // Swap the app once this process has quit, then reopen it.
-                let target = Bundle.main.bundlePath
-                let script = "while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done; rm -rf \"\(target)\" && ditto \"\(app.path)\" \"\(target)\" && open \"\(target)\"; rm -rf \"\(work.path)\""
-                let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh"); process.arguments = ["-c", script]
+                // Once this process has quit: copy the new app next to the old one, swap them, and only then
+                // remove the old copy, so a failure part-way never leaves you without Still. Paths are passed as
+                // arguments, not pasted into the script.
+                let script = #"""
+                while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
+                ditto "$2" "$3.new" || { rm -rf "$3.new"; open "$3"; exit 1; }
+                mv "$3" "$3.old" && mv "$3.new" "$3" && rm -rf "$3.old" || { [ -d "$3" ] || mv "$3.old" "$3"; }
+                open "$3"; rm -rf "$4"
+                """#
+                let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-c", script, "still-update", String(ProcessInfo.processInfo.processIdentifier), app.path, Bundle.main.bundlePath, work.path]
                 try process.run()
                 NSApp.terminate(nil)
             } catch { info("Update failed", error.localizedDescription) }

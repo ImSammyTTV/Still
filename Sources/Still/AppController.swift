@@ -39,6 +39,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var forceVideoEditor = false
     private var subscriptions = Set<AnyCancellable>()
     private var lastExternalApp: NSRunningApplication?
+    /// Set while a capture started from a still:// link is in progress.
+    private var urlCapture = false
+    /// True while a finished recording is being exported and added to the library.
+    private(set) var preparingRecording = false
     private var workspaceObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -82,9 +86,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.recordingHUD?.close(); self.recordingHUD = nil
             let metadata = self.recorder.completedMetadata, camera = self.recorder.completedCameraURL
             let showEditor = self.forceVideoEditor || Preferences.shared.openVideoEditor; self.forceVideoEditor = false
-            self.library.busy = true; self.showCopyToast("Preparing your recording…")
+            self.library.busy = true; self.preparingRecording = true; self.showCopyToast("Preparing your recording…")
             Task {
-                defer { self.library.busy = false; try? FileManager.default.removeItem(at: url); if let camera { try? FileManager.default.removeItem(at: camera) }; self.restoreOverlays() }
+                var keepOriginal = false
+                defer { self.library.busy = false; self.preparingRecording = false; if !keepOriginal { try? FileManager.default.removeItem(at: url) }; if let camera { try? FileManager.default.removeItem(at: camera) }; self.restoreOverlays() }
                 let gif = Preferences.shared.recordingFormat == "gif"
                 let exported = FileManager.default.temporaryDirectory.appendingPathComponent("Still-finished-\(UUID()).\(gif ? "gif" : "mp4")")
                 defer { try? FileManager.default.removeItem(at: exported) }
@@ -104,8 +109,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 } catch {
                     if let item = try? self.library.add(file: url, title: self.captureTitle("Original recording"), video: true) {
                         try? self.library.saveRecordingMetadata(item, metadata: metadata, camera: camera)
+                        self.showError("The original recording was kept", "The effects export failed: \(error.localizedDescription). You can open the original in Capture History.")
+                    } else {
+                        // The library couldn't take it either (a full disk, say). Never delete the only copy:
+                        // move it somewhere the user can find it instead.
+                        let rescue = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].appendingPathComponent("\(self.captureTitle("Recording")).\(url.pathExtension.isEmpty ? "mov" : url.pathExtension)")
+                        if (try? FileManager.default.moveItem(at: url, to: rescue)) != nil {
+                            self.showError("Your recording was saved to the Desktop", "Still couldn’t finish it (\(error.localizedDescription)), so the original was moved to \(rescue.lastPathComponent) on your Desktop.")
+                        } else {
+                            self.showError("Your recording couldn’t be saved", "\(error.localizedDescription). The original is still at \(url.path); copy it somewhere safe before restarting your Mac.")
+                            keepOriginal = true
+                        }
                     }
-                    self.showError("The original recording was kept", "The effects export failed: \(error.localizedDescription). You can open the original in Capture History.")
                 }
             }
         }
@@ -150,10 +165,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
         ClipboardHistory.shared.start()
+        // After an update, ask macOS to re-read Still's right-click Services.
+        if UserDefaults.standard.string(forKey: "servicesVersion") != Updater.shared.currentVersion {
+            NSUpdateDynamicServices(); UserDefaults.standard.set(Updater.shared.currentVersion, forKey: "servicesVersion")
+        }
+        // Recordings rescued after a failure wait in Recovery; say so rather than leave them forgotten.
+        let recovery = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Still/Recovery")
+        if let rescued = try? FileManager.default.contentsOfDirectory(atPath: recovery.path).filter({ !$0.hasPrefix(".") }), !rescued.isEmpty {
+            library.toast("\(rescued.count) recovered recording\(rescued.count == 1 ? " is" : "s are") waiting in \(recovery.path)")
+        }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if preparingRecording {
+            let alert = NSAlert(); alert.messageText = "Still is saving your recording"
+            alert.informativeText = "Wait a moment for it to finish, then quit. Quitting now would lose the recording."
+            alert.runModal(); return .terminateCancel
+        }
         if recorder.recording || recorder.stopping {
             let alert = NSAlert(); alert.messageText = "A recording is in progress"
             alert.informativeText = "Stop the recording before quitting so Still can finish saving the video."
@@ -233,6 +262,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         decorateMenu()
         statusItem.menu = menu
     }
+    /// Closes Still's menu bar menu (and its submenus) if it's open, e.g. when a capture starts from a shortcut.
+    func closeMenus() { menu?.cancelTrackingWithoutAnimation(); clipboardMenu.cancelTrackingWithoutAnimation() }
     @objc func openMain() { showMain() }
     @objc func settings() { library.page = "General"; showMain() }
     @objc func allInOne() { showAllInOne() }
@@ -409,7 +440,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.isReleasedWhenClosed = false; window.delegate = self; window.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
         window.contentView = NSHostingView(rootView: EditorView(model: model)); window.center()
         editors[id] = window; editorModels[id] = model
-        preview?.close(); preview = nil
+        // Close the newest preview properly, so later captures don't bring it back.
+        if let preview, let id = previewPanels.first(where: { $0.value === preview })?.key { dismissPreview(id) } else { preview?.close() }
+        preview = nil
         NSApp.unhideWithoutActivation(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         if recognize { model.recognize() }
     }
@@ -491,17 +524,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switch url.host?.lowercased() {
             case "capture-area": capture(.area)
             case "capture-window": capture(.window)
-            case "capture-fullscreen": capture(.screen)
+            case "capture-fullscreen": if confirmURLAction("capture your whole screen") { urlCapture = true; capture(.screen) }
             case "capture-text": capture(.text)
             case "capture-scrolling": showAllInOne(purpose: .scroll)
             case "all-in-one": showAllInOne()
-            case "record": toggleRecording()
+            case "record": if confirmURLAction(recorder.recording ? "stop and save your screen recording" : "start recording your screen") { toggleRecording() }
             case "history": showHistory()
             case "restore": restoreLastCapture()
             case "settings": showMain()
             default: library.toast("Unknown Still URL action")
             }
         }
+    }
+    /// Another app or a web page can open still:// links. Actions that capture without you choosing an area
+    /// (the whole screen, recording) ask first, so nothing is captured behind your back.
+    private func confirmURLAction(_ action: String) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert(); alert.messageText = "Allow a link to \(action)?"
+        alert.informativeText = "Another app or a web page opened a still:// link. You can turn these links off in Settings → Advanced."
+        alert.addButton(withTitle: "Allow"); alert.addButton(withTitle: "Don’t Allow")
+        return alert.runModal() == .alertFirstButtonReturn
     }
     func demo() { openEditor(image: DemoImage.make(), item: nil, isSample: true) }
     func pin(_ image: CGImage) {
@@ -541,6 +583,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     private func showRecordingHUD() {
         guard let screen = NSScreen.main else { return }
+        // Resuming after a pause shows the HUD again; replace the earlier one rather than stacking another.
+        recordingHUD?.close(); recordingHUD = nil
         let panel = NSPanel(contentRect: NSRect(x: screen.visibleFrame.midX-110, y: screen.visibleFrame.minY+24, width: 220, height: 44), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.level = .floating
         panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true
@@ -645,6 +689,7 @@ extension AppController {
         }
     }
     @objc func capturePrevious() {
+        guard !recorder.recording, !recorder.stopping, !recorder.choosing else { library.toast("Finish the current recording first"); return }
         guard !library.busy, let saved = UserDefaults.standard.dictionary(forKey: "lastSelection") as? [String: Double],
               let screen = NSScreen.screens.first(where: { (selfScreenID($0)) == saved["screen"] }),
               let x = saved["x"], let y = saved["y"], let w = saved["w"], let h = saved["h"] else { showAllInOne(); return }
@@ -677,7 +722,9 @@ extension AppController {
             if Preferences.shared.pinAfterCapture { pin(image) }
             if library.showPreview { showPreview(item) }
             if Preferences.shared.annotateAfterCapture { openItem(item) }
-            if Preferences.shared.autoUploadImages { upload(item) }
+            // Captures started by a still:// link are never uploaded automatically.
+            if Preferences.shared.autoUploadImages && !urlCapture { upload(item) }
+            urlCapture = false
         } catch { showError("Couldn’t save capture", error.localizedDescription) }
     }
     func showCopyToast(_ text: String) {

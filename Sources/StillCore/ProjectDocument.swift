@@ -26,6 +26,12 @@ public struct ProjectDocument: Codable {
     public static func read(_ url: URL) throws -> ProjectDocument {
         let document = try JSONDecoder().decode(ProjectDocument.self, from: Data(contentsOf: url))
         guard document.version == 1, document.sourceImage() != nil else { throw RenderError.encoding }
+        // A damaged or hand-made file mustn't be able to crash Still with out-of-range numbers.
+        let sane = { (v: Double, range: ClosedRange<Double>) in v.isFinite && range.contains(v) }
+        guard sane(document.padding, 0...2000), sane(document.cornerRadius, 0...2000), sane(document.shadow, 0...2000),
+              document.aspectRatio.map({ sane($0, 0.01...100) }) ?? true,
+              document.alignmentX.map({ sane($0, 0...1) }) ?? true, document.alignmentY.map({ sane($0, 0...1) }) ?? true
+        else { throw RenderError.encoding }
         return document
     }
     public func write(_ url: URL) throws { try JSONEncoder().encode(self).write(to: url, options: .atomic) }
