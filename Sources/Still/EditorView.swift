@@ -50,7 +50,7 @@ struct EditorView: View {
         .alert("Couldn’t complete that action", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
     }
     @ViewBuilder private var background: some View {
-        if let data = model.customBackground, let image = NSImage(data: data) { Image(nsImage: image).resizable().scaledToFill().clipped() }
+        if let image = model.backdropImage { Image(nsImage: image).resizable().scaledToFill().clipped() }
         else { LinearGradient(colors: model.frame.colors.map { Color(nsColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing) }
     }
     private var toolbar: some View {
@@ -203,7 +203,7 @@ struct BackgroundEditor: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack {
-                if let image = try? model.flattened() { Image(decorative: image, scale: 1).resizable().scaledToFit().shadow(radius: 8).padding(28) }
+                if let image = try? model.flattenedPreview() { Image(decorative: image, scale: 1).resizable().scaledToFit().shadow(radius: 8).padding(28) }
                 Text("Background").font(.headline).padding(.bottom, 20)
             }.frame(width: 390, height: 510).background(Studio.paper)
             ScrollView {

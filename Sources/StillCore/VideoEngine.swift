@@ -11,6 +11,8 @@ public struct PreparedVideo {
     public let duration: Double
     public let size: CGSize
     public let quality: VideoQuality
+    /// A custom preset's bitrate; when set it replaces the size-based bitrate of `quality`.
+    public let bitrate: Int?
 }
 public enum VideoError: LocalizedError {
     case noVideo, export, invalidRange, cancelled
@@ -58,10 +60,10 @@ public enum VideoEngine {
         composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(max(1, min(60, settings.fps))))
         let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: range.duration), screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
         composition.instructions = [instruction]
-        return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: end-start, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high)
+        return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: end-start, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality))
     }
     public static func export(_ prepared: PreparedVideo, to url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
-        if prepared.quality != .original { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, progress: progress); return }
+        if prepared.quality != .original || prepared.bitrate != nil { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, progress: progress); return }
         guard let exporter = AVAssetExportSession(asset: prepared.asset, presetName: AVAssetExportPresetHighestQuality) else { throw VideoError.export }
         exporter.videoComposition = prepared.composition; exporter.audioMix = prepared.audioMix; exporter.shouldOptimizeForNetworkUse = true
         let observer = Task {

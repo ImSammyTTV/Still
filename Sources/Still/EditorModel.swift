@@ -29,7 +29,14 @@ final class EditorModel: ObservableObject {
     @Published var cornerRadius: Double = 12 { willSet { if !suppressChanges, newValue != cornerRadius { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var shadow: Double = 24 { willSet { if !suppressChanges, newValue != shadow { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var aspectRatio: Double? { willSet { if !suppressChanges, newValue != aspectRatio { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
-    @Published var customBackground: Data? { willSet { if !suppressChanges, newValue != customBackground { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var customBackground: Data? { willSet { if !suppressChanges, newValue != customBackground { snapshot() } } didSet { if !suppressChanges { dirty = true }; backdrop = nil } }
+    private var backdrop: NSImage?
+    /// The custom background as one image, so redraws don't decode it again.
+    var backdropImage: NSImage? {
+        if backdrop == nil, let customBackground { backdrop = NSImage(data: customBackground) }
+        return backdrop
+    }
+    private let previewCache = PreviewCache()
     @Published var frame = FrameStyle.none { willSet { if !suppressChanges, newValue != frame { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var padding: Double = 64 { willSet { if !suppressChanges, newValue != padding { snapshot() } } didSet { if !suppressChanges, frame != .none { dirty = true } } }
     @Published var alignmentX: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentX { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
@@ -127,6 +134,8 @@ final class EditorModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
     func flattened() throws -> CGImage { try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
+    /// The flattened picture at the size the Background sheet shows it, quick enough to follow a slider.
+    func flattenedPreview() throws -> CGImage { try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: previewCache) }
     func document() throws -> ProjectDocument { try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
     var canvasLayout: (size: CGSize, origin: CGPoint) { ImageRenderer.canvasLayout(source: CGSize(width: source.width, height: source.height), framed: frame != .none || customBackground != nil, padding: Int(padding), aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY) }
     func autoBalance() {

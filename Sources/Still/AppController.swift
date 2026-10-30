@@ -160,14 +160,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             if purpose == .scroll { self.scrolling.start(first: image, screen: screen, rect: rect) }
             else if purpose == .recording { self.library.busy = false; DesktopCover.shared.endCapture(); self.showRecordingSetup(screen: screen, rect: rect) }
-            else { self.library.busy = false; self.completeScreenshot(image, text: purpose == .text); DesktopCover.shared.endCapture(); self.restoreOverlays(); self.returnFocus() }
+            else { Task { await self.completeScreenshot(image, text: purpose == .text); self.library.busy = false; DesktopCover.shared.endCapture(); self.restoreOverlays(); self.returnFocus() } }
         }
-        scrolling.onComplete = { [weak self] image in self?.library.busy = false; self?.completeScreenshot(image); DesktopCover.shared.endCapture(); self?.restoreOverlays() }
+        scrolling.onComplete = { [weak self] image in Task { await self?.completeScreenshot(image); self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays() } }
         scrolling.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays() }
         // A menu bar app: only open Settings the first time, so launches at login stay out of the way.
         if !UserDefaults.standard.bool(forKey: "studioSetupComplete") { showMain() }
         if CommandLine.arguments.contains("--editor-demo") { demo() }
-        DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
+        DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.selection.prewarm(); self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
         ClipboardHistory.shared.start()
         // After an update, ask macOS to re-read Still's right-click Services.
@@ -265,7 +265,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         quit.target = NSApp; menu.addItem(quit)
         for item in menu.items where item.target == nil { item.target = self }
         decorateMenu()
-        statusItem.menu = menu
+        statusItem.menu = menu; menu.delegate = self
     }
     /// Closes Still's menu bar menu (and its submenus) if it's open, e.g. when a capture starts from a shortcut.
     func closeMenus() { menu?.cancelTrackingWithoutAnimation(); clipboardMenu.cancelTrackingWithoutAnimation() }
@@ -279,7 +279,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let screen = NSScreen.screens[sender.tag]; library.busy = true; hideForCapture(); DesktopCover.shared.beginCapture()
         Task {
             defer { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays() }
-            do { try await Task.sleep(for: .milliseconds(200)); completeScreenshot(try await ScreenCaptureAPI.image(screen: screen)) }
+            do { try await Task.sleep(for: .milliseconds(200)); await completeScreenshot(try await ScreenCaptureAPI.image(screen: screen)) }
             catch { showError("Capture failed", error.localizedDescription) }
         }
     }
@@ -411,7 +411,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     let background = DesktopCover.shared.backgroundData(for: NSScreen.main)
                     finalImage = try ImageRenderer.render(image, frame: .midnight, padding: Int(Preferences.shared.windowPadding), customBackground: background)
                 }
-                completeScreenshot(finalImage)
+                await completeScreenshot(finalImage)
             } catch { showError("Capture failed", error.localizedDescription) }
         }
     }
@@ -564,7 +564,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.center(); panel.orderFrontRegardless(); pins[id] = panel
     }
     func showPreview(_ item: CaptureItem) {
-        dismissPreview(item.id); lastPreviewItem = item; overlaysHidden = false
+        dismissPreview(item.id); lastPreviewItem = item; overlaysHidden = false; library.loadThumbnail(item)
         let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main
         guard let screen else { return }
         let prefs = Preferences.shared, width = prefs.previewWidth
@@ -704,15 +704,24 @@ extension AppController {
         library.busy = true; hideForCapture(); DesktopCover.shared.beginCapture()
         Task {
             defer { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays() }
-            do { try await Task.sleep(nanoseconds: 180_000_000); completeScreenshot(try await ScreenCaptureAPI.image(screen: screen, rect: CGRect(x: x, y: y, width: w, height: h))) }
+            do { try await Task.sleep(nanoseconds: 180_000_000); await completeScreenshot(try await ScreenCaptureAPI.image(screen: screen, rect: CGRect(x: x, y: y, width: w, height: h))) }
             catch { showError("Capture failed", error.localizedDescription) }
         }
     }
     private func selfScreenID(_ screen: NSScreen) -> Double { (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue ?? 0 }
-    private func completeScreenshot(_ image: CGImage, text: Bool = false) {
+    /// Encoding a screen-sized PNG takes 100 to 300 ms, so it happens here off the main thread, before the capture is
+    /// stored and shown. Callers wait for this to finish, so the clipboard is ready before focus goes back.
+    private func completeScreenshot(_ image: CGImage, text: Bool = false) async {
         library.permissionGranted = true; library.permissionError = nil
         do {
-            let item = try library.add(image: image, title: library.captureName(width: image.width, height: image.height))
+            let copying = library.autoCopy && !text
+            let encoded = try await Task.detached(priority: .userInitiated) { () -> (png: Data, clipboard: Data?, thumbnail: CGImage?) in
+                async let png = ImageRenderer.libraryData(image)
+                async let clipboard = copying ? ImageRenderer.data(image) : nil
+                return (try await png, try await clipboard, ImageRenderer.thumbnail(image, maxPixelSize: 560))
+            }.value
+            let item = try library.add(png: encoded.png, width: image.width, height: image.height, title: library.captureName(width: image.width, height: image.height))
+            if let thumbnail = encoded.thumbnail { library.storeThumbnail(item.id, image: thumbnail) }
             if library.captureSound { NSSound(named: "Tink")?.play() }
             if text {
                 Task {
@@ -724,7 +733,7 @@ extension AppController {
                 }
                 return
             }
-            if library.autoCopy { library.copy(image) }
+            if let clipboard = encoded.clipboard { library.copy(png: clipboard) }
             if Preferences.shared.saveAfterCapture { library.quickSave(item) }
             if Preferences.shared.pinAfterCapture { pin(image) }
             if library.showPreview { showPreview(item) }
@@ -807,4 +816,8 @@ extension AppController {
 extension AppController: NSMenuDelegate {
     /// The Clipboard History submenu is rebuilt each time it opens, so it's always current.
     func menuNeedsUpdate(_ menu: NSMenu) { if menu === clipboardMenu { fillClipboardMenu(menu, numbered: false) } }
+    /// Carbon holds hotkeys back until an open menu closes. While the menu bar menu is open, the shortcuts with a row in
+    /// it stay out of the way, so the menu's own key equivalents close it and run the capture right away.
+    func menuWillOpen(_ menu: NSMenu) { if menu === self.menu { hotkeys.suspend([1, 2, 3, 4, 5, 8]) } }
+    func menuDidClose(_ menu: NSMenu) { if menu === self.menu { hotkeys.register() } }
 }

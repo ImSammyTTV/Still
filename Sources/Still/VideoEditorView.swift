@@ -162,7 +162,7 @@ struct VideoEditorView: View {
     @ViewBuilder private var controls: some View {
         switch model.panel {
         case "Background":
-            Picker("Quality", selection: Binding(get: { model.settings.quality ?? "high" }, set: { model.settings.quality = $0 })) { ForEach(VideoQuality.allCases) { Text($0.title).tag($0.rawValue) } }
+            Picker("Quality", selection: Binding(get: { model.settings.quality ?? "high" }, set: { model.settings.quality = $0 })) { ForEach(Preferences.shared.qualityOptions(including: model.settings.quality), id: \.tag) { Text($0.title).tag($0.tag) } }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 7) { ForEach(FrameStyle.allCases) { frame in Button { model.settings.frame = frame.rawValue } label: { RoundedRectangle(cornerRadius: 5).fill(LinearGradient(colors: frame == .none ? [.gray.opacity(0.1)] : frame.colors.map { Color(nsColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(height: 30).overlay(RoundedRectangle(cornerRadius: 5).stroke(model.settings.frame == frame.rawValue ? Color.accentColor : .clear, lineWidth: 2)) }.buttonStyle(.plain).help(frame.title) } }
             Picker("Aspect Ratio", selection: $model.settings.aspect) { Text("Auto").tag(0.0); Text("16:9").tag(16.0/9); Text("1:1").tag(1.0); Text("9:16").tag(9.0/16) }
             slider("Padding", value: $model.settings.padding, range: 0...200)

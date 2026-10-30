@@ -187,7 +187,8 @@ struct MainView: View {
     private var recording: some View {
         Group {
             section("Video") {
-                choice("Quality", selection: $prefs.recordingQuality) { ForEach(VideoQuality.allCases) { Text($0.title).tag($0.rawValue) } }
+                choice("Quality", selection: $prefs.recordingQuality) { ForEach(prefs.qualityOptions(including: prefs.recordingQuality), id: \.tag) { Text($0.title).tag($0.tag) } }
+                BitratePresetEditor()
                 choice("Frame rate", selection: $prefs.recordingFPS) { ForEach([15, 24, 30, 60], id: \.self) { Text("\($0) fps").tag($0) } }
                 choice("Max resolution", selection: $prefs.recordingResolution) { Text("Original").tag(0); Text("1080p").tag(1920); Text("1440p").tag(2560); Text("4K").tag(3840) }
                 Toggle("Show cursor", isOn: $prefs.recordingCursor)

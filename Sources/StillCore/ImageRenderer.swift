@@ -17,30 +17,35 @@ public enum RenderError: LocalizedError {
 public enum ImageRenderer {
     public static func render(_ source: CGImage, marks: [Mark] = [], frame: FrameStyle = .none, padding: Int = 64,
                               cornerRadius: Double = 12, shadow: Double = 24, aspectRatio: Double? = nil, customBackground: Data? = nil,
-                              alignmentX: Double = 0.5, alignmentY: Double = 0.5) throws -> CGImage {
+                              alignmentX: Double = 0.5, alignmentY: Double = 0.5, maxDimension: Int? = nil, cache: PreviewCache? = nil) throws -> CGImage {
         let framed = frame != .none || customBackground != nil
         let layout = canvasLayout(source: CGSize(width: source.width, height: source.height), framed: framed, padding: padding, aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY)
         let width = Int(layout.size.width), height = Int(layout.size.height)
         let offsetX = Int(layout.origin.x), offsetY = height-source.height-Int(layout.origin.y)
+        // Small previews draw the same picture through a scaled context; exports always stay at full size.
+        let scale = min(1, Double(maxDimension ?? Int.max)/Double(max(1, max(width, height))))
+        let outputWidth = scale < 1 ? max(1, Int(Double(width)*scale)) : width, outputHeight = scale < 1 ? max(1, Int(Double(height)*scale)) : height
         guard width > 0, height > 0, width <= 30000, height <= 30000,
               Int64(width)*Int64(height) <= 120_000_000,
-              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+              let ctx = CGContext(data: nil, width: outputWidth, height: outputHeight, bitsPerComponent: 8,
                                   bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw RenderError.allocation }
+        if scale < 1 { ctx.scaleBy(x: CGFloat(outputWidth)/CGFloat(width), y: CGFloat(outputHeight)/CGFloat(height)) }
         ctx.interpolationQuality = .high
         if framed {
             let colors = frame.colors.map(\.cgColor) as CFArray
             if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors, locations: [0, 1]) {
                 ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: height), end: CGPoint(x: width, y: 0), options: [])
             }
-            if let customBackground, let imageSource = CGImageSourceCreateWithData(customBackground as CFData, nil), let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
+            if let customBackground, let image = cache?.background(customBackground) ?? decodedImage(customBackground) {
                 let scale = max(CGFloat(width)/CGFloat(image.width), CGFloat(height)/CGFloat(image.height))
                 let w = CGFloat(image.width)*scale, h = CGFloat(image.height)*scale
                 ctx.draw(image, in: CGRect(x: (CGFloat(width)-w)/2, y: (CGFloat(height)-h)/2, width: w, height: h))
             }
             let r = CGRect(x: offsetX, y: offsetY, width: source.width, height: source.height)
             ctx.saveGState()
-            ctx.setShadow(offset: CGSize(width: 0, height: -shadow/2), blur: shadow, color: NSColor.black.withAlphaComponent(shadow == 0 ? 0 : 0.25).cgColor)
+            // Shadows ignore the context's scale, so a scaled preview scales them by hand.
+            ctx.setShadow(offset: CGSize(width: 0, height: -shadow/2*scale), blur: shadow*scale, color: NSColor.black.withAlphaComponent(shadow == 0 ? 0 : 0.25).cgColor)
             ctx.setFillColor(NSColor.black.cgColor)
             ctx.addPath(CGPath(roundedRect: r, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)); ctx.fillPath()
             ctx.restoreGState()
@@ -48,7 +53,7 @@ public enum ImageRenderer {
         }
         ctx.translateBy(x: CGFloat(offsetX), y: CGFloat(offsetY))
         ctx.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
-        draw(marks: marks, in: ctx, source: source)
+        draw(marks: marks, in: ctx, source: source, cache: cache)
         guard let result = ctx.makeImage() else { throw RenderError.allocation }
         return result
     }
@@ -60,12 +65,12 @@ public enum ImageRenderer {
         }
         return (CGSize(width: width, height: height), CGPoint(x: inset+floor((width-source.width-inset*2)*max(0, min(1, alignmentX))), y: inset+floor((height-source.height-inset*2)*max(0, min(1, alignmentY)))))
     }
-    public static func preview(_ source: CGImage, marks: [Mark], maxDimension: Int = 1800) throws -> CGImage {
+    public static func preview(_ source: CGImage, marks: [Mark], maxDimension: Int = 1800, cache: PreviewCache? = nil) throws -> CGImage {
         let scale = min(1, Double(maxDimension)/Double(max(source.width, source.height)))
         let width = max(1, Int(Double(source.width)*scale)), height = max(1, Int(Double(source.height)*scale))
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw RenderError.allocation }
         context.scaleBy(x: CGFloat(width)/CGFloat(source.width), y: CGFloat(height)/CGFloat(source.height))
-        context.interpolationQuality = .high; context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height)); draw(marks: marks, in: context, source: source)
+        context.interpolationQuality = .high; context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height)); draw(marks: marks, in: context, source: source, cache: cache)
         guard let result = context.makeImage() else { throw RenderError.allocation }; return result
     }
     public static func contentBounds(_ source: CGImage) -> CGRect {
@@ -84,7 +89,22 @@ public enum ImageRenderer {
         return CGRect(x: Double(minX)/factor, y: Double(minY)/factor, width: Double(maxX-minX+1)/factor, height: Double(maxY-minY+1)/factor).integral.intersection(full)
     }
 
-    private static func draw(marks: [Mark], in ctx: CGContext, source: CGImage) {
+    private static func decodedImage(_ data: Data) -> CGImage? {
+        CGImageSourceCreateWithData(data as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+    }
+    /// Blur and pixelate one region. A CIContext takes about 10 ms to build, too slow to make per mark, per frame.
+    private static let filterContext = CIContext(options: [.useSoftwareRenderer: false])
+    fileprivate static func filteredPatch(_ mark: Mark, cropRect: CGRect, source: CGImage) -> CGImage? {
+        guard let patch = source.cropping(to: cropRect) else { return nil }
+        let input = CIImage(cgImage: patch)
+        let scale = max(12,mark.width*4), seed = mark.id.uuid
+        let center = CIVector(x: Double(seed.0).truncatingRemainder(dividingBy: scale),y: Double(seed.1).truncatingRemainder(dividingBy: scale))
+        let pixelated = input.clampedToExtent().applyingFilter("CIPixellate",parameters: [kCIInputScaleKey: scale,kCIInputCenterKey: center]).cropped(to: input.extent)
+        let blurInput = mark.style == "smooth" ? input : pixelated
+        let output = mark.tool == .blur ? blurInput.clampedToExtent().applyingFilter("CIGaussianBlur",parameters: [kCIInputRadiusKey: max(8,mark.width*3)]).cropped(to: input.extent) : pixelated
+        return filterContext.createCGImage(output, from: input.extent)
+    }
+    private static func draw(marks: [Mark], in ctx: CGContext, source: CGImage, cache: PreviewCache? = nil) {
         let height = CGFloat(source.height)
         let p: (PixelPoint) -> CGPoint = { CGPoint(x: $0.x, y: height-$0.y) }
         let r: (CGRect) -> CGRect = { CGRect(x: $0.minX, y: height-$0.maxY, width: $0.width, height: $0.height) }
@@ -141,17 +161,10 @@ public enum ImageRenderer {
                 ctx.setBlendMode(.copy); ctx.setFillColor(NSColor(hex: "202421").cgColor); ctx.fill(r(mark.rect).integral)
             case .blur, .pixelate:
                 let cropRect = mark.rect.integral.intersection(CGRect(x: 0, y: 0, width: source.width, height: source.height))
-                if !cropRect.isNull, cropRect.width > 1, cropRect.height > 1, let patch = source.cropping(to: cropRect) {
-                    let input = CIImage(cgImage: patch)
-                    let scale = max(12,mark.width*4), seed = mark.id.uuid
-                    let center = CIVector(x: Double(seed.0).truncatingRemainder(dividingBy: scale),y: Double(seed.1).truncatingRemainder(dividingBy: scale))
-                    let pixelated = input.clampedToExtent().applyingFilter("CIPixellate",parameters: [kCIInputScaleKey: scale,kCIInputCenterKey: center]).cropped(to: input.extent)
-                    let blurInput = mark.style == "smooth" ? input : pixelated
-                    let output = mark.tool == .blur ? blurInput.clampedToExtent().applyingFilter("CIGaussianBlur",parameters: [kCIInputRadiusKey: max(8,mark.width*3)]).cropped(to: input.extent) : pixelated
-                    if let processed = CIContext(options: [.useSoftwareRenderer: false]).createCGImage(output, from: input.extent) { ctx.draw(processed, in: r(cropRect)) }
-                }
+                if !cropRect.isNull, cropRect.width > 1, cropRect.height > 1,
+                   let processed = cache?.patch(mark, cropRect: cropRect, source: source) ?? filteredPatch(mark, cropRect: cropRect, source: source) { ctx.draw(processed, in: r(cropRect)) }
             case .image:
-                if let data = mark.imageData, let imgSource = CGImageSourceCreateWithData(data as CFData, nil), let img = CGImageSourceCreateImageAtIndex(imgSource, 0, nil) { ctx.draw(img, in: r(mark.rect)) }
+                if let data = mark.imageData, let img = cache?.picture(mark.id, data: data) ?? decodedImage(data) { ctx.draw(img, in: r(mark.rect)) }
             case .text, .number:
                 let fontSize = max(18, mark.width*5)
                 let font = NSFont.systemFont(ofSize: fontSize, weight: mark.style == "plain" ? .regular : .semibold)
@@ -208,6 +221,15 @@ public enum ImageRenderer {
         guard CGImageDestinationFinalize(dest) else { throw RenderError.encoding }
         return data as Data
     }
+    /// The bytes the library has always stored: a PNG that went through one encode and decode first, which turns a
+    /// display's own colour profile into the standard one ImageIO resolves it to. The pixels never change, so asking a
+    /// single pixel what that profile becomes gives the same file for one encode instead of two.
+    public static func libraryData(_ image: CGImage) throws -> Data {
+        if let pixel = image.cropping(to: CGRect(x: 0, y: 0, width: 1, height: 1)), let space = decodedImage(try data(pixel))?.colorSpace,
+           let retagged = image.copy(colorSpace: space) { return try data(retagged) }
+        guard let decoded = decodedImage(try data(image)) else { throw RenderError.encoding }
+        return try data(decoded)
+    }
     public static func data(_ image: CGImage, format: String) throws -> Data {
         let type: UTType
         switch format.lowercased() { case "jpg", "jpeg": type = .jpeg; case "heic": type = .heic; case "tiff": type = .tiff; default: type = .png }
@@ -218,6 +240,21 @@ public enum ImageRenderer {
         return data as Data
     }
 
+    /// A small copy of an image already in memory, without decoding anything from disk.
+    public static func thumbnail(_ source: CGImage, maxPixelSize: Int) -> CGImage? {
+        let scale = min(1, Double(maxPixelSize)/Double(max(1, max(source.width, source.height))))
+        let width = max(1, Int(Double(source.width)*scale)), height = max(1, Int(Double(source.height)*scale))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: source.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                ?? CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+    /// A small copy read from a file. Decoding happens here, not at first draw, so it can run off the main thread.
+    public static func thumbnail(_ url: URL, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+    }
     public static func load(_ url: URL) -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         // Apply the EXIF orientation (phone photos are often stored sideways) at full size.
@@ -228,5 +265,38 @@ public enum ImageRenderer {
         }
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: max(width, height)]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) ?? CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+}
+
+/// Decoded pieces an edit session redraws many times: finished blur and pixelate regions, dropped-in pictures and the
+/// custom background. Only previews use it; exports always render from scratch. Use one per editor, on one thread.
+public final class PreviewCache {
+    private struct PatchKey: Hashable { let id: UUID; let tool: MarkTool; let rect: [CGFloat]; let width: Double; let style: String? }
+    private var source: CGImage?
+    private var patches: [PatchKey: CGImage] = [:]
+    private var pictures: [UUID: (data: Data, image: CGImage)] = [:]
+    private var backdrop: (data: Data, image: CGImage)?
+    public init() {}
+    fileprivate func patch(_ mark: Mark, cropRect: CGRect, source: CGImage) -> CGImage? {
+        if self.source !== source { self.source = source; patches = [:] }
+        let key = PatchKey(id: mark.id, tool: mark.tool, rect: [cropRect.minX, cropRect.minY, cropRect.width, cropRect.height], width: mark.width, style: mark.style)
+        if let cached = patches[key] { return cached }
+        guard let image = ImageRenderer.filteredPatch(mark, cropRect: cropRect, source: source) else { return nil }
+        if patches.count >= 64 { patches = [:] }
+        patches[key] = image
+        return image
+    }
+    fileprivate func picture(_ id: UUID, data: Data) -> CGImage? {
+        if let cached = pictures[id], cached.data == data { return cached.image }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
+        if pictures.count >= 64 { pictures = [:] }
+        pictures[id] = (data, image)
+        return image
+    }
+    fileprivate func background(_ data: Data) -> CGImage? {
+        if let backdrop, backdrop.data == data { return backdrop.image }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
+        backdrop = (data, image)
+        return image
     }
 }

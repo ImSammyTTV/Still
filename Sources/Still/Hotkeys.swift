@@ -3,11 +3,11 @@ import Carbon
 
 final class Hotkeys {
     var handler: ((UInt32) -> Void)?
-    private var refs: [EventHotKeyRef] = []
+    private var refs: [UInt32: EventHotKeyRef] = [:]
     private var eventHandler: EventHandlerRef?
     var unavailable: [UInt32] = []
     func register() {
-        refs.forEach { UnregisterEventHotKey($0) }; refs = []; unavailable = []
+        refs.values.forEach { UnregisterEventHotKey($0) }; refs = [:]; unavailable = []
         if let eventHandler { RemoveEventHandler(eventHandler); self.eventHandler = nil }
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, data in
@@ -22,8 +22,10 @@ final class Hotkeys {
             guard let key = shortcut.keyCode else { continue }
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(key, shortcut.modifiers, EventHotKeyID(signature: 0x5354494C, id: shortcut.id), GetApplicationEventTarget(), 0, &ref)
-            if status == noErr, let ref { refs.append(ref) } else { unavailable.append(shortcut.id) }
+            if status == noErr, let ref { refs[shortcut.id] = ref } else { unavailable.append(shortcut.id) }
         }
     }
-    deinit { refs.forEach { UnregisterEventHotKey($0) }; if let eventHandler { RemoveEventHandler(eventHandler) } }
+    /// Lets these keys through as ordinary key presses until the next `register()`.
+    func suspend(_ ids: Set<UInt32>) { for id in ids { if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) } } }
+    deinit { refs.values.forEach { UnregisterEventHotKey($0) }; if let eventHandler { RemoveEventHandler(eventHandler) } }
 }
