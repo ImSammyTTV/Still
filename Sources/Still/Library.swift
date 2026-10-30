@@ -187,6 +187,7 @@ final class Library: ObservableObject {
         let panel = NSSavePanel(); panel.allowedContentTypes = [type]
         panel.nameFieldStringValue = "\(title).\(format)"
         if !exportFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: exportFolder) }
+        else { try? FileManager.default.createDirectory(at: Self.defaultExportFolder, withIntermediateDirectories: true); panel.directoryURL = Self.defaultExportFolder }
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, let destination = panel.url {
             do { try ImageRenderer.data(image, format: format).write(to: destination, options: .atomic); toast("Saved to \(destination.lastPathComponent)") }
@@ -201,8 +202,11 @@ final class Library: ObservableObject {
         let cleaned = name.components(separatedBy: CharacterSet(charactersIn: "/:\0\n")).joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? "Screenshot \(date.string(from: now)) \(time.string(from: now))" : String(cleaned.prefix(180))
     }
+    /// Where saves go unless you choose a folder: Documents/Still, created when first needed.
+    static var defaultExportFolder: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Still", isDirectory: true) }
     func quickSave(_ item: CaptureItem) {
-        let folder = exportFolder.isEmpty ? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0] : URL(fileURLWithPath: exportFolder)
+        let folder = exportFolder.isEmpty ? Self.defaultExportFolder : URL(fileURLWithPath: exportFolder)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let format = item.isVideo ? URL(fileURLWithPath: item.filename).pathExtension : Preferences.shared.exportFormat
         let cleaned = item.title.components(separatedBy: CharacterSet(charactersIn: "/:\0\n\r")).joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines)
         let name = cleaned.isEmpty || cleaned == "." || cleaned == ".." ? "Capture" : String(cleaned.prefix(180))

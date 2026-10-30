@@ -51,7 +51,7 @@ const pages = {
     ]),
     group('Sounds', [toggle('Play sounds', 'playSounds')]),
     group('Export', [row('Export location', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
-      el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Desktop'),
+      el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Documents › Still'),
       el('button', { class: 'btn', onclick: async () => { if (await still.invoke('settings:chooseFolder')) { prefs = await still.invoke('settings:get'); render(); } } }, 'Choose…')
     ]))], 'Save actions from Floating Preview, the editor and After Capture use this folder.'),
     group('After capture', [

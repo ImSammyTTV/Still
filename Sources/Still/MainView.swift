@@ -99,8 +99,8 @@ struct MainView: View {
             section("Capture") { Toggle("Hide desktop icons while capturing", isOn: $prefs.hideDesktop) }
             section("Sounds") { Toggle("Play sounds", isOn: $library.captureSound) }
             section("Export") {
-                HStack { Text("Export location"); Spacer(); Text(library.exportFolder.isEmpty ? "Desktop" : URL(fileURLWithPath: library.exportFolder).lastPathComponent).foregroundStyle(.secondary); Button("Choose…") { chooseFolder() } }
-                Text("Set the default save location used by the Floating Preview, After Capture and Save actions.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack { Text("Export location"); Spacer(); Text(library.exportFolder.isEmpty ? "Documents › Still" : URL(fileURLWithPath: library.exportFolder).lastPathComponent).foregroundStyle(.secondary); Button("Choose…") { chooseFolder() } }
+                Text("Where Save, the Floating Preview and After Capture put files. Unless you choose a folder, it’s Still in your Documents folder.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             section("After Capture") {
                 HStack { Text("Action").foregroundStyle(.secondary); Spacer(); Text("Screenshot").foregroundStyle(.secondary).frame(width: 85); Text("Recording").foregroundStyle(.secondary).frame(width: 75) }

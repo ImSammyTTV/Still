@@ -301,7 +301,8 @@ fn recognize_file(app: &AppHandle, image: &RgbaImage) {
 
 fn export_folder(app: &AppHandle) -> PathBuf {
     let custom = st(app).settings.lock().unwrap().str("exportFolder");
-    let folder = if custom.is_empty() { app.path().desktop_dir().unwrap_or_else(|_| std::env::temp_dir()) } else { PathBuf::from(custom) };
+    // Unless a folder was chosen in Settings, saves go to Documents/Still.
+    let folder = if custom.is_empty() { app.path().document_dir().or_else(|_| app.path().home_dir()).map(|d| d.join("Still")).unwrap_or_else(|_| std::env::temp_dir()) } else { PathBuf::from(custom) };
     let _ = std::fs::create_dir_all(&folder);
     folder
 }
