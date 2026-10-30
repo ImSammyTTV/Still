@@ -6,9 +6,9 @@
 <p align="center"><strong>A screenshot is only the beginning.</strong><br>Capture a moment, make your point, and keep moving.</p>
 
 <p align="center">
-  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=flat-square&color=33373e&label=download" alt="Latest release"></a>
+  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=flat-square&color=6e6e73&label=download" alt="Latest release"></a>
   <a href="https://github.com/ImSammyTTV/Still/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ImSammyTTV/Still/ci.yml?branch=main&style=flat-square&label=checks" alt="Build and test status"></a>
-  <img src="https://img.shields.io/badge/macOS%20%2F%20Windows%20%2F%20Linux-33373e?style=flat-square" alt="Mac, Windows and Linux">
+  <img src="https://img.shields.io/badge/macOS%20%2F%20Windows%20%2F%20Linux-6e6e73?style=flat-square" alt="Mac, Windows and Linux">
 </p>
 
 <p align="center">
@@ -191,6 +191,8 @@ npm run build
 ```
 
 The app uses Tauri with shared web views. CI also runs `still --self-test=<folder>` on Windows and Linux.
+
+The shared look is documented in [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) and the brand in [docs/BRAND.md](docs/BRAND.md). `npm test` includes a guard that keeps page styles on the design tokens.
 
 </details>
 

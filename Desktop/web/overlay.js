@@ -1,4 +1,7 @@
 const G = StillGeometry;
+// The functional selection colour for window outlines comes from the stylesheet, like --mono does for labels.
+const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('--selection').trim() || '#0a84ff';
+const selectionAlpha = (alpha) => { const hex = SELECTION.replace('#', ''); const n = parseInt(hex.length === 3 ? hex.replace(/./g, '$&$&') : hex, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`; };
 const canvas = $('#canvas'), ctx = canvas.getContext('2d');
 const image = new Image();
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
@@ -118,8 +121,8 @@ function drawWindowMode() {
   ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(0, 0, innerWidth, innerHeight);
   if (hovered) {
     const r = G.intersect(hovered, bounds());
-    ctx.fillStyle = 'rgba(10,132,255,.32)'; ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = 'rgba(10,132,255,.85)'; ctx.lineWidth = 1; ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    ctx.fillStyle = selectionAlpha(0.32); ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = selectionAlpha(0.85); ctx.lineWidth = 1; ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
   }
   const cam = $('#camera'); cam.style.left = `${pointer.x}px`; cam.style.top = `${pointer.y}px`;
   if (pointer.x >= 0) label(hovered ? 'Click to capture window' : 'Hold Space and move over a window', pointer.x + 6, pointer.y + 6);

@@ -7,13 +7,13 @@
 <style>
   body { display: grid; grid-template-rows: 44px 1fr 45px; }
   .titlebar { border-bottom: 1px solid var(--border); background: var(--bg); }
-  .swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--bg-elevated); box-shadow: 0 0 0 1px var(--border); }
   main { position: relative; display: grid; grid-template-columns: auto 1fr auto; min-height: 0; background: var(--canvas); }
   /* Still's tool rail: drawing tools stacked down the left edge. */
-  .rail { width: 50px; padding: 10px 7px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; background: var(--bg); border-right: 1px solid var(--border); }
-  .rail button { width: 36px; height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--text); display: grid; place-items: center; flex: none; }
+  .rail { width: 72px; padding: var(--space-5) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; overflow-x: hidden; background: var(--bg); border-left: 1px solid var(--border); }
+  .rail button { width: 46px; height: 38px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text); display: grid; place-items: center; flex: none; }
   .rail button:hover { background: var(--surface-strong); }
-  .rail button.active { background: var(--accent); color: #fff; }
+  .rail button.active { background: var(--accent); color: var(--accent-text); }
   .rail svg { width: 16px; height: 16px; }
   .scroller { overflow: auto; display: grid; place-items: center; min-height: 0; padding: 28px; }
   #stage { display: block; box-shadow: 0 2px 20px rgba(0,0,0,.25); image-rendering: auto; }
@@ -24,23 +24,24 @@
   .panel { width: 0; overflow: hidden; background: var(--bg); border-left: 1px solid var(--border); transition: width .18s; }
   .panel.open { width: 290px; }
   .panel-inner { width: 290px; padding: 16px; display: grid; gap: 14px; }
-  .panel h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-2); }
+  .panel h3 { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-2); }
   .gradients { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-  .gradients button { height: 28px; border-radius: 6px; border: 1px solid var(--border); padding: 0; }
+  .gradients button { height: 28px; border-radius: var(--radius-sm); border: 1px solid var(--border); padding: 0; }
   .gradients button.active { outline: 2px solid var(--accent); outline-offset: 1px; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .row input[type=range] { flex: 1; accent-color: var(--accent); }
   .row .value { width: 34px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
   footer { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 13px; border-top: 1px solid var(--border); background: var(--bg); }
-  .drag { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 0 14px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; gap: 10px; background: var(--surface-strong); cursor: grab; }
+  .drag { margin-left: auto; padding: 0 14px; height: 28px; border-radius: var(--radius-pill); display: inline-flex; align-items: center; gap: 10px; background: var(--surface-strong); cursor: grab; }
   .spacer { flex: 1; }
-  .crop-bar { position: absolute; left: calc(50% + 25px); top: 14px; transform: translateX(-50%); display: none; gap: 8px; padding: 6px; border-radius: 999px; background: var(--hud); color: #fff; z-index: 5; }
+  .meta { color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .crop-bar { position: absolute; left: calc(50% + 25px); top: 14px; transform: translateX(-50%); display: none; gap: 8px; padding: 6px; border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); z-index: 5; }
   .crop-bar.show { display: flex; }
-  .crop-bar .btn { background: rgba(255,255,255,.14); color: #fff; }
-  .crop-bar .btn.primary { background: var(--accent); }
+  .crop-bar .btn { background: var(--chrome-surface-strong); color: var(--on-chrome); }
+  .crop-bar .btn.primary { background: var(--accent); color: var(--accent-text); }
   textarea.text-edit { position: absolute; z-index: 6; border: 1px dashed var(--accent); background: transparent; outline: none; resize: none; overflow: hidden; padding: 0; margin: 0; white-space: pre; font-weight: 600; line-height: 1.2; }
   .palette { display: grid; grid-template-columns: repeat(5, 22px); gap: 8px; padding: 6px; }
-  .palette button { width: 22px; height: 22px; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.2); }
+  .palette button { width: 22px; height: 22px; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1px var(--border); }
   .palette button.active { box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent); }
   .drop-hint { position: absolute; inset: 12px; z-index: 7; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: var(--radius); pointer-events: none; }
   .drop-hint span { padding: 8px 14px; border-radius: 999px; background: var(--hud); color: #fff; font-size: 12px; }
@@ -52,13 +53,11 @@
   .sheet-error { margin: 0; min-height: 18px; font-size: 12px; color: var(--red); }
   .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+  /* Layout: canvas, then the tool rail, then the background panel. */
   main { grid-template-columns: 1fr auto auto; }
   .scroller { grid-column: 1; grid-row: 1; background-image: radial-gradient(var(--border) .7px, transparent .7px); background-size: 18px 18px; }
-  .rail { grid-column: 2; grid-row: 1; width: 72px; padding: 20px 12px; border-left: 1px solid var(--border); border-right: 0; gap: 8px; }
-  .rail button { width: 46px; height: 38px; border-radius: 9px; }
-  .rail button.active { background: var(--accent); color: white; }
+  .rail { grid-column: 2; grid-row: 1; }
   .panel { grid-column: 3; grid-row: 1; }
-  .drag { position: static; transform: none; margin-left: auto; border-radius: 999px; }
 </style>
 </head>
 <body class="glass">
@@ -100,7 +99,7 @@
 </main>
 <footer>
   <button class="btn plain" id="zoom">Fit</button>
-  <span id="size" style="color:var(--text-2)"></span>
+  <span id="size" class="meta"></span>
   <div class="spacer"></div>
   <div class="drag" id="dragMe" title="Drag the image into another app">Drag to share</div>
   <button class="btn icon" id="ocr" title="Copy text (OCR)"><i data-lucide="scan-text"></i></button>
