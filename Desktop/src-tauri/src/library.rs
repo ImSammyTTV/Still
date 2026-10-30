@@ -201,6 +201,18 @@ mod tests {
         let again = Library::open(dir);
         assert_eq!(again.items[0].file_name, "capture.png");
     }
+    /// cargo test --lib --release -- --ignored --nocapture library_timings
+    #[test]
+    #[ignore]
+    fn library_timings() {
+        let mut lib = Library::open(std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4())));
+        for _ in 0..1000 { lib.add(b"png", "screenshot", "png", None, 3840, 2160).unwrap(); }
+        let time = |name: &str, f: &dyn Fn()| { let t = std::time::Instant::now(); for _ in 0..20 { f(); } println!("  {name:28} {:7.2} ms", t.elapsed().as_secs_f64() * 50.0); };
+        println!("1000 captures");
+        time("write library.json", &|| lib.save().unwrap());
+        time("look for every thumbnail", &|| { lib.missing_thumbs(); });
+        let _ = fs::remove_dir_all(&lib.dir);
+    }
     #[test]
     fn search_filters_kind_title_and_text() {
         let mut lib = Library::open(std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4())));

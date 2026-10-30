@@ -217,7 +217,10 @@ fn warm_overlay(app: &AppHandle, g: &Grab, init: &Value) -> Option<(String, Webv
             if st(app).session.lock().unwrap().handing.is_none() { return Some((label, win.clone())); }
             std::thread::sleep(Duration::from_millis(2));
         }
-        let _ = win.destroy();
+        // On the main thread, and finished before going on: a webview destroyed from here while another is being built can leave both stuck.
+        let doomed = win.clone();
+        let _ = app.run_on_main_thread(move || { let _ = doomed.destroy(); });
+        for _ in 0..50 { if app.get_webview_window(&label).is_none() { break; } std::thread::sleep(Duration::from_millis(2)); }
     }
     st(app).session.lock().unwrap().handing = None;
     None
