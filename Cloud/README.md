@@ -32,7 +32,7 @@ Configure backups, storage quotas, monitoring and patching for your deployment. 
 | --- | --- |
 | `STILL_PUBLIC_URL` | HTTPS origin used to build share and login URLs |
 | `STILL_BRAND` | Name displayed by browser UI |
-| `STILL_ACCENT` | Six-digit hex accent color |
+| `STILL_ACCENT` | Six-digit hex accent color (graphite `#6e6e73` by default) |
 | `STILL_ADMIN_TOKEN` | Optional initial owner token, used only when first creating the owner |
 | `STILL_MAX_UPLOAD_BYTES` | Per-upload maximum, default 4 GiB |
 | `STILL_OIDC_ISSUER` | HTTPS OpenID Connect issuer |

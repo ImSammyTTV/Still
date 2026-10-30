@@ -58,7 +58,7 @@ class Store:
         self.public_url = public_url.rstrip("/")
         self.secure = self.public_url.startswith("https://")
         self.brand = os.environ.get("STILL_BRAND", "Still Cloud")[:80]
-        self.accent = os.environ.get("STILL_ACCENT", "#087cff")
+        self.accent = os.environ.get("STILL_ACCENT", "#6e6e73")
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", self.accent):
             self.accent = "#087cff"
         self.secret = self._secret("session-secret")

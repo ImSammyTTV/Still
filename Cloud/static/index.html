@@ -10,7 +10,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <section id="login-page" hidden>
   <form id="login-form" class="login-card">
-    <div class="brand-mark" aria-hidden="true">⌗</div><h1>Sign in to Still Cloud</h1>
+    <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12V4h8M20 4h8v8M28 20v8h-8M12 28H4v-8"/><rect x="12" y="12" width="8" height="8" rx="1.6" fill="currentColor" stroke="none"/></svg></div><h1>Sign in to Still Cloud</h1>
     <p>Your captures, ready to share.</p><label for="login-token">Personal access token</label>
     <input id="login-token" name="token" type="password" autocomplete="current-password" required>
     <p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">Sign In</button>
@@ -20,7 +20,7 @@
 </section>
 <div id="dashboard-page" class="app" hidden>
   <aside class="sidebar">
-    <a class="wordmark" href="/"><span class="brand-mark small" aria-hidden="true">⌗</span><span class="brand-name">Still Cloud</span></a>
+    <a class="wordmark" href="/"><span class="brand-mark small" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12V4h8M20 4h8v8M28 20v8h-8M12 28H4v-8"/><rect x="12" y="12" width="8" height="8" rx="1.6" fill="currentColor" stroke="none"/></svg></span><span class="brand-name">Still Cloud</span></a>
     <nav aria-label="Library"><button class="nav active" aria-label="All Captures" data-filter="All">▦ <span>All Captures</span></button><button class="nav" aria-label="Screenshots" data-filter="Images">▧ <span>Screenshots</span></button><button class="nav" aria-label="Recordings" data-filter="Videos">▷ <span>Recordings</span></button><button class="nav" aria-label="Trash" data-filter="Trash">⌫ <span>Trash</span></button></nav>
     <div class="sidebar-bottom"><button aria-label="Team" id="team-button" class="nav" hidden>♧ <span>Team</span></button><button aria-label="App Connection" id="token-button" class="nav">⌘ <span>App Connection</span></button><button aria-label="Sign Out" id="logout-button" class="nav">↪ <span>Sign Out</span></button><div id="account" class="account"></div></div>
   </aside>
@@ -28,12 +28,12 @@
     <header class="library-header"><div><p class="eyebrow">YOUR WORKSPACE</p><h1 id="library-title">All Captures</h1></div><div class="header-actions"><label class="search"><span aria-hidden="true">⌕</span><input id="search" name="search" type="search" autocomplete="off" placeholder="Search captures…" aria-label="Search titles, tags and transcripts"></label><button id="upload-button" class="primary">＋ Upload</button></div></header>
     <div class="library-meta"><p id="capture-count"></p><select id="sort" aria-label="Sort captures"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option></select></div>
     <div id="captures" class="capture-grid"></div><button id="load-more" class="secondary load-more" hidden>Load More</button>
-    <div id="empty" class="empty" hidden><div aria-hidden="true">⌗</div><h2>No captures here yet</h2><p>Capture something in the Mac app, or upload a file.</p></div>
+    <div id="empty" class="empty" hidden><div aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12V4h8M20 4h8v8M28 20v8h-8M12 28H4v-8"/><rect x="12" y="12" width="8" height="8" rx="1.6" fill="currentColor" stroke="none"/></svg></div><h2>No captures here yet</h2><p>Capture something in the Mac app, or upload a file.</p></div>
     <p id="dashboard-error" class="error" role="alert"></p>
   </main>
 </div>
 <div id="share-page" hidden>
-  <header class="share-header"><a class="wordmark" href="/"><span class="brand-mark small" aria-hidden="true">⌗</span><span class="brand-name">Still Cloud</span></a><h1 id="share-title">Capture</h1><a id="download" class="secondary" download>↓ Download</a></header>
+  <header class="share-header"><a class="wordmark" href="/"><span class="brand-mark small" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12V4h8M20 4h8v8M28 20v8h-8M12 28H4v-8"/><rect x="12" y="12" width="8" height="8" rx="1.6" fill="currentColor" stroke="none"/></svg></span><span class="brand-name">Still Cloud</span></a><h1 id="share-title">Capture</h1><a id="download" class="secondary" download>↓ Download</a></header>
   <main id="share-main" class="share-layout" tabindex="-1">
     <div class="media-column"><div id="media-stage" class="media-stage"></div><div class="media-tools"><button id="point-button" class="secondary" hidden>Add a Comment Pin</button><span id="share-meta"></span></div><details id="transcript-section" hidden><summary>Transcript</summary><label class="search transcript-search"><input id="transcript-search" name="transcript-search" type="search" placeholder="Search transcript…" aria-label="Search transcript"></label><div id="transcript"></div></details></div>
     <aside class="comments-pane"><div class="comments-heading"><h2>Comments</h2><span id="comments-count" class="count">0</span></div><div id="comments" class="comments-list"></div>
