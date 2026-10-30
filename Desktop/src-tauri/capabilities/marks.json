@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "marks",
+  "description": "The click and keystroke overlay, which only listens for events",
+  "windows": [
+    "marks"
+  ],
+  "permissions": []
+}

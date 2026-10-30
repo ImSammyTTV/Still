@@ -7,8 +7,8 @@ fn main() {
         "library_list", "library_get", "library_rename", "library_delete", "library_copy", "library_save",
         "library_save_as", "library_reveal", "library_open", "library_play", "library_pin", "library_drag", "editor_save",
         "editor_copy", "editor_export", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
-        "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_started",
-        "recording_cancel", "recording_error", "recording_save", "recording_tick", "video_export_target", "video_export_save",
+        "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_prepared", "recording_started",
+        "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_save", "recording_tick", "video_export_target", "video_export_save",
         "video_export_copy", "update_status", "update_check", "update_install",
         "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data",
     ]))).expect("failed to run tauri-build");

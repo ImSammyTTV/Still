@@ -6,7 +6,10 @@
     "hud"
   ],
   "permissions": [
+    "allow-recording-prepared",
     "allow-recording-started",
+    "allow-recording-listen",
+    "allow-recording-finished",
     "allow-recording-cancel",
     "allow-recording-error",
     "allow-recording-save",
