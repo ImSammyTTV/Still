@@ -11,7 +11,6 @@
 <p align="center">
   <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=flat-square&color=0b3a47&label=latest" alt="Latest release"></a>
   <a href="https://github.com/ImSammyTTV/Still/releases"><img src="https://img.shields.io/github/downloads/ImSammyTTV/Still/total?style=flat-square&color=0b3a47&label=downloads" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/no%20account-no%20tracking-2f8f92?style=flat-square" alt="No account, no tracking">
 </p>
 
 <br>
