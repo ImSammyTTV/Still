@@ -23,7 +23,7 @@ send it on — usually in a few seconds, and without opening a single window you
 > &nbsp;→&nbsp; **share**: it's already on your clipboard.
 
 <p align="center">
-  <img src="assets/editor.svg" alt="The Still editor: a capture with numbered arrows, a highlight and a redaction, and the tools down the right" width="100%">
+  <img src="assets/editor.png" alt="The Still editor: the capture in the middle, the markup tools down the right, Drag to share and export buttons along the bottom" width="100%">
 </p>
 
 ## What you get
