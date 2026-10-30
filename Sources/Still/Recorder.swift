@@ -179,7 +179,8 @@ import StillCore
         timer = Timer.scheduledTimer(withTimeInterval: 1.0/60, repeats: true) { [weak self] _ in Task { @MainActor in
             guard let self, self.recording, !self.paused else { return }
             let p = self.pointer(), time = self.currentTime
-            self.elapsed = time
+            // Published, so only when the whole seconds shown change: 60 updates a second redraw every observer.
+            if Int(time) != Int(self.elapsed) { self.elapsed = time }
             self.metadata.pointer.append(PointerSample(time: time, x: p.x, y: p.y))
         } }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in Task { @MainActor in guard let self, self.recording, !self.paused else { return }; let p = self.pointer(); if p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 { self.metadata.clicks.append(ClickSample(time: self.currentTime, x: p.x, y: p.y)) } } }

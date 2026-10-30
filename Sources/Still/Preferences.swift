@@ -28,6 +28,18 @@ import StillCore
     }
     static func position(_ name: String) -> CGPoint { CGPoint(x: name.contains("Left") ? 0.03 : name.contains("Right") ? 0.97 : 0.5, y: name.contains("top") ? 0.03 : 0.97) }
     @AppStorage("recordingQuality") var recordingQuality = "high"
+    @AppStorage("recordingBitratePresets") private var bitratePresetData = Data()
+    /// Your own bitrates, listed after the built-in qualities.
+    var bitratePresets: [BitratePreset] {
+        get { (try? JSONDecoder().decode([BitratePreset].self, from: bitratePresetData)) ?? [] }
+        set { bitratePresetData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+    }
+    /// Every quality a picker can show. `selected` keeps a deleted preset's value listed for edits already saved with it.
+    func qualityOptions(including selected: String? = nil) -> [(title: String, tag: String)] {
+        var options = VideoQuality.allCases.map { (title: $0.title, tag: $0.rawValue) } + bitratePresets.map { (title: $0.title, tag: $0.tag) }
+        if let selected, let bitrate = BitratePreset.bitrate(tag: selected), !options.contains(where: { $0.tag == selected }) { options.append((title: "Custom (\(BitratePreset.label(bitrate)))", tag: selected)) }
+        return options
+    }
     @AppStorage("recordingCameraID") var recordingCameraID = ""
     @AppStorage("recordingMicrophoneID") var recordingMicrophoneID = ""
     @AppStorage("showMenuBar") var showMenuBar = true

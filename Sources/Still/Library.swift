@@ -22,8 +22,16 @@ final class Library: ObservableObject {
     @AppStorage("exportJPEG") var exportJPEG = false
     @AppStorage("exportFolder") var exportFolder = ""
     let root: URL
-    var thumbnails: [UUID: NSImage] = [:]
-    private var loadingThumbnails = Set<UUID>()
+    /// Decoded previews, bounded so a long history can't grow without limit. 560 px previews cost about 1 MB each.
+    private let thumbnails: NSCache<NSUUID, NSImage> = { let cache = NSCache<NSUUID, NSImage>(); cache.totalCostLimit = 128*1024*1024; return cache }()
+    /// One token per decode in flight, so a result for a file that has since changed is dropped.
+    private var loadingThumbnails: [UUID: UUID] = [:]
+    /// PNG decoding is the slow part of showing History; it never runs on the main thread, and only a few run at once.
+    static let thumbnailQueue: OperationQueue = {
+        let queue = OperationQueue(); queue.name = "Still thumbnails"; queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount-2)); return queue
+    }()
+    private var thumbnailChangeQueued = false
     private var toastID = UUID()
     private var defaultsObserver: NSObjectProtocol?
 
@@ -86,10 +94,19 @@ final class Library: ObservableObject {
     }
     @discardableResult
     func add(image: CGImage, title: String) throws -> CaptureItem {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID()).png")
-        defer { try? FileManager.default.removeItem(at: temp) }
-        try ImageRenderer.data(image).write(to: temp)
-        return try add(file: temp, title: title)
+        try add(png: try ImageRenderer.libraryData(image), width: image.width, height: image.height, title: title)
+    }
+    /// Stores PNG bytes from ImageRenderer.libraryData as they are, for captures encoded off the main thread.
+    @discardableResult
+    func add(png: Data, width: Int, height: Int, title: String) throws -> CaptureItem {
+        pruneHistory()
+        let name = "\(UUID().uuidString).png"
+        let destination = root.appendingPathComponent(name)
+        try png.write(to: destination, options: .atomic)
+        let item = CaptureItem(filename: name, title: title, isVideo: false, width: width, height: height)
+        items.insert(item, at: 0)
+        do { try persist() } catch { items.removeAll { $0.id == item.id }; try? FileManager.default.removeItem(at: destination); throw error }
+        return item
     }
     func update(_ item: CaptureItem, image: CGImage, document: ProjectDocument? = nil) throws {
         try ImageRenderer.data(image).write(to: url(item), options: .atomic)
@@ -98,7 +115,7 @@ final class Library: ObservableObject {
             let name = "\(item.id.uuidString).stillshot"
             try document.write(root.appendingPathComponent(name)); items[idx].projectFilename = name
         }
-        thumbnails[item.id] = nil
+        forgetThumbnail(item.id)
         try persist()
         objectWillChange.send()
     }
@@ -125,34 +142,51 @@ final class Library: ObservableObject {
                 let file = root.appendingPathComponent(name)
                 if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.trashItem(at: file, resultingItemURL: nil) }
             }
-            items.removeAll { $0.id == item.id }; thumbnails[item.id] = nil
+            items.removeAll { $0.id == item.id }; forgetThumbnail(item.id)
             try persist(); toast("Moved to Trash")
         } catch { toast("Couldn’t remove capture: \(error.localizedDescription)") }
     }
+    /// The preview if it's ready. If not this returns nil, starts loading it off the main thread, and the views
+    /// update when it arrives, so scrolling a long history never waits for a PNG.
     func thumbnail(_ item: CaptureItem) -> NSImage? {
-        if let cached = thumbnails[item.id] { return cached }
-        let image: NSImage?
+        if let cached = thumbnails.object(forKey: item.id as NSUUID) { return cached }
+        guard loadingThumbnails[item.id] == nil else { return nil }
+        let id = item.id, token = UUID(), file = url(item)
+        loadingThumbnails[id] = token
         if item.isVideo && !item.filename.hasSuffix("gif") {
-            guard !loadingThumbnails.contains(item.id) else { return nil }
-            loadingThumbnails.insert(item.id)
             Task {
-                defer { loadingThumbnails.remove(item.id) }
-                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url(item)))
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
                 generator.maximumSize = CGSize(width: 560, height: 360)
                 generator.appliesPreferredTrackTransform = true
-                if let result = try? await generator.image(at: .zero) {
-                    thumbnails[item.id] = NSImage(cgImage: result.image, size: .zero)
-                    objectWillChange.send()
-                }
+                finishThumbnail(id, token: token, image: try? await generator.image(at: .zero).image)
             }
-            return nil
-        } else if let source = CGImageSourceCreateWithURL(url(item) as CFURL, nil),
-                  let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 560] as CFDictionary) {
-            image = NSImage(cgImage: cg, size: .zero)
-        } else { image = nil }
-        if let image { thumbnails[item.id] = image }
-        return image
+        } else {
+            Self.thumbnailQueue.addOperation { [weak self] in
+                let image = ImageRenderer.thumbnail(file, maxPixelSize: 560)
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.finishThumbnail(id, token: token, image: image) } }
+            }
+        }
+        return nil
     }
+    /// Loads a picture's preview right now, for the Floating Preview, which appears with its image already in place.
+    func loadThumbnail(_ item: CaptureItem) {
+        guard !item.isVideo || item.filename.hasSuffix("gif"), thumbnails.object(forKey: item.id as NSUUID) == nil, let image = ImageRenderer.thumbnail(url(item), maxPixelSize: 560) else { return }
+        storeThumbnail(item.id, image: image)
+    }
+    func storeThumbnail(_ id: UUID, image: CGImage) {
+        thumbnails.setObject(NSImage(cgImage: image, size: .zero), forKey: id as NSUUID, cost: image.bytesPerRow*image.height)
+    }
+    private func finishThumbnail(_ id: UUID, token: UUID, image: CGImage?) {
+        guard loadingThumbnails[id] == token else { return }
+        loadingThumbnails[id] = nil
+        guard let image else { return }
+        storeThumbnail(id, image: image)
+        // A screenful of previews lands in a burst; redraw once for all of them.
+        guard !thumbnailChangeQueued else { return }
+        thumbnailChangeQueued = true
+        DispatchQueue.main.asyncAfter(deadline: .now()+0.03) { [weak self] in MainActor.assumeIsolated { self?.thumbnailChangeQueued = false; self?.objectWillChange.send() } }
+    }
+    private func forgetThumbnail(_ id: UUID) { thumbnails.removeObject(forKey: id as NSUUID); loadingThumbnails[id] = nil }
     func toast(_ text: String) {
         let id = UUID(); toastID = id; message = text
         DispatchQueue.main.asyncAfter(deadline: .now()+5) { [weak self] in
@@ -166,6 +200,12 @@ final class Library: ObservableObject {
             NSPasteboard.general.setData(data, forType: .png)
             toast("Copied image")
         } catch { toast(error.localizedDescription) }
+    }
+    /// Puts PNG bytes that are already encoded on the clipboard.
+    func copy(png: Data) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(png, forType: .png)
+        toast("Copied image")
     }
     func copy(_ item: CaptureItem) {
         if item.isVideo { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([url(item) as NSURL]); toast("Copied recording file") }
@@ -249,7 +289,7 @@ final class Library: ObservableObject {
         return url(item)
     }
     func replaceVideo(_ item: CaptureItem, file: URL) throws {
-        try Data(contentsOf: file).write(to: url(item), options: .atomic); thumbnails[item.id] = nil; loadingThumbnails.remove(item.id); objectWillChange.send()
+        try Data(contentsOf: file).write(to: url(item), options: .atomic); forgetThumbnail(item.id); objectWillChange.send()
     }
     func setCloudURL(_ item: CaptureItem, url: URL) {
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].cloudURL = url.absoluteString; do { try persist() } catch { toast(error.localizedDescription) } }

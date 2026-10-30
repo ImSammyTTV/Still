@@ -19,6 +19,7 @@ final class MarkCanvas: NSView {
     private var movingControl = false
     private var resizeAnchor = CGPoint.zero
     private var resizeCorner = CGPoint.zero
+    private let previewCache = PreviewCache()
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     init(model: EditorModel) { self.model = model; super.init(frame: .zero); setAccessibilityLabel("Annotation canvas. Choose a tool, then drag on the image. Text and step tools use a click.") }
@@ -29,7 +30,7 @@ final class MarkCanvas: NSView {
         var marks = model.marks
         if let draft, draft.tool != .crop { marks.append(draft) }
         do {
-            let rendered = try ImageRenderer.preview(model.source, marks: marks)
+            let rendered = try ImageRenderer.preview(model.source, marks: marks, cache: previewCache)
             NSImage(cgImage: rendered, size: NSSize(width: rendered.width, height: rendered.height)).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         } catch {
             NSColor.windowBackgroundColor.setFill(); bounds.fill()

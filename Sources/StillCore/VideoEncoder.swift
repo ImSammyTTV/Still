@@ -9,6 +9,24 @@ public enum VideoQuality: String, Codable, CaseIterable, Identifiable {
         return max(400_000, min(100_000_000, Int(size.width*size.height*Double(max(1, fps))*factor)))
     }
 }
+/// A video bitrate you name in Settings. Its `tag` goes wherever a quality name goes (`VideoSettings.quality`) and
+/// carries the bitrate itself, so saved edits keep working after a preset is deleted, and builds that don't know
+/// presets fall back to High.
+public struct BitratePreset: Codable, Identifiable, Equatable {
+    public static let megabitRange: ClosedRange<Double> = 1...100
+    public var id = UUID()
+    public var name: String
+    public var megabits: Double
+    public init(name: String, megabits: Double) { self.name = name; self.megabits = megabits }
+    public var bitrate: Int { Int(min(Self.megabitRange.upperBound, max(Self.megabitRange.lowerBound, megabits))*1_000_000) }
+    public var tag: String { "bitrate:\(bitrate)" }
+    public var title: String { "\(name) (\(Self.label(bitrate)))" }
+    public static func label(_ bitrate: Int) -> String { "\((Double(bitrate)/100_000).rounded()/10) Mbps".replacingOccurrences(of: ".0 ", with: " ") }
+    public static func bitrate(tag: String?) -> Int? {
+        guard let tag, tag.hasPrefix("bitrate:"), let value = Int(tag.dropFirst(8)), value > 0 else { return nil }
+        return Int(min(megabitRange.upperBound, max(megabitRange.lowerBound, Double(value)/1_000_000))*1_000_000)
+    }
+}
 private final class EncodingSession: @unchecked Sendable {
     let reader: AVAssetReader
     let writer: AVAssetWriter
@@ -25,7 +43,7 @@ public enum VideoEncoder {
         output.videoComposition = video.composition; output.alwaysCopiesSampleData = false
         guard reader.canAdd(output) else { throw VideoError.export }; reader.add(output)
         let fps = max(1, Int((1/video.composition.frameDuration.seconds).rounded()))
-        let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(video.size.width), AVVideoHeightKey: Int(video.size.height), AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: quality.bitrate(size: video.size, fps: fps), AVVideoExpectedSourceFrameRateKey: fps, AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel, AVVideoMaxKeyFrameIntervalKey: fps*2]]
+        let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(video.size.width), AVVideoHeightKey: Int(video.size.height), AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: video.bitrate ?? quality.bitrate(size: video.size, fps: fps), AVVideoExpectedSourceFrameRateKey: fps, AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel, AVVideoMaxKeyFrameIntervalKey: fps*2]]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
         guard writer.canAdd(input) else { throw VideoError.export }; writer.add(input)

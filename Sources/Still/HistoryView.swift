@@ -11,8 +11,9 @@ struct HistoryView: View {
     @State private var renaming: CaptureItem?
     @State private var title = ""
     private var items: [CaptureItem] { library.items.filter { (filter == "All" || (filter == "Screenshots" && !$0.isVideo) || (filter == "Videos" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) } }
-    private var current: CaptureItem? { items.first(where: { $0.id == selected }) ?? items.first }
     var body: some View {
+        // Filtered once here: every grid cell asks for `current`, and a search looks through recognized text.
+        let items = self.items, current = items.first(where: { $0.id == selected }) ?? items.first
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close capture history")

@@ -6,7 +6,9 @@ import StillCore
 enum SelectionPurpose { case screenshot, text, scroll, recording }
 @MainActor enum ScreenCaptureAPI {
     static func filter(screen: NSScreen) async throws -> SCContentFilter {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        try filter(screen: screen, content: await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true))
+    }
+    static func filter(screen: NSScreen, content: SCShareableContent) throws -> SCContentFilter {
         let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         guard let display = content.displays.first(where: { $0.displayID == id }) else { throw NSError(domain: "Still", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected display is no longer connected."]) }
         let pid = ProcessInfo.processInfo.processIdentifier
@@ -31,6 +33,17 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         config.height = max(1, Int(region.height*screen.backingScaleFactor))
         config.showsCursor = Preferences.shared.includeCursor
         return try await SCScreenshotManager.captureImage(contentFilter: selected, configuration: config)
+    }
+    /// Every display at once, from one window list: fetching the list costs as much as the grab itself, and
+    /// grabbing together keeps the frozen images from the same moment.
+    static func images(screens: [NSScreen]) async -> [ObjectIdentifier: Result<CGImage, Error>] {
+        let content: SCShareableContent
+        do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
+        catch { return Dictionary(uniqueKeysWithValues: screens.map { (ObjectIdentifier($0), .failure(error)) }) }
+        let grabs = screens.map { screen in (ObjectIdentifier(screen), Task { try await image(screen: screen, filter: try filter(screen: screen, content: content)) }) }
+        var results: [ObjectIdentifier: Result<CGImage, Error>] = [:]
+        for (id, grab) in grabs { results[id] = await grab.result }
+        return results
     }
 }
 
@@ -58,8 +71,9 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         Task {
             var shots: [ObjectIdentifier: CGImage] = [:]
             var failures: [String] = []
+            let grabs = await ScreenCaptureAPI.images(screens: NSScreen.screens)
             for screen in NSScreen.screens {
-                do { shots[ObjectIdentifier(screen)] = try await ScreenCaptureAPI.image(screen: screen) }
+                do { shots[ObjectIdentifier(screen)] = try grabs[ObjectIdentifier(screen)]?.get() }
                 catch { let error = error as NSError; failures.append("\(screen.localizedName): \(error.localizedDescription) (\(error.domain) \(error.code))") }
             }
             guard active else { return }

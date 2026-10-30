@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import StillCore
 import SwiftUI
 
 /// One remembered clipboard entry: text, an image (stored on disk) or a set of files.
@@ -37,6 +38,28 @@ struct ClipItem: Codable, Identifiable, Equatable {
     }
 }
 
+/// Small menu icons for image entries. Decoding a full PNG costs tens of milliseconds and the menu holds up to 100
+/// rows, so icons are made once and kept; cost is small because each one is at most 56 px.
+final class ClipboardThumbnails: @unchecked Sendable {
+    private let cache = NSCache<NSString, NSImage>()
+    func cached(_ url: URL) -> NSImage? { cache.object(forKey: url.lastPathComponent as NSString) }
+    func image(for url: URL) -> NSImage? {
+        if let cached = cached(url) { return cached }
+        guard let thumbnail = ImageRenderer.thumbnail(url, maxPixelSize: 56) else { return nil }
+        let width = CGFloat(thumbnail.width), height = CGFloat(thumbnail.height)
+        let size = width >= height ? NSSize(width: 28, height: 28*height/max(1, width)) : NSSize(width: 28*width/max(1, height), height: 28)
+        let image = NSImage(cgImage: thumbnail, size: size)
+        cache.setObject(image, forKey: url.lastPathComponent as NSString)
+        return image
+    }
+    func removeAll() { cache.removeAllObjects() }
+    /// Fills the cache in the background so the first menu open doesn't have to.
+    func prepare(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        Task.detached(priority: .utility) { [self] in for url in urls where cached(url) == nil { _ = image(for: url) } }
+    }
+}
+
 /// Keeps a history of what you copy, like a clipboard manager, and puts any entry back on demand.
 @MainActor final class ClipboardHistory: ObservableObject {
     static let shared = ClipboardHistory()
@@ -48,6 +71,8 @@ struct ClipItem: Codable, Identifiable, Equatable {
     private let pasteboard = NSPasteboard.general
     private var lastChange = 0
     private var timer: Timer?
+    private var lastRead: Task<Void, Never>?
+    private let thumbnails = ClipboardThumbnails()
     private let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Still/Clipboard", isDirectory: true)
     private var indexURL: URL { folder.appendingPathComponent("history.json") }
     private var imageFolder: URL { folder.appendingPathComponent("images", isDirectory: true) }
@@ -71,6 +96,7 @@ struct ClipItem: Codable, Identifiable, Equatable {
         guard enabled, timer == nil else { return }
         lastChange = pasteboard.changeCount
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in Task { @MainActor in self?.poll() } }
+        thumbnails.prepare(items.compactMap(imageURL))
     }
     func stop() { timer?.invalidate(); timer = nil }
 
@@ -78,26 +104,36 @@ struct ClipItem: Codable, Identifiable, Equatable {
         let change = pasteboard.changeCount
         guard change != lastChange else { return }
         lastChange = change
-        if let item = read() { remember(item) }
+        guard let reading = read() else { return }
+        // In copy order, even when a text copy lands just after an image that is still being converted.
+        let previous = lastRead
+        lastRead = Task { await previous?.value; if let item = await reading.value { remember(item) } }
     }
 
-    /// Reads the current clipboard into an entry, or nil when it's empty or marked private.
-    func read() -> ClipItem? {
+    /// Reads the current clipboard into an entry, or nil when it's empty or marked private. The pasteboard is read
+    /// here; converting an image is slow (Still's own captures land here too), so that part runs off the main thread.
+    private func read() -> Task<ClipItem?, Never>? {
         let types = Set((pasteboard.types ?? []).map(\.rawValue))
         guard !types.isEmpty, types.isDisjoint(with: Self.privateTypes) else { return nil }
         let source = NSWorkspace.shared.frontmostApplication?.localizedName
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            return ClipItem(kind: .files, files: urls.map(\.path), source: source)
+            let item = ClipItem(kind: .files, files: urls.map(\.path), source: source)
+            return Task { item }
         }
         if let text = pasteboard.string(forType: .string), !text.isEmpty, text.count <= Self.maxTextLength {
-            return ClipItem(kind: .text, text: text, source: source)
+            let item = ClipItem(kind: .text, text: text, source: source)
+            return Task { item }
         }
-        if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff), data.count <= Self.maxImageBytes,
-           let image = NSBitmapImageRep(data: data), let png = image.representation(using: .png, properties: [:]) {
-            let name = SHA256.hash(data: png).prefix(12).map { String(format: "%02x", $0) }.joined() + ".png"
-            let url = imageFolder.appendingPathComponent(name)
-            if !FileManager.default.fileExists(atPath: url.path) { try? png.write(to: url) }
-            return ClipItem(kind: .image, imageFile: name, width: image.pixelsWide, height: image.pixelsHigh, source: source)
+        if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff), data.count <= Self.maxImageBytes {
+            let imageFolder = imageFolder, thumbnails = thumbnails
+            return Task.detached(priority: .userInitiated) {
+                guard let image = NSBitmapImageRep(data: data), let png = image.representation(using: .png, properties: [:]) else { return nil }
+                let name = SHA256.hash(data: png).prefix(12).map { String(format: "%02x", $0) }.joined() + ".png"
+                let url = imageFolder.appendingPathComponent(name)
+                if !FileManager.default.fileExists(atPath: url.path) { try? png.write(to: url) }
+                _ = thumbnails.image(for: url)
+                return ClipItem(kind: .image, imageFile: name, width: image.pixelsWide, height: image.pixelsHigh, source: source)
+            }
         }
         return nil
     }
@@ -140,12 +176,8 @@ struct ClipItem: Codable, Identifiable, Equatable {
 
     func remove(_ item: ClipItem) { items.removeAll { $0.id == item.id }; cleanImages(); save() }
     func clear() { items = []; cleanImages(); save() }
-    func thumbnail(_ item: ClipItem) -> NSImage? {
-        guard item.kind == .image, let file = item.imageFile, let image = NSImage(contentsOf: imageFolder.appendingPathComponent(file)) else { return nil }
-        let size = NSSize(width: 28, height: 28*image.size.height/max(1, image.size.width))
-        image.size = size.height > 28 ? NSSize(width: 28*image.size.width/max(1, image.size.height), height: 28) : size
-        return image
-    }
+    private func imageURL(_ item: ClipItem) -> URL? { item.kind == .image ? item.imageFile.map { imageFolder.appendingPathComponent($0) } : nil }
+    func thumbnail(_ item: ClipItem) -> NSImage? { imageURL(item).flatMap { thumbnails.image(for: $0) } }
 
     private func trim() { if items.count > limit { items.removeLast(items.count - limit); cleanImages() } }
     private func cleanImages() {
