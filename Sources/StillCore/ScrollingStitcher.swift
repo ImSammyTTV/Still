@@ -26,48 +26,43 @@ public final class ScrollingStitcher: @unchecked Sendable {
     @discardableResult public func append(_ next: CGImage) throws -> Bool {
         let image = axis == .horizontal ? try ImageRenderer.orient(next, orientation: 6) : next
         guard image.width == previous.width, image.height == previous.height else { throw StitchError.differentSize }
-        let w = 80, h = min(280, image.height)
+        let w = Self.sampleWidth, edge = Self.sampleEdge, h = min(280, image.height)
         let a = sample(previous, width: w, height: h), b = sample(image, width: w, height: h)
         let difference = zip(a, b).reduce(0.0) { $0+abs(Double($1.0)-Double($1.1)) } / Double(a.count) / 255
         if difference < 0.003 { return false }
-        let margin = max(3, h/18)
-        var best = Double.greatestFiniteMagnitude, shift = 0
-        func score(_ a: [UInt8], _ b: [UInt8], height: Int, displacement: Int, margin: Int, step: Int) -> Double {
-            var rows: [Double] = []
-            let begin = max(margin, -displacement+margin), end = min(height-margin, height-displacement-margin)
-            guard end-begin > 20 else { return .greatestFiniteMagnitude }
-            for y in stride(from: begin, to: end, by: step) {
-                var sum = 0.0
-                for x in stride(from: 5, to: w-5, by: 2) { sum += abs(Double(a[(y+displacement)*w+x])-Double(b[y*w+x])) }
-                rows.append(sum/Double((w-10)/2)/255)
-            }
-            rows.sort()
-            let keep = max(1, Int(Double(rows.count)*0.8))
-            return rows.prefix(keep).reduce(0,+)/Double(keep)
+        let margin = max(3, h/18), limit = max(3, h-margin*2-24)
+        let shifts = (-limit...limit).filter { abs($0) > 1 }
+        let scores = shifts.map { Self.score(a, b, height: h, displacement: $0, margin: margin, step: 2) }
+        let lowest = scores.map(\.trimmed).min() ?? .greatestFiniteMagnitude
+        guard lowest < Self.match else { throw StitchError.noOverlap }
+        // Repeated text can look like a match at the wrong shift, and the sample is too coarse to say which is
+        // right. The closest contenders are judged at full height, and on a tie the one that overlaps most wins,
+        // because it has the most rows agreeing with it.
+        var contenders = shifts.indices.filter { i in
+            let value = scores[i].trimmed
+            return value < Self.match && value <= lowest+Self.close && (i == 0 || value <= scores[i-1].trimmed) && (i == shifts.count-1 || value <= scores[i+1].trimmed)
         }
-        let limit = max(3, h-margin*2-24)
-        for d in -limit...limit where abs(d) > 1 {
-            let value = score(a, b, height: h, displacement: d, margin: margin, step: 2)
-            if value < best-0.00001 || (abs(value-best) < 0.00001 && abs(d) < abs(shift)) { best = value; shift = d }
-        }
-        guard best < 0.065, shift != 0 else { throw StitchError.noOverlap }
-        var pixels = Int((Double(shift)*Double(image.height)/Double(h)).rounded())
-        if image.height > h {
-            let fullA = sample(previous, width: w, height: image.height), fullB = sample(image, width: w, height: image.height)
-            let radius = max(2, Int(ceil(Double(image.height)/Double(h)))*2)
-            var refined = Double.greatestFiniteMagnitude
-            for candidate in pixels-radius...pixels+radius where candidate != 0 {
-                let value = score(fullA, fullB, height: image.height, displacement: candidate, margin: max(3,image.height/18), step: max(1,image.height/350))
-                if value < refined { refined = value; pixels = candidate }
+        contenders.sort { (scores[$0].trimmed, scores[$0].overlap) < (scores[$1].trimmed, scores[$1].overlap) }
+        contenders = Array(contenders.prefix(Self.contenders))
+        let fullA = image.height > h ? sample(previous, width: w, height: image.height) : a
+        let fullB = image.height > h ? sample(image, width: w, height: image.height) : b
+        let radius = max(2, Int(ceil(Double(image.height)/Double(h))))*2
+        var best = Score.worst, pixels = 0
+        for index in contenders {
+            let center = Int((Double(shifts[index])*Double(image.height)/Double(h)).rounded())
+            for candidate in center-radius...center+radius where candidate != 0 {
+                let value = Self.score(fullA, fullB, height: image.height, displacement: candidate, margin: max(3, image.height/18), step: max(1, image.height/350))
+                if value.beats(best, smaller: abs(candidate) < abs(pixels)) { best = value; pixels = candidate }
             }
         }
+        guard pixels != 0, best.upper < Self.exact else { throw StitchError.noOverlap }
         func fixedRows(fromBottom: Bool) -> Int {
             var count = 0
             for index in 0..<max(1,h/5) {
                 let y = fromBottom ? h-1-index : index
                 var difference = 0.0
-                for x in 5..<w-5 { difference += abs(Double(a[y*w+x])-Double(b[y*w+x])) }
-                let delta = difference/Double(w-10)/255
+                for x in edge..<w-edge { difference += abs(Double(a[y*w+x])-Double(b[y*w+x])) }
+                let delta = difference/Double(w-2*edge)/255
                 if delta > 0.007 { break }; count += 1
             }
             return min(image.height/4, Int(Double(count)*Double(image.height)/Double(h)))
@@ -94,6 +89,49 @@ public final class ScrollingStitcher: @unchecked Sendable {
         }
         guard let result = ctx.makeImage() else { throw RenderError.allocation }
         previous = image; combined = result; frameCount += 1; return true
+    }
+    /// Columns sampled across the frame. Text needs this many: coarser samples blur lines into look-alikes.
+    private static let sampleWidth = 320
+    /// Columns left out on each side, because scrollbars move on their own.
+    private static let sampleEdge = sampleWidth/16
+    /// The worst average difference, from 0 to 1, that still counts as the same content.
+    private static let match = 0.065
+    /// The same at full height for the row 70% of the way from best to worst, where a true shift compares the very
+    /// same pixels. Strict, because a refused frame can be recovered by scrolling back, and a bad join can't.
+    private static let exact = 0.012
+    /// How far behind the best a shift can be and still be looked at closely, and how many are.
+    private static let close = 0.04
+    private static let contenders = 24
+
+    private struct Score {
+        var trimmed: Double, overlap: Double, upper: Double
+        static let worst = Score(trimmed: .greatestFiniteMagnitude, overlap: .greatestFiniteMagnitude, upper: .greatestFiniteMagnitude)
+        /// A tie goes to `smaller`, the shift that moves the frame less.
+        func beats(_ other: Score, smaller: Bool) -> Bool {
+            if abs(trimmed-other.trimmed) >= 0.00001 { return trimmed < other.trimmed }
+            if abs(overlap-other.overlap) >= 0.00000001 { return overlap < other.overlap }
+            return smaller
+        }
+    }
+    /// How badly row y+displacement of `a` differs from row y of `b`. The worst fifth of the rows is ignored, so sticky
+    /// bars and small animations don't spoil a good match. The average over the whole overlap, margins included,
+    /// settles ties on flat pages, where a shift slightly off can differ only in the ignored rows.
+    private static func score(_ a: [UInt8], _ b: [UInt8], height: Int, displacement: Int, margin: Int, step: Int) -> Score {
+        let w = sampleWidth, edge = sampleEdge
+        let begin = max(margin, margin-displacement), end = min(height-margin, height-displacement-margin)
+        guard end-begin > 20 else { return .worst }
+        return a.withUnsafeBufferPointer { a in b.withUnsafeBufferPointer { b in
+            func row(_ y: Int) -> Double {
+                var sum = 0
+                for x in stride(from: edge, to: w-edge, by: 2) { sum += abs(Int(a[(y+displacement)*w+x])-Int(b[y*w+x])) }
+                return Double(sum)/Double((w-2*edge)/2)/255
+            }
+            var rows = stride(from: begin, to: end, by: step).map(row)
+            rows.sort()
+            let keep = max(1, Int(Double(rows.count)*0.8))
+            let overlap = Array(stride(from: max(0, -displacement), to: min(height, height-displacement), by: step))
+            return Score(trimmed: rows.prefix(keep).reduce(0, +)/Double(keep), overlap: overlap.map(row).reduce(0, +)/Double(overlap.count), upper: rows[rows.count*7/10])
+        } }
     }
     private func sample(_ image: CGImage, width: Int, height: Int) -> [UInt8] {
         var data = [UInt8](repeating: 0, count: width*height)
