@@ -16,6 +16,7 @@ cp -R Cloud/static "$app_path/Contents/Resources/Cloud/"
 if [ -f Cloud/README.md ]; then cp Cloud/README.md "$app_path/Contents/Resources/Cloud/"; fi
 mkdir -p "$app_path/Contents/Resources/Documentation"
 cp README.md FEATURES.md "$app_path/Contents/Resources/Documentation/"
+cp Resources/MenuBarIcon.png Resources/MenuBarIcon@2x.png "$app_path/Contents/Resources/"
 mkdir -p .build/Still.iconset
 for size in 16 32 128 256 512; do
   sips -z $size $size Resources/AppIcon.png --out .build/Still.iconset/icon_${size}x${size}.png >/dev/null

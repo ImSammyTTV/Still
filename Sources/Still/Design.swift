@@ -36,15 +36,10 @@ enum Studio {
         return material
     }
 
-    /// The captured-frame mark as a template, so macOS draws it black or white.
+    /// The logo's own artwork (frame, gaps and curled corner) as a template, so macOS draws it black or white.
     @MainActor static func menuBarIcon() -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            NSColor.black.setStroke(); NSColor.black.setFill()
-            let frame = NSBezierPath(); frame.lineWidth = 1.7; frame.lineJoinStyle = .round; frame.lineCapStyle = .round
-            frame.move(to: NSPoint(x: 11, y: 2)); frame.line(to: NSPoint(x: 2, y: 2)); frame.line(to: NSPoint(x: 2, y: 16)); frame.line(to: NSPoint(x: 16, y: 16)); frame.line(to: NSPoint(x: 16, y: 7)); frame.stroke()
-            let fold = NSBezierPath(); fold.move(to: NSPoint(x: 11, y: 2)); fold.line(to: NSPoint(x: 11, y: 7)); fold.line(to: NSPoint(x: 16, y: 7)); fold.close(); fold.fill()
-            return true
-        }
+        let image = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "viewfinder", accessibilityDescription: nil) ?? NSImage()
+        image.accessibilityDescription = "Still capture menu"
         image.isTemplate = true
         return image
     }
