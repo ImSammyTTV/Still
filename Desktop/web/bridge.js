@@ -24,6 +24,7 @@
     'recording:started': ['recording_started'], 'recording:cancel': ['recording_cancel'], 'recording:error': ['recording_error', 'message'],
     'cloud:get': ['cloud_get'], 'cloud:connect': ['cloud_connect', 'endpoint', 'token'], 'cloud:disconnect': ['cloud_disconnect'],
     'cloud:upload': ['cloud_upload', 'id'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],
+    'scroll:stop': ['scroll_stop', 'save'],
     'update:status': ['update_status'], 'update:check': ['update_check'], 'update:install': ['update_install']
   };
 

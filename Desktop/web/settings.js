@@ -5,6 +5,7 @@ const PAGES = [
 ];
 const SHORTCUTS = [
   ['allInOne', 'Capture Bar'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Fullscreen'],
+  ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture (press again to finish)'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
 let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false };
@@ -92,7 +93,8 @@ const pages = {
     group('Selection', [
       select('Crosshair', 'crosshair', [['partial', 'Partial'], ['full', 'Full screen'], ['disabled', 'Off']]),
       toggle('Show magnifier', 'magnifier'), toggle('Remember last selection', 'rememberSelection')
-    ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it.')
+    ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it.'),
+    prefs.platform === 'win32' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], 'Your icons come back as soon as the capture ends.') : null
   ],
   Recording: () => [
     group('Video', [

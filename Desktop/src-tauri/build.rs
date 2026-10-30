@@ -9,6 +9,6 @@ fn main() {
         "editor_copy", "editor_export", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
         "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_started",
         "recording_cancel", "recording_error", "recording_save", "update_status", "update_check", "update_install",
-        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data",
+        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data", "scroll_stop",
     ]))).expect("failed to run tauri-build");
 }
