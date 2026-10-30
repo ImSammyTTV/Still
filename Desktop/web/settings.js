@@ -14,15 +14,19 @@ const group = (title, rows, hint) => [title ? el('div', { class: 'group-title' }
 const row = (label, control) => el('div', { class: 'row' }, [el('span', {}, label), control]);
 const get = (path) => path.split('.').reduce((o, k) => o?.[k], prefs);
 const patchFor = (path, value) => path.split('.').reduceRight((acc, k) => ({ [k]: acc }), value);
-const toggle = (label, path) => row(label, el('input', { type: 'checkbox', class: 'switch', checked: !!get(path), onchange: (e) => set(patchFor(path, e.target.checked)) }));
+const toggle = (label, path) => row(label, el('input', { type: 'checkbox', class: 'switch', 'aria-label': label, checked: !!get(path), onchange: (e) => set(patchFor(path, e.target.checked)) }));
 const select = (label, path, options, number = false) => {
-  const s = el('select', { class: 'field', onchange: (e) => set(patchFor(path, number ? Number(e.target.value) : e.target.value)) },
+  const s = el('select', { class: 'field', 'aria-label': label, onchange: (e) => set(patchFor(path, number ? Number(e.target.value) : e.target.value)) },
     options.map(([value, text]) => el('option', { value, selected: String(get(path)) === String(value) }, text)));
   return row(label, s);
 };
 
 function render() {
-  $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === current));
+  $$('#nav button[data-page]').forEach((b) => {
+    const active = b.dataset.page === current;
+    b.classList.toggle('active', active);
+    if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   $('#pageTitle').textContent = current;
   const c = $('#content'); c.replaceChildren(...pages[current]().flat().filter(Boolean)); refreshIcons();
 }
@@ -196,8 +200,17 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   if (localStorage.getItem('stillSetupComplete') !== '1') current = 'Setup';
   updateStatus = await still.invoke('update:status');
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
+  const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings…', 'aria-label': 'Search settings categories', autocomplete: 'off' });
+  const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');
+  search.addEventListener('input', () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    let matches = 0;
+    $$('#nav button[data-page]').forEach(button => { button.hidden = !button.dataset.page.toLocaleLowerCase().includes(query); if (!button.hidden) matches++; });
+    empty.hidden = matches > 0;
+  });
+  $('#nav').append(search);
   $('#nav').append(...PAGES.map(([name, iconName, color]) => el('button', { 'data-page': name, html: `<span class="tile" style="background:${color}">${icon(iconName)}</span>${name}`, onclick: () => { current = name; render(); } })));
-  $('#nav').append(el('div', { class: 'spacer' }));
+  $('#nav').append(empty, el('div', { class: 'spacer' }));
   // Window buttons sit in the top-right corner, at the end of the page's title bar.
   if (prefs.platform !== 'darwin') { const header = $('header'); header.classList.add('titlebar'); addWindowControls(header); header.querySelector('.window-controls').style.marginLeft = 'auto'; }
   render();

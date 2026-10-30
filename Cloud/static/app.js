@@ -63,7 +63,11 @@ async function loadCaptures(append = false) {
   if (!append) { state.shown = 50; state.items = []; state.nextOffset = null; }
   const request = state.request = (state.request || 0) + 1;
   $('captures').setAttribute('aria-busy', 'true'); $('dashboard-error').textContent = '';
-  document.querySelectorAll('[data-filter]').forEach((node) => node.classList.toggle('active', node.dataset.filter === state.filter));
+  document.querySelectorAll('[data-filter]').forEach((node) => {
+    const active = node.dataset.filter === state.filter;
+    node.classList.toggle('active', active);
+    node.setAttribute('aria-pressed', String(active));
+  });
   $('library-title').textContent = state.filter === 'All' ? 'All Captures' : state.filter === 'Images' ? 'Screenshots' : state.filter === 'Videos' ? 'Recordings' : 'Trash';
   const query = new URLSearchParams({ q: state.query, trash: state.filter === 'Trash' ? '1' : '0', offset: append ? String(state.nextOffset || 0) : '0', count: '100', type: state.filter });
   try { const result = await api(`/api/uploads?${query}`); if (request !== state.request) return; state.items = append ? state.items.concat(result.items) : result.items; state.total = result.total ?? state.items.length; state.nextOffset = result.nextOffset ?? null; renderCaptures(); }

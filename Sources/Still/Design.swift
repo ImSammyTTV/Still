@@ -27,7 +27,7 @@ enum Studio {
     @MainActor static func glass(_ content: NSView, in window: NSWindow, cornerRadius: CGFloat = 0) -> NSView {
         window.isOpaque = false; window.backgroundColor = .clear
         let material = NSVisualEffectView()
-        material.material = .hudWindow; material.blendingMode = .behindWindow; material.state = .followsWindowActiveState
+        material.material = .underWindowBackground; material.blendingMode = .behindWindow; material.state = .followsWindowActiveState
         if cornerRadius > 0 { material.wantsLayer = true; material.layer?.cornerRadius = cornerRadius; material.layer?.cornerCurve = .continuous; material.layer?.masksToBounds = true }
         content.translatesAutoresizingMaskIntoConstraints = false
         material.addSubview(content)

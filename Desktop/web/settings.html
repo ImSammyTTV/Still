@@ -6,10 +6,12 @@
 <link rel="stylesheet" href="style.css">
 <style>
   body { display: grid; grid-template-columns: 210px 1fr; }
-  nav { background: var(--sidebar); border-right: 1px solid var(--border); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; -webkit-app-region: drag; }
-  nav button { -webkit-app-region: no-drag; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; text-align: left; }
+  nav { background: var(--sidebar); border-right: 1px solid var(--border); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; -webkit-app-region: drag; }
+  nav button { -webkit-app-region: no-drag; display: flex; align-items: center; gap: 9px; min-height: 32px; flex-shrink: 0; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; text-align: left; }
   nav button:hover { background: var(--surface); }
   nav button.active { background: var(--surface-strong); }
+  .settings-search { width: 100%; margin-bottom: 10px; flex-shrink: 0; -webkit-app-region: no-drag; }
+  .nav-empty { color: var(--text-2); font-size: 12px; padding: 12px 8px; }
   .tile { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: #fff; }
   .tile svg { width: 13px; height: 13px; }
   .brand { display: flex; align-items: center; gap: 10px; padding: 34px 8px 16px; }
@@ -43,15 +45,15 @@
   .brand { padding: 4px 8px 14px; }
   .brand img { border-radius: 8px; }
   .group { border-radius: var(--radius); }
-  nav button.active { background: var(--accent); color: #fff; }
+  nav button.active { background: var(--accent); color: var(--accent-text); }
   nav button.active .tile { box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
 </style>
 </head>
 <body class="glass">
-<nav id="nav">
+<nav id="nav" aria-label="Settings categories">
   <div class="brand-row"><div class="brand"><img src="icon.png" alt=""><div><b>Still</b><span>Capture studio</span></div></div></div>
 </nav>
-<section>
+<section aria-labelledby="pageTitle">
   <header><span id="pageTitle"></span></header>
   <div class="content" id="content"></div>
 </section>

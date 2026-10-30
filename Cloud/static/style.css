@@ -23,3 +23,14 @@ h1,h2,.wordmark { font-family:inherit; letter-spacing:-.01em; }
   body { background:radial-gradient(1200px 600px at 20% -10%,#2a2d33 0,transparent 60%),var(--bg); background-attachment:fixed; }
   .capture-thumb { background:#141416; }
 }
+
+/* The same actions remain visible on touch screens and with keyboard focus. */
+@media (hover: none) { .card-actions { opacity: 1; } .card-actions button,.card-actions a { min-height: 32px; display: inline-flex; align-items: center; } }
+.header-actions,.library-header > div { min-width: 0; }
+.library-meta { flex-wrap: wrap; gap: 10px; }
+@media (max-width: 420px) { .header-actions { flex-wrap: wrap; } .search { min-width: 0; } .search input { min-width: 0; } }
+@media (prefers-reduced-transparency: reduce) {
+  :root { --surface: #fff; --sidebar: #f2f2f5; }
+  .sidebar,.share-header,.comments-pane,.login-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) { :root { --surface: #2c2c2e; --sidebar: #232325; } }

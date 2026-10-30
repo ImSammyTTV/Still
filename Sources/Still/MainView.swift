@@ -28,8 +28,16 @@ struct MainView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                TextField("Search", text: $sidebarSearch).textFieldStyle(.roundedBorder).controlSize(.regular).padding(.horizontal, 10).padding(.bottom, 10)
-                ForEach(visibleCategories, id: \.0) { category in sidebarRow(category.0, symbol: category.1, color: category.2) }
+                TextField("Search settings", text: $sidebarSearch).accessibilityLabel("Search settings categories").textFieldStyle(.roundedBorder).controlSize(.regular).padding(.horizontal, 10).padding(.bottom, 10)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(visibleCategories, id: \.0) { category in sidebarRow(category.0, symbol: category.1, color: category.2) }
+                        if visibleCategories.isEmpty {
+                            Text("No matching settings").font(.system(size: 12)).foregroundStyle(.secondary).padding(18)
+                            Button("Clear Search") { sidebarSearch = "" }.buttonStyle(.link).padding(.horizontal, 18)
+                        }
+                    }
+                }
                 Spacer()
                 Divider().padding(.horizontal, 10).padding(.vertical, 6)
                 Button { library.page = "About" } label: {
@@ -70,7 +78,7 @@ struct MainView: View {
             }.padding(.horizontal, 8).padding(.vertical, 4)
             .background(selected == title ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .contentShape(Rectangle())
-        }.buttonStyle(.plain).padding(.horizontal, 10)
+        }.buttonStyle(.plain).accessibilityAddTraits(selected == title ? .isSelected : []).padding(.horizontal, 10)
     }
     @ViewBuilder private var content: some View {
         switch selected {

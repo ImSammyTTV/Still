@@ -1,13 +1,17 @@
-# Still Studio
+# Still design
 
-Still takes its visual cues from a print studio: paper, ink, registration marks and annotated proof sheets.
+Still uses a neutral graphite palette, soft grouped surfaces, a ripple brand mark and a separate viewfinder menu icon. Keep the latest native Mac design and the Windows/Linux interface visually consistent.
 
-Vermilion #D64B32 marks selection and primary actions. Warm paper #F4F0E7 and charcoal #242522 provide light and dark surfaces. Serif display headings pair with humanist labels and monospaced measurements.
+## Surfaces and appearance
 
-Settings uses a horizontal subject index. The editor places a labeled tool bench to the right of the canvas. Capture uses an upper-left command card with mode buttons above measurements. History is a scrolling collection of proof cards. Capture receipts have a typographic header and persistent actions. The icon depicts offset print sheets with a vermilion registration dot.
+Mac windows use the native under-window material. Windows uses Acrylic where available; Linux keeps opaque surfaces. Light mode uses cool white and grey rather than the previous warm paper palette. Dark mode uses space grey. Native form controls follow the selected appearance. Web surfaces become opaque when reduced transparency is requested. Respect reduced motion.
 
-Keep actions keyboard accessible. Pair selection color with labels or shape. Respect system appearance and reduced motion. Standard system menus and dialogs retain native behavior.
+## Navigation and interaction
 
-Validation: 21 native core tests and 7 desktop logic tests pass. The Mac universal build supports Apple silicon and Intel. Windows/Linux visual changes require a fresh platform build; this Mac cannot provide a live target-system visual check.
+Settings uses a searchable sidebar with a persistent About entry on Mac. Categories scroll independently on smaller windows. Search has an explicit empty state. Current categories are exposed to assistive technology. Focus rings stay visible; dark graphite controls use dark text to retain contrast.
 
-First launch uses a short setup assistant. Screen capture is verified with an actual screenshot request, without saving the result. Permission requests require a button press. Camera, microphone and cloud remain optional. Setup can be skipped and reopened from General settings.
+Capture, editor and recording workflows retain their existing layouts. Sharing pages use the same rounded surfaces and line icons. Capture actions stay visible for touch input and keyboard focus. Narrow layouts allow the search and upload controls to wrap.
+
+## Installation
+
+Keep the existing release signing identity when installing Mac updates. Use the signed preview workflow and `scripts/install-mac.sh`; a locally signed development build can invalidate an existing screen permission.
