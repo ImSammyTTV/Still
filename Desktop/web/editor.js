@@ -494,20 +494,20 @@ function demoImage() {
   const c = document.createElement('canvas'); c.width = 1200; c.height = 760; const t = c.getContext('2d');
   const font = (weight, size, family = 'system-ui, "Segoe UI", sans-serif') => `${weight} ${size}px ${family}`;
   const fit = (text, weight, size, max, family) => { let s = size; do { t.font = font(weight, s, family); } while (t.measureText(text).width > max && --s > 10); return s; };
-  t.fillStyle = '#e6e9df'; t.fillRect(0, 0, 1200, 760);
+  t.fillStyle = '#e8e8ed'; t.fillRect(0, 0, 1200, 760);
   t.shadowColor = 'rgba(0,0,0,.12)'; t.shadowBlur = 40; t.shadowOffsetY = 12;
-  t.fillStyle = '#fafaf6'; t.beginPath(); t.roundRect(120, 96, 960, 568, 22); t.fill();
+  t.fillStyle = '#ffffff'; t.beginPath(); t.roundRect(120, 96, 960, 568, 22); t.fill();
   t.shadowColor = 'transparent';
   [['#e0938a', 156], ['#d9c27c', 180], ['#9fbf8f', 204]].forEach(([col, x]) => { t.fillStyle = col; t.beginPath(); t.arc(x, 130, 7, 0, Math.PI * 2); t.fill(); });
   const left = 180, max = 840;
   t.textBaseline = 'alphabetic';
-  t.fillStyle = '#6b7565'; t.font = font(700, 15); t.fillText('A LITTLE FIELD GUIDE', left, 200);
-  t.fillStyle = '#26332b'; t.font = font(700, fit('Make your point.', 700, 64, max, 'Georgia, "Times New Roman", serif'), 'Georgia, "Times New Roman", serif'); t.fillText('Make your point.', left, 276);
-  t.fillStyle = '#7b8475'; t.font = font(400, fit('A screenshot is worth a thousand explanations.', 400, 24, max)); t.fillText('A screenshot is worth a thousand explanations.', left, 322);
+  t.fillStyle = '#6e6e73'; t.font = font(700, 15); t.fillText('A LITTLE FIELD GUIDE', left, 200);
+  t.fillStyle = '#1d1d1f'; t.font = font(700, fit('Make your point.', 700, 64, max, 'Georgia, "Times New Roman", serif'), 'Georgia, "Times New Roman", serif'); t.fillText('Make your point.', left, 276);
+  t.fillStyle = '#86868b'; t.font = font(400, fit('A screenshot is worth a thousand explanations.', 400, 24, max)); t.fillText('A screenshot is worth a thousand explanations.', left, 322);
   const steps = ['Draw an arrow to the detail that matters.', 'Highlight the important part, add a note, or crop.', 'Copy it. Save it. Keep moving.'];
   steps.forEach((line, i) => {
     const y = 396 + i * 48;
-    t.fillStyle = '#26332b'; t.font = font(500, 22); t.fillText(String(i + 1).padStart(2, '0'), left, y);
+    t.fillStyle = '#1d1d1f'; t.font = font(500, 22); t.fillText(String(i + 1).padStart(2, '0'), left, y);
     t.font = font(600, fit(line, 600, 22, max - 56)); t.fillText(line, left + 56, y);
   });
   t.fillStyle = '#e8ecdf'; t.beginPath(); t.roundRect(left, 556, max, 54, 10); t.fill();

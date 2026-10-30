@@ -233,7 +233,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.windowsMenu = windowMenu
         NSApp.mainMenu = main
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Still capture menu")
+        statusItem.button?.image = Studio.menuBarIcon()
         menu = NSMenu()
         menu.addItem(withTitle: "Capture Bar", action: #selector(allInOne), keyEquivalent: "")
         menu.addItem(.separator())
@@ -296,7 +296,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.toolTip = "Stop recording"
             statusItem.isVisible = true
         } else {
-            button.image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Still capture menu")
+            button.image = Studio.menuBarIcon()
             button.title = ""; button.contentTintColor = nil
             button.action = nil; button.toolTip = nil
             statusItem.menu = menu
@@ -345,7 +345,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.minSize = NSSize(width: 700, height: 560); window.isReleasedWhenClosed = false
             let host = NSHostingView(rootView: SetupRootView(library: library, recorder: recorder).tint(Studio.accent))
             host.sizingOptions = []
-            window.contentView = host
+            window.contentView = Studio.glass(host, in: window)
             window.center(); window.setFrameAutosaveName("StillPreferences"); mainWindow = window
         }
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -438,7 +438,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.title = item?.title ?? "Still — Annotate"; window.minSize = NSSize(width: 1080, height: 560)
         window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false; window.delegate = self; window.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
-        window.contentView = NSHostingView(rootView: EditorView(model: model)); window.center()
+        window.contentView = Studio.glass(NSHostingView(rootView: EditorView(model: model)), in: window); window.center()
         editors[id] = window; editorModels[id] = model
         // Close the newest preview properly, so later captures don't bring it back.
         if let preview, let id = previewPanels.first(where: { $0.value === preview })?.key { dismissPreview(id) } else { preview?.close() }
@@ -671,7 +671,8 @@ extension AppController {
         if let panel = historyPanel { panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let panel = SelectionPanel(contentRect: CGRect(x: 0, y: 0, width: 880, height: 580), styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .floating; panel.isReleasedWhenClosed = false
-        panel.contentView = NSHostingView(rootView: HistoryView(library: library, dismiss: { [weak self] in self?.historyPanel?.close(); self?.historyPanel = nil }))
+        // The panel is borderless and History's colours are translucent, so it sits on the glass material.
+        panel.contentView = Studio.glass(NSHostingView(rootView: HistoryView(library: library, dismiss: { [weak self] in self?.historyPanel?.close(); self?.historyPanel = nil })), in: panel, cornerRadius: 16)
         historyPanel = panel; panel.center(); panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func showAllInOne(purpose: SelectionPurpose = .screenshot, delay: Int = 0) {
@@ -744,7 +745,7 @@ extension AppController {
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1120, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = item.title; window.minSize = NSSize(width: 950, height: 640); window.isReleasedWhenClosed = false; window.delegate = self; window.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
         let model = VideoEditorModel(item: item, library: library); videoModels[id] = model
-        window.contentView = NSHostingView(rootView: VideoEditorView(model: model).tint(Studio.accent)); editors[id] = window
+        window.contentView = Studio.glass(NSHostingView(rootView: VideoEditorView(model: model).tint(Studio.accent)), in: window); editors[id] = window
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func performPreviewGesture(_ item: CaptureItem, left: Bool) {

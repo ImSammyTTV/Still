@@ -70,13 +70,13 @@ function shutter() {
 }
 
 // Windows are frameless, so they get their own minimise / maximise / close buttons.
-function addWindowControls() {
-  const box = el('div', { class: 'segmented no-drag', style: 'margin-left:8px' }, [
+function addWindowControls(target = $('.titlebar')) {
+  const box = el('div', { class: 'segmented no-drag window-controls', style: 'margin-left:8px' }, [
     el('button', { title: 'Minimise', html: icon('minus'), onclick: () => still.send('window:minimize') }),
     el('button', { title: 'Maximise', html: icon('square', 13), onclick: () => still.send('window:toggleMaximize') }),
     el('button', { title: 'Close', html: icon('x'), onclick: () => still.send('window:close') })
   ]);
-  $('.titlebar').append(box);
+  target.append(box);
   refreshIcons();
 }
 

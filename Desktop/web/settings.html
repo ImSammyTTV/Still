@@ -35,23 +35,21 @@
   .about img { width: 96px; height: 96px; }
   .warning { color: var(--red); font-size: 11px; }
 
-  body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  nav { flex-direction: row; flex-wrap: wrap; gap: 4px 12px; padding: 14px 24px; border-right: 0; border-bottom: 1px solid var(--border); }
-  nav .brand { flex-basis: 100%; padding: 8px 0 15px; }
-  .brand b { font-size: 30px; }
-  nav .tile { display: none; }
-  nav button { border-radius: 0; border-bottom: 2px solid transparent; padding: 0 2px; }
-  nav button.active { background: transparent; border-color: var(--accent); color: var(--accent); }
-  nav .spacer { display: none; }
-  section header { height: 68px; font: 30px "Baskerville", Georgia, serif; }
-  section { grid-template-rows: 68px 1fr; }
-  .content { padding: 0 28px 28px; }
-  .group { border-radius: 3px; }
+  /* macOS System Settings layout: a sidebar of coloured icon tiles and rounded grouped lists. */
+  section header { height: 64px; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  section { grid-template-rows: 64px 1fr; }
+  .content { padding: 0 24px 28px; }
+  header.titlebar { height: 64px; padding: 0 12px 0 24px; }
+  .brand { padding: 4px 8px 14px; }
+  .brand img { border-radius: 8px; }
+  .group { border-radius: var(--radius); }
+  nav button.active { background: var(--accent); color: #fff; }
+  nav button.active .tile { box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
 </style>
 </head>
-<body>
+<body class="glass">
 <nav id="nav">
-  <div class="brand"><img src="icon.png" alt=""><div><b>Still</b><span>Capture studio</span></div></div>
+  <div class="brand-row"><div class="brand"><img src="icon.png" alt=""><div><b>Still</b><span>Capture studio</span></div></div></div>
 </nav>
 <section>
   <header><span id="pageTitle"></span></header>

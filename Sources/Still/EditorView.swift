@@ -32,7 +32,7 @@ struct EditorView: View {
             }
             bottomBar
         }
-        .font(.custom("AvenirNext-Regular", size: 12)).tint(Studio.accent).background(Studio.surface).ignoresSafeArea()
+        .font(.system(size: 12)).tint(Studio.accent).background(Studio.surface).ignoresSafeArea()
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers { _ = provider.loadObject(ofClass: URL.self) { url, _ in if let url { Task { @MainActor in model.addImage(url) } } } }
             return true
@@ -55,7 +55,7 @@ struct EditorView: View {
     }
     private var toolbar: some View {
         HStack(spacing: 8) {
-            Text("Still / Studio").font(.custom("Baskerville", size: 19)).padding(.trailing, 12)
+            Text("Still / Studio").font(.system(size: 19, weight: .semibold)).padding(.trailing, 12)
             HStack(spacing: 5) {
                 roundButton("crop", "Crop") { model.tool = .crop }
                 Menu {
@@ -111,12 +111,12 @@ struct EditorView: View {
     private var toolRail: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("MARK UP").font(.custom("Menlo", size: 9)).tracking(2).foregroundStyle(.secondary).padding(.vertical, 12)
+                Text("MARK UP").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).padding(.vertical, 12)
                 ForEach(tools) { tool in
                     Button { model.tool = tool; model.selectedID = nil } label: {
-                        Label(tool.title, systemImage: tool.symbol).font(.custom("AvenirNext-Medium", size: 11)).frame(width: 116, height: 32, alignment: .leading).padding(.leading, 9)
+                        Label(tool.title, systemImage: tool.symbol).font(.system(size: 11, weight: .medium)).frame(width: 116, height: 32, alignment: .leading).padding(.leading, 9)
                             .foregroundStyle(model.tool == tool ? Color.white : Color.primary)
-                            .background(model.tool == tool ? Studio.accent : .clear, in: RoundedRectangle(cornerRadius: 3))
+                            .background(model.tool == tool ? Studio.accent : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain).help("\(tool.title) (\(tool.key.uppercased()))").accessibilityLabel(tool.title).accessibilityAddTraits(model.tool == tool ? .isSelected : [])
                 }

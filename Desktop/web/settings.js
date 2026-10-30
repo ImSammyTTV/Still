@@ -1,5 +1,5 @@
 const PAGES = [
-  ['Setup', 'sparkles', '#d64b32'],
+  ['Setup', 'sparkles', '#8e8e93'],
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
   ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
 ];
@@ -198,6 +198,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   $('#nav').append(...PAGES.map(([name, iconName, color]) => el('button', { 'data-page': name, html: `<span class="tile" style="background:${color}">${icon(iconName)}</span>${name}`, onclick: () => { current = name; render(); } })));
   $('#nav').append(el('div', { class: 'spacer' }));
-  if (prefs.platform !== 'darwin') { const header = $('header'); header.classList.add('titlebar'); addWindowControls(); header.querySelector('.segmented').style.marginLeft = 'auto'; }
+  // Window buttons sit in the top-right corner, at the end of the page's title bar.
+  if (prefs.platform !== 'darwin') { const header = $('header'); header.classList.add('titlebar'); addWindowControls(header); header.querySelector('.window-controls').style.marginLeft = 'auto'; }
   render();
 })();

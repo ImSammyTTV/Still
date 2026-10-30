@@ -21,7 +21,7 @@ struct SetupView: View {
     private var installed: Bool { Bundle.main.bundleURL.path == "/Applications/Still.app" }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack { Text("Still.").font(.custom("Baskerville-Bold", size: 36)); Spacer(); Text("LET’S GET YOU READY").font(.custom("Menlo", size: 9)).tracking(2).foregroundStyle(.secondary) }
+            HStack { Text("Still.").font(.system(size: 36, weight: .bold)); Spacer(); Text("LET’S GET YOU READY").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
             Text("Your first capture starts here.").font(Studio.heading)
             Text("One screen permission is all you need for screenshots. Camera and microphone access can wait until you use them.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ScrollView {
@@ -59,18 +59,18 @@ struct SetupView: View {
                 Button("Capture Area") { finish(); AppController.shared.captureArea() }.buttonStyle(.borderedProminent).disabled(!checked || failed)
             }
         }.padding(.horizontal, 28).padding(.top, 42).padding(.bottom, 24)
-            .font(.custom("AvenirNext-Regular", size: 12)).background(Studio.paper).tint(Studio.accent)
+            .font(.system(size: 12)).background(Studio.paper).tint(Studio.accent)
             .onAppear { refreshExistingAccess() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshExistingAccess() }
     }
     private func card<Content: View>(_ number: String, _ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            Text(number).font(.custom("Menlo", size: 12)).foregroundStyle(Studio.accent).padding(.top, 3)
+            Text(number).font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(Studio.accent).padding(.top, 3)
             VStack(alignment: .leading, spacing: 9) {
-                Label(title, systemImage: symbol).font(.custom("AvenirNext-DemiBold", size: 14))
+                Label(title, systemImage: symbol).font(.system(size: 14, weight: .semibold))
                 content().fixedSize(horizontal: false, vertical: true)
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 4))
+        }.padding(16).background(Studio.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
     private func refreshExistingAccess() {
         if CGPreflightScreenCaptureAccess() { checked = true; failed = false; library.permissionGranted = true }

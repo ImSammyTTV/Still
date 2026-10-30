@@ -32,7 +32,7 @@ struct HistoryView: View {
                                     VStack(spacing: 12) {
                                         ZStack {
                                             RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.07))
-                                            if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 3)).padding(3) }
+                                            if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).padding(3) }
                                             if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 35)).shadow(radius: 5) }
                                         }.frame(width: 250, height: 190).overlay(RoundedRectangle(cornerRadius: 4).stroke(current?.id == item.id ? Color.accentColor : .clear, lineWidth: 4))
                                         Text(item.title).lineLimit(1).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 245)

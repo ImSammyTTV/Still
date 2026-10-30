@@ -66,6 +66,13 @@ fn builder<'a>(app: &'a AppHandle, label: &str, page: &str, params: Value) -> We
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into())).initialization_script(script).visible(false)
 }
 
+/// Settings, History and the editor use Windows' Acrylic glass (see-through and blurred) behind a translucent page. Elsewhere the
+/// window stays solid (Linux has no system glass; on Windows 10 Mica is ignored and the page background shows).
+fn glass<'a>(builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    #[cfg(windows)] { return builder.transparent(true).effects(tauri::window::EffectsBuilder::new().effect(tauri::window::Effect::Acrylic).build()); }
+    #[allow(unreachable_code)] builder
+}
+
 fn focus_or<F: FnOnce() -> Option<WebviewWindow>>(app: &AppHandle, label: &str, make: F) -> Option<WebviewWindow> {
     if let Some(w) = app.get_webview_window(label) { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); return Some(w); }
     let w = make()?;
@@ -75,12 +82,12 @@ fn focus_or<F: FnOnce() -> Option<WebviewWindow>>(app: &AppHandle, label: &str, 
 
 fn open_settings(app: &AppHandle, page: Option<&str>) {
     let params = json!({ "page": page.unwrap_or("") });
-    if let Some(w) = focus_or(app, "settings", || builder(app, "settings", "settings.html", params).title("Still Settings").inner_size(760.0, 600.0).min_inner_size(700.0, 540.0).decorations(false).build().ok()) {
+    if let Some(w) = focus_or(app, "settings", || glass(builder(app, "settings", "settings.html", params)).title("Still Settings").inner_size(760.0, 600.0).min_inner_size(700.0, 540.0).decorations(false).build().ok()) {
         if let Some(p) = page { let _ = w.emit("settings:page", p); }
     }
 }
 fn open_history(app: &AppHandle) {
-    focus_or(app, "history", || builder(app, "history", "history.html", json!({})).title("Capture History").inner_size(980.0, 660.0).min_inner_size(640.0, 420.0).decorations(false).build().ok());
+    focus_or(app, "history", || glass(builder(app, "history", "history.html", json!({}))).title("Capture History").inner_size(980.0, 660.0).min_inner_size(640.0, 420.0).decorations(false).build().ok());
 }
 fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
     let label = format!("editor-{}", id.unwrap_or("demo"));
@@ -90,7 +97,7 @@ fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
     let (w, h) = app.cursor_position().ok().and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())
         .map(|m| { let a = m.work_area(); let s = m.scale_factor(); ((a.size.width as f64 / s - 40.0).min(1180.0), (a.size.height as f64 / s - 40.0).min(800.0)) })
         .unwrap_or((1180.0, 800.0));
-    focus_or(app, &label, || builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" } }))
+    focus_or(app, &label, || glass(builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" } })))
         .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false).center().build().ok());
 }
 
@@ -400,6 +407,24 @@ fn build_tray_menu(app: &AppHandle) {
     if let Ok(menu) = tray_menu(app) { let _ = tray.set_menu(Some(menu)); }
 }
 
+/// The tray shows a plain ripple glyph, like other menu bar and tray icons: white on a dark taskbar or
+/// panel, black on a light Windows taskbar.
+fn tray_icon() -> tauri::image::Image<'static> {
+    let light = cfg!(windows) && windows_light_taskbar();
+    let bytes: &'static [u8] = if light { include_bytes!("../icons/tray-black.png") } else { include_bytes!("../icons/tray-white.png") };
+    tauri::image::Image::from_bytes(bytes).expect("tray icon")
+}
+/// Windows stores the taskbar's theme in SystemUsesLightTheme (1 = light).
+fn windows_light_taskbar() -> bool {
+    #[cfg(windows)] {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        if let Ok(out) = std::process::Command::new("reg").args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "/v", "SystemUsesLightTheme"]).creation_flags(CREATE_NO_WINDOW).output() {
+            return String::from_utf8_lossy(&out.stdout).contains("0x1");
+        }
+    }
+    false
+}
 /// Small grey icons for the tray menu, drawn from the same Lucide set the windows use.
 fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
     let bytes: &'static [u8] = match name {
@@ -1037,7 +1062,7 @@ pub fn run() {
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
             let menu = tray_menu(&handle)?;
-            TrayIconBuilder::with_id("still").icon(app.default_window_icon().cloned().unwrap()).tooltip("Still").menu(&menu)
+            TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))
                 .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))
                 .on_tray_icon_event(|tray, e| if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e { run_action(tray.app_handle(), "area"); })

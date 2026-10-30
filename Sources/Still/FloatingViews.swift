@@ -11,7 +11,7 @@ struct PreviewView: View {
     /// Still's floating preview: the capture on top, a permanent action bar underneath.
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("CAPTURE READY").font(.custom("Menlo", size: 9)).tracking(1.5); Spacer(); Text("Still.").font(.custom("Baskerville", size: 17)) }.padding(10).background(Studio.surface)
+            HStack { Text("CAPTURE READY").font(.system(size: 10, weight: .semibold)); Spacer(); Text("Still.").font(.system(size: 17, weight: .semibold)) }.padding(10).background(Studio.surface)
             ZStack {
                 Color.black
                 if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit() }
@@ -31,7 +31,7 @@ struct PreviewView: View {
                 action("xmark", "Close") { dismiss() }
             }.padding(.horizontal, 6).frame(height: 34).background(Studio.surface)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3)).overlay(RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.15)))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.15)))
         .tint(Studio.accent).onHover { hovering = $0 }
         .contextMenu { Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Save") { library.quickSave(item) }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Button("Close Preview") { dismiss() } }
         .accessibilityLabel("Floating Preview for \(item.title)")

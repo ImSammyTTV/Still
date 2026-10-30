@@ -20,36 +20,57 @@ struct MainView: View {
         ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Advanced", "wand.and.stars", .purple)
     ]
     private var selected: String { categories.map(\.0).contains(library.page) || library.page == "About" ? library.page : "General" }
+    @State private var sidebarSearch = ""
+    private var visibleCategories: [(String, String, Color)] {
+        sidebarSearch.isEmpty ? categories : categories.filter { $0.0.localizedCaseInsensitiveContains(sidebarSearch) }
+    }
+    /// macOS System Settings layout: a sidebar of coloured icon tiles, and the selected page on the right.
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Still.").font(.custom("Baskerville-Bold", size: 34))
-                Text("YOUR CAPTURE STUDIO").font(.custom("Menlo", size: 9)).tracking(2).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Search", text: $sidebarSearch).textFieldStyle(.roundedBorder).controlSize(.regular).padding(.horizontal, 10).padding(.bottom, 10)
+                ForEach(visibleCategories, id: \.0) { category in sidebarRow(category.0, symbol: category.1, color: category.2) }
                 Spacer()
-                Button("About") { library.page = "About" }.buttonStyle(.plain)
-            }.padding(.horizontal, 24).padding(.top, 42).padding(.bottom, 16)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 18) {
-                    ForEach(categories, id: \.0) { category in
-                        Button { library.page = category.0 } label: {
-                            Text(category.0).font(.custom("AvenirNext-DemiBold", size: 11))
-                                .padding(.vertical, 12)
-                                .foregroundStyle(selected == category.0 ? Studio.accent : Color.secondary)
-                                .overlay(alignment: .bottom) { if selected == category.0 { Rectangle().fill(Studio.accent).frame(height: 3) } }
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(.horizontal, 24)
-            }.frame(height: 42).background(Studio.surface)
+                Divider().padding(.horizontal, 10).padding(.vertical, 6)
+                Button { library.page = "About" } label: {
+                    HStack(spacing: 9) {
+                        Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 22, height: 22)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Still").font(.system(size: 12, weight: .semibold))
+                            Text("Version \(Updater.shared.currentVersion)").font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }.padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(selected == "About" ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain).padding(.horizontal, 10)
+            }.padding(.top, 46).padding(.bottom, 12).frame(width: 220).background(Studio.surface.opacity(0.5))
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                HStack { Text(selected).font(Studio.heading); Spacer(); if selected == "Shortcuts" { TextField("Search shortcuts", text: $shortcutSearch).textFieldStyle(.roundedBorder).frame(width: 190) } }.padding(.horizontal, 18).padding(.top, 17).padding(.bottom, 14)
+                HStack {
+                    Text(selected).font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    if selected == "Shortcuts" { TextField("Search shortcuts", text: $shortcutSearch).textFieldStyle(.roundedBorder).frame(width: 190) }
+                }.frame(height: 30).padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 8)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 23) { content }.padding(.horizontal, 18).padding(.bottom, 22)
+                    VStack(alignment: .leading, spacing: 22) { content }.padding(.horizontal, 24).padding(.top, 6).padding(.bottom, 24)
                 }
-                if let message = library.message { Text(message).font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.bottom, 8) }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Studio.paper)
-        }.font(.custom("AvenirNext-Regular", size: 12)).background(Studio.paper).tint(Studio.accent).ignoresSafeArea()
+                if let message = library.message { Text(message).font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.bottom, 8) }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.font(.system(size: 13)).background(Studio.paper).tint(Studio.accent).ignoresSafeArea()
         .alert("Settings couldn’t be updated", isPresented: Binding(get: { loginError != nil }, set: { if !$0 { loginError = nil } })) { Button("OK") { loginError = nil } } message: { Text(loginError ?? "") }
+    }
+    private func sidebarRow(_ title: String, symbol: String, color: Color) -> some View {
+        Button { library.page = title } label: {
+            HStack(spacing: 9) {
+                Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 22, height: 22).background(color.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text(title).font(.system(size: 13))
+                Spacer()
+            }.padding(.horizontal, 8).padding(.vertical, 4)
+            .background(selected == title ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain).padding(.horizontal, 10)
     }
     @ViewBuilder private var content: some View {
         switch selected {
@@ -228,7 +249,13 @@ struct MainView: View {
         }.frame(maxWidth: .infinity).padding(.top, 55)
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 9) { Text(title).font(.system(size: 11, weight: .semibold)); VStack(alignment: .leading, spacing: 0) { content().padding(.horizontal, 10).padding(.vertical, 10) }.frame(maxWidth: .infinity, alignment: .leading).background(Studio.surface, in: RoundedRectangle(cornerRadius: 3)) }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).padding(.leading, 4)
+            VStack(alignment: .leading, spacing: 0) { content().padding(.horizontal, 14).padding(.vertical, 11) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Studio.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.07)))
+        }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
     }
     private func afterRow(_ title: String, image: Binding<Bool>, video: Binding<Bool>? = nil) -> some View { HStack { Text(title); Spacer(); Toggle(title, isOn: image).labelsHidden().toggleStyle(.checkbox).frame(width: 85); if let video { Toggle(title, isOn: video).labelsHidden().toggleStyle(.checkbox).frame(width: 75) } else { Text("—").foregroundStyle(.secondary).frame(width: 75) } } }
     private func choice<Value: Hashable, Content: View>(_ title: String, selection: Binding<Value>, @ViewBuilder content: () -> Content) -> some View { HStack { Text(title); Spacer(minLength: 12); Picker(title, selection: selection, content: content).labelsHidden().fixedSize().frame(maxWidth: 270, alignment: .trailing) } }

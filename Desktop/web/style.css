@@ -1,10 +1,13 @@
 /* Shared look for every Still window on Windows and Linux: the same tokens as the Mac app. */
 :root {
   color-scheme: light dark;
-  --font: "Avenir Next", "Trebuchet MS", "Candara", sans-serif;
+  /* The platform's own UI font: SF Pro on a Mac, Segoe UI Variable on Windows 11, the desktop font on Linux. */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, Cantarell, Ubuntu, "Noto Sans", sans-serif;
+  --radius: 12px;
   --mono: "Cascadia Mono", "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
-  --accent: #d64b32;
-  --accent-text: #fffcf5;
+  /* Graphite accent: neutral highlights that read well in light and dark mode. */
+  --accent: #707075;
+  --accent-text: #ffffff;
   --red: #ff453a;
   --bg: #f4f0e7;
   --bg-elevated: #fffcf5;
@@ -21,21 +24,22 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #242522;
-    --bg-elevated: #30312c;
-    --sidebar: #292a26;
+    --bg: #1c1c1e;
+    --bg-elevated: #2c2c2e;
+    --sidebar: #232325;
     --surface: rgba(255, 255, 255, 0.06);
     --surface-strong: rgba(255, 255, 255, 0.11);
     --border: rgba(255, 255, 255, 0.1);
-    --text: #f4f0e7;
+    --text: #f5f5f7;
     --text-2: rgba(245, 245, 247, 0.62);
     --text-3: rgba(245, 245, 247, 0.38);
-    --canvas: #1b1c19;
+    --canvas: #111113;
+    --accent: #98989d;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #242522; --bg-elevated: #30312c; --sidebar: #292a26; --surface: rgba(255, 255, 255, 0.06); --surface-strong: rgba(255, 255, 255, 0.11);
-  --border: rgba(255, 255, 255, 0.1); --text: #f4f0e7; --text-2: rgba(245, 245, 247, 0.62); --text-3: rgba(245, 245, 247, 0.38); --canvas: #1b1c19;
+  --bg: #1c1c1e; --bg-elevated: #2c2c2e; --sidebar: #232325; --surface: rgba(255, 255, 255, 0.06); --surface-strong: rgba(255, 255, 255, 0.11);
+  --border: rgba(255, 255, 255, 0.1); --text: #f5f5f7; --text-2: rgba(245, 245, 247, 0.62); --text-3: rgba(245, 245, 247, 0.38); --canvas: #111113; --accent: #98989d;
 }
 
 * { box-sizing: border-box; }
@@ -80,12 +84,20 @@ select.field { padding-right: 24px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--surface-strong); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
 
-/* Studio identity: paper, ruled edges, editorial type and square-cut controls. */
-h1, h2, .brand b { font-family: "Baskerville", "Palatino Linotype", Georgia, serif; font-weight: 500; letter-spacing: -.025em; }
-.btn, .segmented, .segmented button { border-radius: 4px; }
-.btn.primary { box-shadow: inset 0 -2px 0 #0002; }
-.titlebar { border-top: 3px solid var(--accent); }
+/* Modern, macOS-like: system type, rounded cards and soft, rounded controls on every platform. */
+h1, h2, .brand b { font-family: var(--font); font-weight: 650; letter-spacing: -.01em; }
+.btn { border-radius: 8px; }
+.segmented { border-radius: 9px; }
+.segmented button { border-radius: 7px; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Glass: on Windows, Settings, History and the editor sit on Acrylic (set by the app), so their backgrounds
+   are translucent and the system material shows through. Other platforms keep the solid colours above. */
+body.win32.glass { --bg: rgba(246, 246, 248, 0.35); --sidebar: rgba(246, 246, 248, 0.2); --bg-elevated: rgba(255, 255, 255, 0.55); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body.win32.glass { --bg: rgba(28, 28, 30, 0.35); --sidebar: rgba(35, 35, 37, 0.2); --bg-elevated: rgba(58, 58, 60, 0.5); }
+}
+:root[data-theme="dark"] body.win32.glass { --bg: rgba(28, 28, 30, 0.35); --sidebar: rgba(35, 35, 37, 0.2); --bg-elevated: rgba(58, 58, 60, 0.5); }

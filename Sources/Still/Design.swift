@@ -13,10 +13,33 @@ extension Color {
 }
 func defaulted<T>(_ binding: Binding<T?>, _ fallback: T) -> Binding<T> { Binding(get: { binding.wrappedValue ?? fallback }, set: { binding.wrappedValue = $0 }) }
 
-/// Still's studio palette adapts to the user's appearance preference.
+/// Still's palette: translucent space grey and white panels over the window's glass, with a graphite accent.
 enum Studio {
-    static let accent = Color(hex: "D64B32")
-    static let paper = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "242522") : NSColor(hex: "F4F0E7") })
-    static let surface = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "30312C") : NSColor(hex: "FFFCF5") })
-    static let heading = Font.custom("Baskerville", size: 30)
+    /// Graphite: a neutral accent that reads well in light and dark mode.
+    static let accent = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "98989D") : NSColor(hex: "6E6E73") })
+    // Slightly translucent, so the window's glass material (see `glass`) shows through.
+    static let paper = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "1C1C1E").withAlphaComponent(0.3) : NSColor(hex: "F6F6F8").withAlphaComponent(0.35) })
+    static let surface = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "3A3A3C").withAlphaComponent(0.45) : NSColor(hex: "FFFFFF").withAlphaComponent(0.55) })
+    static let heading = Font.system(size: 26, weight: .semibold)
+
+    /// Puts a view on the native translucent window material, for Still's glassy look.
+    /// Borderless panels pass a corner radius, since they have no window frame to round them.
+    @MainActor static func glass(_ content: NSView, in window: NSWindow, cornerRadius: CGFloat = 0) -> NSView {
+        window.isOpaque = false; window.backgroundColor = .clear
+        let material = NSVisualEffectView()
+        material.material = .hudWindow; material.blendingMode = .behindWindow; material.state = .followsWindowActiveState
+        if cornerRadius > 0 { material.wantsLayer = true; material.layer?.cornerRadius = cornerRadius; material.layer?.cornerCurve = .continuous; material.layer?.masksToBounds = true }
+        content.translatesAutoresizingMaskIntoConstraints = false
+        material.addSubview(content)
+        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: material.leadingAnchor), content.trailingAnchor.constraint(equalTo: material.trailingAnchor),
+                                     content.topAnchor.constraint(equalTo: material.topAnchor), content.bottomAnchor.constraint(equalTo: material.bottomAnchor)])
+        return material
+    }
+
+    /// The menu bar icon: a framed viewfinder square, as a template so macOS draws it black or white.
+    @MainActor static func menuBarIcon() -> NSImage {
+        let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Still capture menu") ?? NSImage()
+        image.isTemplate = true
+        return image
+    }
 }

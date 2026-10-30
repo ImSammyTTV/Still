@@ -46,13 +46,13 @@
   main { grid-template-columns: 1fr auto auto; }
   .scroller { grid-column: 1; grid-row: 1; background-image: radial-gradient(var(--border) .7px, transparent .7px); background-size: 18px 18px; }
   .rail { grid-column: 2; grid-row: 1; width: 72px; padding: 20px 12px; border-left: 1px solid var(--border); border-right: 0; gap: 8px; }
-  .rail button { width: 46px; height: 38px; border-radius: 3px; }
+  .rail button { width: 46px; height: 38px; border-radius: 9px; }
   .rail button.active { background: var(--accent); color: white; }
   .panel { grid-column: 3; grid-row: 1; }
-  .drag { position: static; transform: none; margin-left: auto; border-radius: 3px; }
+  .drag { position: static; transform: none; margin-left: auto; border-radius: 999px; }
 </style>
 </head>
-<body>
+<body class="glass">
 <div class="titlebar">
   <div class="spacer"></div>
   <button class="btn plain icon no-drag" id="color" title="Color"><span class="swatch" id="swatch"></span></button>
