@@ -1,4 +1,4 @@
-const G = StillGeometry;
+const G = StillGeometry, M = StillMarks;
 const stage = $('#stage'), ctx = stage.getContext('2d');
 const scroller = $('#scroller');
 const itemId = params.get('id') || null;
@@ -18,11 +18,16 @@ const GRADIENTS = {
   snow: ['#FFFFFF', '#ECEFF2'], forest: ['#3D8061', '#12362D'], teal: ['#83D9D3', '#1F7C91'], plum: ['#A66AA5', '#3F1B57'], crimson: ['#E58D95', '#9E2045']
 };
 
-let image = new Image(), bgImage = null, prefs = {};
-let doc = { marks: [], crop: null, bg: { style: 'none', padding: 64, radius: 12, shadow: true, aspect: 0, balance: false, custom: null } };
+// `image` is what's being edited: the original capture, or doc.source once it has been resized, rotated or flipped.
+let image = new Image(), original = image, bgImage = null, prefs = {};
+let doc = { marks: [], crop: null, source: null, bg: { style: 'none', padding: 64, radius: 12, shadow: true, aspect: 0, balance: false, custom: null } };
 let tool = 'arrow', color = '#FF453A', stroke = 4, zoom = 0;
+const styles = { arrow: 'filled', text: 'shadow' };
+// Images the document uses, by id: their data URLs, and decoded copies because drawing has to be synchronous.
+let assets = {};
+const decoded = new Map();
 let selected = null, drag = null, pendingCrop = null, history = [], future = [], dirty = false, saveTimer = null;
-const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight'].includes(m.type);
+const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'image'].includes(m.type);
 const isSegment = (m) => m.type === 'arrow' || m.type === 'line';
 
 // ---- Layout ---------------------------------------------------------------------------------
@@ -71,6 +76,7 @@ function render(target = ctx, { handles = true } = {}) {
   if (target === ctx && tool === 'crop') drawCropOverlay(target);
   if (handles && target === ctx && selected && tool === 'select') drawHandles(target, selected);
   target.restore();
+  if (target === ctx) syncStyleButton();
 }
 
 function drawCover(target, img, w, h) {
@@ -78,14 +84,37 @@ function drawCover(target, img, w, h) {
   target.drawImage(img, (w - img.naturalWidth * s) / 2, (h - img.naturalHeight * s) / 2, img.naturalWidth * s, img.naturalHeight * s);
 }
 
-function drawArrowHead(t, m) {
-  const angle = Math.atan2(m.y2 - m.y1, m.x2 - m.x1), size = Math.max(14, m.stroke * 4.2);
-  t.beginPath();
-  t.moveTo(m.x2, m.y2);
-  t.lineTo(m.x2 - size * Math.cos(angle - 0.45), m.y2 - size * Math.sin(angle - 0.45));
-  t.lineTo(m.x2 - size * Math.cos(angle + 0.45), m.y2 - size * Math.sin(angle + 0.45));
-  t.closePath(); t.fill();
-  return size;
+function drawArrow(t, m) {
+  const shape = M.arrowShape(m);
+  t.beginPath(); t.moveTo(shape.start.x, shape.start.y);
+  if (shape.control) t.quadraticCurveTo(shape.control.x, shape.control.y, shape.end.x, shape.end.y); else t.lineTo(shape.end.x, shape.end.y);
+  t.stroke();
+  for (const head of shape.heads) {
+    t.beginPath(); t.moveTo(head.left.x, head.left.y); t.lineTo(head.tip.x, head.tip.y); t.lineTo(head.right.x, head.right.y);
+    if (head.closed) { t.closePath(); t.fill(); } else t.stroke();
+  }
+}
+
+const fontFamily = () => getComputedStyle(document.body).fontFamily;
+function measureText(t, m) {
+  t.save(); t.font = M.textFont(m, fontFamily());
+  const width = Math.max(...m.text.split('\n').map((line) => t.measureText(line).width)); t.restore();
+  return M.textLayout(m, Math.max(10, width));
+}
+function drawText(t, m) {
+  const style = M.textStyle(m), { box, tail } = measureText(t, m);
+  if (box) {
+    t.beginPath(); t.roundRect(box.x, box.y, box.w, box.h, box.radius);
+    if (style === 'border') t.stroke(); else t.fill();
+    if (tail) { t.beginPath(); t.moveTo(tail[0].x, tail[0].y); t.lineTo(tail[1].x, tail[1].y); t.lineTo(tail[2].x, tail[2].y); t.closePath(); t.fill(); }
+  }
+  t.font = M.textFont(m, fontFamily()); t.textBaseline = 'top'; t.fillStyle = M.textInk(m);
+  if (style === 'shadow') { t.shadowColor = m.color === '#1D1D1F' ? 'rgba(255,255,255,.6)' : 'rgba(0,0,0,.45)'; t.shadowBlur = Math.max(2, m.size / 10); }
+  if (style === 'outline') t.lineWidth = m.size * 0.08;
+  m.text.split('\n').forEach((line, i) => {
+    if (style === 'outline') t.strokeText(line, m.x, m.y + i * m.size * 1.2);
+    t.fillText(line, m.x, m.y + i * m.size * 1.2);
+  });
 }
 
 function drawMark(t, m) {
@@ -100,10 +129,7 @@ function drawMark(t, m) {
     case 'line': t.beginPath(); t.moveTo(m.x1, m.y1); t.lineTo(m.x2, m.y2); t.stroke(); break;
     case 'arrow': {
       t.shadowColor = 'rgba(0,0,0,.25)'; t.shadowBlur = 4; t.shadowOffsetY = 1;
-      const len = Math.hypot(m.x2 - m.x1, m.y2 - m.y1), angle = Math.atan2(m.y2 - m.y1, m.x2 - m.x1), head = Math.max(14, m.stroke * 4.2);
-      const back = Math.min(len, head * 0.75);
-      t.beginPath(); t.moveTo(m.x1, m.y1); t.lineTo(m.x2 - back * Math.cos(angle), m.y2 - back * Math.sin(angle)); t.stroke();
-      drawArrowHead(t, m); break;
+      drawArrow(t, m); break;
     }
     case 'pen': {
       const p = m.points; if (p.length < 2) break;
@@ -112,10 +138,12 @@ function drawMark(t, m) {
       t.lineTo(p[p.length - 1].x, p[p.length - 1].y); t.stroke(); break;
     }
     case 'highlight': t.globalCompositeOperation = 'multiply'; t.globalAlpha = 0.45; t.fillStyle = m.color === '#FFFFFF' ? '#FFD60A' : m.color; t.fillRect(r.x, r.y, r.w, r.h); break;
-    case 'text': {
-      t.font = `600 ${m.size}px ${getComputedStyle(document.body).fontFamily}`; t.textBaseline = 'top';
-      t.shadowColor = m.color === '#1D1D1F' ? 'rgba(255,255,255,.6)' : 'rgba(0,0,0,.45)'; t.shadowBlur = Math.max(2, m.size / 10);
-      m.text.split('\n').forEach((line, i) => t.fillText(line, m.x, m.y + i * m.size * 1.2)); break;
+    case 'text': drawText(t, m); break;
+    case 'image': {
+      const placed = decoded.get(m.asset);
+      // A project whose image data is damaged keeps a box in its place, so it can still be selected and deleted.
+      if (placed) t.drawImage(placed, r.x, r.y, r.w, r.h); else { t.fillStyle = 'rgba(112,112,117,.35)'; t.fillRect(r.x, r.y, r.w, r.h); }
+      break;
     }
     case 'step': {
       const radius = Math.max(14, m.stroke * 3.5);
@@ -146,21 +174,18 @@ function drawMark(t, m) {
 
 function bounds(m) {
   if (m.w !== undefined) return G.normalize(m);
-  if (isSegment(m)) return G.normalize({ x: m.x1, y: m.y1, w: m.x2 - m.x1, h: m.y2 - m.y1 });
+  if (isSegment(m)) return M.pathBounds(m);
   if (m.type === 'pen') {
     const xs = m.points.map((p) => p.x), ys = m.points.map((p) => p.y);
     return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
   }
-  if (m.type === 'text') {
-    ctx.save(); ctx.font = `600 ${m.size}px ${getComputedStyle(document.body).fontFamily}`;
-    const lines = m.text.split('\n'), w = Math.max(...lines.map((l) => ctx.measureText(l).width)); ctx.restore();
-    return { x: m.x, y: m.y, w: Math.max(10, w), h: lines.length * m.size * 1.2 };
-  }
+  if (m.type === 'text') return measureText(ctx, m).bounds;
   if (m.type === 'step') { const r = Math.max(14, m.stroke * 3.5); return { x: m.x - r, y: m.y - r, w: r * 2, h: r * 2 }; }
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
 function handlePoints(m) {
+  if (M.isCurved(m)) return [{ x: m.x1, y: m.y1, k: 'p1' }, { x: m.x2, y: m.y2, k: 'p2' }, { ...M.curveControl(m), k: 'bend' }];
   if (isSegment(m)) return [{ x: m.x1, y: m.y1, k: 'p1' }, { x: m.x2, y: m.y2, k: 'p2' }];
   if (isRectLike(m)) { const r = G.normalize(m); return [{ x: r.x, y: r.y, k: 'nw' }, { x: r.x + r.w, y: r.y, k: 'ne' }, { x: r.x, y: r.y + r.h, k: 'sw' }, { x: r.x + r.w, y: r.y + r.h, k: 'se' }]; }
   return [];
@@ -188,16 +213,11 @@ function drawCropOverlay(t) {
 
 // ---- Hit testing ------------------------------------------------------------------------------
 
-function distanceToSegment(p, m) {
-  const dx = m.x2 - m.x1, dy = m.y2 - m.y1, len = dx * dx + dy * dy || 1;
-  const t = Math.max(0, Math.min(1, ((p.x - m.x1) * dx + (p.y - m.y1) * dy) / len));
-  return Math.hypot(p.x - (m.x1 + t * dx), p.y - (m.y1 + t * dy));
-}
 function hit(p) {
   const tol = 8 / displayScale();
   for (let i = doc.marks.length - 1; i >= 0; i--) {
     const m = doc.marks[i];
-    if (isSegment(m) ? distanceToSegment(p, m) < tol + m.stroke : m.type === 'pen' ? m.points.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < tol + m.stroke) : G.contains(inflate(bounds(m), tol), p)) return m;
+    if (isSegment(m) ? M.distanceToPath(p, m) < tol + m.stroke : m.type === 'pen' ? m.points.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < tol + m.stroke) : G.contains(inflate(bounds(m), tol), p)) return m;
   }
   return null;
 }
@@ -209,12 +229,20 @@ function handleAt(p, m) { const tol = 9 / displayScale(); return handlePoints(m)
 const snapshot = () => JSON.stringify(doc);
 function commit() {
   history.push(lastState); if (history.length > 200) history.shift();
-  future = []; lastState = snapshot(); dirty = true; scheduleSave(); updateButtons();
+  future = []; lastState = snapshot(); dirty = true; forgetOldImages(); scheduleSave(); updateButtons();
+}
+// Every rotate or resize keeps a full image for undo, so only the most recent ones stay undoable.
+function forgetOldImages() {
+  while (M.unusedAssets(assets, [lastState]).length > 30 && history.length) {
+    history.shift();
+    for (const id of M.unusedAssets(assets, [lastState, ...history])) { delete assets[id]; decoded.delete(id); }
+  }
 }
 let lastState = snapshot();
 function undo() { if (!history.length) return; future.push(snapshot()); doc = JSON.parse(history.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
 function redo() { if (!future.length) return; history.push(snapshot()); doc = JSON.parse(future.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
-function afterDocChange() { dirty = true; scheduleSave(); syncPanel(); updateButtons(); loadBgImage().then(render); }
+function afterDocChange() { syncSource(); dirty = true; scheduleSave(); syncPanel(); updateButtons(); loadBgImage().then(render); }
+function syncSource() { image = decoded.get(doc.source) || original; }
 function updateButtons() { $('#undo').disabled = !history.length; $('#redo').disabled = !future.length; $('#undo').style.opacity = history.length ? 1 : 0.4; $('#redo').style.opacity = future.length ? 1 : 0.4; }
 
 // ---- Pointer ------------------------------------------------------------------------------------
@@ -241,7 +269,8 @@ stage.addEventListener('mousedown', (e) => {
     doc.marks.push({ type: 'step', x: p.x, y: p.y, n, color, stroke }); commit(); render(); return;
   }
   const mark = tool === 'pen' ? { type: 'pen', points: [p], color, stroke }
-    : (tool === 'arrow' || tool === 'line') ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke }
+    : tool === 'arrow' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke, style: styles.arrow }
+    : tool === 'line' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke }
     : { type: tool, x: p.x, y: p.y, w: 0, h: 0, color, stroke };
   if (tool === 'highlight' && e.altKey === false) mark.smart = true;
   doc.marks.push(mark);
@@ -265,7 +294,8 @@ addEventListener('mousemove', (e) => {
   } else if (drag.kind === 'move') {
     moveMark(selected, drag.orig, dx, dy);
   } else if (drag.kind === 'handle') {
-    resizeMark(selected, drag.orig, drag.handle, p, e.shiftKey);
+    // Images keep their shape unless Shift is held; every other mark is the other way round.
+    resizeMark(selected, drag.orig, drag.handle, p, selected.type === 'image' ? !e.shiftKey : e.shiftKey);
   } else if (drag.kind.startsWith('crop')) {
     const full = { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight };
     if (drag.kind === 'crop-new') pendingCrop = G.dragRect(drag.start, p, { square: e.shiftKey, bounds: full });
@@ -300,11 +330,13 @@ stage.addEventListener('dblclick', (e) => { const m = hit(toImage(e)); if (m && 
 function moveMark(m, o, dx, dy) {
   if (m.points) m.points = o.points.map((q) => ({ x: q.x + dx, y: q.y + dy }));
   if (isSegment(m)) Object.assign(m, { x1: o.x1 + dx, y1: o.y1 + dy, x2: o.x2 + dx, y2: o.y2 + dy });
+  if (o.cx !== undefined) Object.assign(m, { cx: o.cx + dx, cy: o.cy + dy });
   else if (m.x !== undefined) Object.assign(m, { x: o.x + dx, y: o.y + dy });
 }
 function resizeMark(m, o, handle, p, keepRatio) {
   if (handle === 'p1') { m.x1 = p.x; m.y1 = p.y; return; }
   if (handle === 'p2') { m.x2 = p.x; m.y2 = p.y; return; }
+  if (handle === 'bend') { m.cx = p.x; m.cy = p.y; return; }
   const r = G.normalize(o);
   const fx = handle.includes('w') ? r.x + r.w : r.x, fy = handle.includes('n') ? r.y + r.h : r.y;
   let w = p.x - fx, h = p.y - fy;
@@ -317,15 +349,18 @@ function resizeMark(m, o, handle, p, keepRatio) {
 let textEditor = null;
 function editText(mark, at) {
   finishTextEdit();
-  const target = mark || { type: 'text', x: at.x, y: at.y, text: '', color, size: Math.round(prefs.annotate?.font || 28) * Math.max(1, image.naturalWidth / 1600), stroke };
+  const target = mark || { type: 'text', x: at.x, y: at.y, text: '', color, size: Math.round(prefs.annotate?.font || 28) * Math.max(1, image.naturalWidth / 1600), stroke, style: styles.text };
   const r = stage.getBoundingClientRect(), L = layout(), s = displayScale(), main = $('main').getBoundingClientRect();
-  const area = el('textarea', { class: 'text-edit', spellcheck: 'false' });
+  const area = el('textarea', { class: 'text-edit', spellcheck: 'false', rows: '1' });
   area.value = target.text;
   Object.assign(area.style, {
     left: `${r.left - main.left + (target.x - L.base.x + L.ox) * s}px`, top: `${r.top - main.top + (target.y - L.base.y + L.oy) * s}px`,
-    fontSize: `${target.size * s}px`, color: target.color, fontFamily: getComputedStyle(document.body).fontFamily, minWidth: '40px'
+    fontSize: `${target.size * s}px`, fontWeight: M.textWeight(target), color: M.textInk(target), fontFamily: fontFamily(), minWidth: '40px'
   });
-  const grow = () => { area.style.height = 'auto'; area.style.height = `${area.scrollHeight}px`; area.style.width = 'auto'; area.style.width = `${Math.max(40, area.scrollWidth + 8)}px`; };
+  const look = M.textStyle(target);
+  if (look === 'label' || look === 'bubble') Object.assign(area.style, { background: target.color, boxShadow: `0 0 0 ${target.size * s * 0.2}px ${target.color}`, borderRadius: '1px' });
+  if (look === 'outline') area.style.webkitTextStroke = `${target.size * s * 0.04}px ${target.color}`;
+  const grow = () => { area.style.height = 'auto'; area.style.height = `${area.scrollHeight}px`; area.style.width = '0'; area.style.width = `${Math.max(40, area.scrollWidth + 8)}px`; };
   area.addEventListener('input', grow);
   area.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) finishTextEdit(); });
   $('main').append(area); grow(); setTimeout(() => area.focus(), 0);
@@ -362,7 +397,7 @@ $('#cropApply').onclick = applyCrop;
 $('#cropCancel').onclick = () => setTool('select');
 $('#cropReset').onclick = () => { pendingCrop = null; if (doc.crop) { doc.crop = null; commit(); } render(); };
 
-function setColor(next) { color = next; $('#swatch').style.background = next; if (selected) { selected.color = next; commit(); render(); } still.invoke('settings:set', { annotate: { color: next } }); }
+function setColor(next) { color = next; $('#swatch').style.background = next; if (selected && selected.type !== 'image') { selected.color = next; commit(); render(); } still.invoke('settings:set', { annotate: { color: next } }); }
 $('#color').onclick = (e) => {
   $$('.menu').forEach((m) => m.remove());
   const menu = el('div', { class: 'menu' }), grid = el('div', { class: 'palette' });
@@ -373,8 +408,144 @@ $('#color').onclick = (e) => {
   setTimeout(() => addEventListener('mousedown', function close(ev) { if (!menu.contains(ev.target)) { menu.remove(); removeEventListener('mousedown', close); } }), 0);
 };
 $('#stroke').onclick = (e) => popupMenu(e.currentTarget, STROKES.map((s) => ({ label: `${s} px${s === stroke ? '  ✓' : ''}`, action: () => { stroke = s; if (selected && selected.stroke !== undefined) { selected.stroke = s; commit(); render(); } still.invoke('settings:set', { annotate: { stroke: s } }); } })));
+// The style menu follows what's being drawn or selected, and is greyed out for marks without styles.
+const styleKind = () => { const type = selected ? selected.type : tool; return type === 'arrow' || type === 'text' ? type : null; };
+let styleIcon = 'arrow';
+function syncStyleButton() {
+  const kind = styleKind();
+  $('#style').disabled = !kind;
+  if (kind && kind !== styleIcon) { styleIcon = kind; $('#style').innerHTML = icon(kind === 'arrow' ? 'move-up-right' : 'type'); refreshIcons(); }
+}
+function setStyle(kind, value) {
+  styles[kind] = value;
+  if (selected) { selected.style = value; commit(); render(); }
+  still.invoke('settings:set', { annotate: { [`${kind}Style`]: value } });
+}
+$('#style').onclick = (e) => {
+  const anchor = e.currentTarget;
+  finishTextEdit();
+  const kind = styleKind(); if (!kind) return;
+  const names = kind === 'arrow' ? M.ARROW_STYLES : M.TEXT_STYLES;
+  const current = selected ? (kind === 'arrow' ? M.arrowStyle(selected) : M.textStyle(selected)) : styles[kind];
+  popupMenu(anchor, names.map((name) => ({ label: `${name[0].toUpperCase()}${name.slice(1)}${name === current ? '  ✓' : ''}`, action: () => setStyle(kind, name) })));
+};
+$('#transform').onclick = (e) => popupMenu(e.currentTarget, [
+  { label: 'Resize Image…', icon: 'scaling', action: openResize }, '-',
+  { label: 'Rotate Clockwise', icon: 'rotate-cw', action: () => reorient('cw') },
+  { label: 'Rotate Counterclockwise', icon: 'rotate-ccw', action: () => reorient('ccw') },
+  { label: 'Flip Horizontally', icon: 'flip-horizontal-2', action: () => reorient('flip-h') },
+  { label: 'Flip Vertically', icon: 'flip-vertical-2', action: () => reorient('flip-v') }, '-',
+  { label: 'Add Image…', icon: 'image-plus', action: chooseImage }
+]);
 $('#undo').onclick = undo; $('#redo').onclick = redo;
 $('#background').onclick = () => { $('#panel').classList.toggle('open'); if ($('#panel').classList.contains('open') && doc.bg.style === 'none') { doc.bg.style = 'midnight'; commit(); syncPanel(); } render(); setTimeout(fitZoom, 200); };
+
+// ---- Resize, rotate and flip --------------------------------------------------------------------
+
+async function decodeAsset(id) {
+  if (decoded.has(id)) return;
+  const loaded = new Image(); loaded.src = assets[id]; await loaded.decode();
+  decoded.set(id, loaded);
+}
+async function storeAsset(dataUrl) { const id = M.addAsset(assets, dataUrl); await decodeAsset(id); return id; }
+
+// The capture as it looks now, marks and crop included, without its background.
+function currentContent() {
+  const b = doc.crop || { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight }, out = document.createElement('canvas');
+  out.width = Math.round(b.w); out.height = Math.round(b.h);
+  const t = out.getContext('2d'); t.translate(-b.x, -b.y); t.drawImage(image, 0, 0);
+  for (const m of doc.marks) drawMark(t, m);
+  return out;
+}
+
+// Like the Mac app, this bakes the marks and crop into a new image, and undo brings them back. The new image is saved
+// in the project so it survives reopening. `plan` gets the current content and returns the output size and how to draw it.
+let baking = false;
+async function bake(plan) {
+  if (baking) return;
+  finishTextEdit();
+  if (tool === 'crop') setTool('select');
+  baking = true;
+  try {
+    const { w, h, paint } = plan(currentContent()), out = document.createElement('canvas'); out.width = w; out.height = h;
+    const t = out.getContext('2d'); t.imageSmoothingQuality = 'high'; paint(t);
+    const url = out.toDataURL('image/png');
+    if (url === 'data:,') { toast('That size is too large to edit.'); return; }
+    doc.source = await storeAsset(url); doc.marks = []; doc.crop = null; selected = null;
+    syncSource(); commit(); render();
+  } catch (error) { toast(`Couldn’t change the image: ${error.message || error}`); } finally { baking = false; }
+}
+const reorient = (kind) => bake((content) => {
+  const o = M.orient({ w: content.width, h: content.height }, kind);
+  return { w: o.w, h: o.h, paint: (t) => { t.setTransform(...o.matrix); t.drawImage(content, 0, 0); } };
+});
+
+let resizeFrom = { w: 1, h: 1 };
+function openResize() {
+  const b = doc.crop || { w: image.naturalWidth, h: image.naturalHeight };
+  resizeFrom = { w: Math.round(b.w), h: Math.round(b.h) };
+  $('#resizeW').value = resizeFrom.w; $('#resizeH').value = resizeFrom.h; $('#resizeLock').checked = true;
+  $('#resizeSheet').hidden = false; checkResize(); $('#resizeW').focus(); $('#resizeW').select();
+}
+const closeResize = () => { $('#resizeSheet').hidden = true; };
+function checkResize() {
+  const w = $('#resizeW').value, h = $('#resizeH').value, problem = M.resizeProblem(Number(w), Number(h));
+  $('#resizeError').textContent = w && h ? problem || '' : ''; $('#resizeApply').disabled = !!problem;
+  return !problem;
+}
+$('#resizeW').addEventListener('input', (e) => { if ($('#resizeLock').checked && e.target.value > 0) $('#resizeH').value = M.linkedSide(e.target.value, resizeFrom.w, resizeFrom.h); checkResize(); });
+$('#resizeH').addEventListener('input', (e) => { if ($('#resizeLock').checked && e.target.value > 0) $('#resizeW').value = M.linkedSide(e.target.value, resizeFrom.h, resizeFrom.w); checkResize(); });
+$('#resizeCancel').onclick = closeResize;
+$('#resizeSheet').addEventListener('mousedown', (e) => { if (e.target === e.currentTarget) closeResize(); });
+$('#resizeForm').addEventListener('submit', (e) => {
+  e.preventDefault(); if (!checkResize()) return;
+  const w = Number($('#resizeW').value), h = Number($('#resizeH').value);
+  closeResize(); bake((content) => ({ w, h, paint: (t) => t.drawImage(content, 0, 0, w, h) }));
+});
+
+// ---- Placed images ------------------------------------------------------------------------------
+
+// Copies an image's pixels into the project through a canvas, so any format the web view can show is kept as PNG.
+// Very large photos are scaled down, because project data is written out with every autosave.
+async function readImage(src) {
+  const loaded = new Image(); loaded.crossOrigin = 'anonymous'; loaded.src = src; await loaded.decode();
+  const fitted = G.fit({ w: loaded.naturalWidth, h: loaded.naturalHeight }, { w: 4096, h: 4096 }), out = document.createElement('canvas');
+  out.width = Math.round(fitted.w); out.height = Math.round(fitted.h);
+  const t = out.getContext('2d'); t.imageSmoothingQuality = 'high'; t.drawImage(loaded, 0, 0, out.width, out.height);
+  return { id: await storeAsset(out.toDataURL('image/png')), size: { w: out.width, h: out.height } };
+}
+async function addImages(sources, point) {
+  finishTextEdit();
+  if (tool === 'crop') setTool('select');
+  const at = point ? toImage(point) : null, canvas = doc.crop || { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight };
+  let last = null, failed = 0;
+  for (const [i, src] of sources.entries()) {
+    try {
+      const { id, size } = await readImage(src);
+      last = { type: 'image', asset: id, ...M.placeImage(size, canvas, at ? { x: at.x + i * 24, y: at.y + i * 24 } : null) };
+      doc.marks.push(last);
+    } catch { failed++; }
+  }
+  if (failed) toast(failed === 1 ? 'That image couldn’t be opened.' : `${failed} images couldn’t be opened.`);
+  if (!last) return;
+  commit(); setTool('select'); selected = last; render();
+}
+async function chooseImage() { const data = await still.invoke('editor:openImage'); if (data) await addImages([data]); }
+
+// Tauri takes file drops before the page sees them, so HTML drag events never fire. Its drop event gives the paths,
+// and allows those files on the asset protocol.
+function listenForDrops() {
+  window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onDragDropEvent(({ payload }) => {
+    if (payload.type === 'enter') $('#dropHint').hidden = !M.droppedImages(payload.paths).length;
+    else if (payload.type === 'leave') $('#dropHint').hidden = true;
+    else if (payload.type === 'drop') {
+      $('#dropHint').hidden = true;
+      const paths = M.droppedImages(payload.paths);
+      if (!paths.length) { if (payload.paths.length) toast('Only PNG, JPEG, GIF, WebP and BMP images can be added.'); return; }
+      addImages(paths.map((path) => still.fileUrl(path)), M.dropPoint(payload.position, devicePixelRatio, still.platform));
+    }
+  });
+}
 
 // ---- Background panel ---------------------------------------------------------------------------
 
@@ -428,7 +599,7 @@ function flatten() {
   const prevSel = selected; selected = null; render(out.getContext('2d'), { handles: false }); selected = prevSel; tool = prevTool;
   return out.toDataURL('image/png');
 }
-const project = () => ({ version: 1, ...doc });
+const project = () => M.projectFile(doc, assets);
 let captureGone = false;
 async function persist() {
   if (!itemId || !dirty || captureGone) return;
@@ -470,6 +641,7 @@ dragOut($('#dragMe'), () => { finishTextEdit(); still.send('editor:drag', flatte
 // ---- Keyboard -----------------------------------------------------------------------------------
 
 addEventListener('keydown', (e) => {
+  if (!$('#resizeSheet').hidden) { if (e.key === 'Escape') closeResize(); return; }
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (mod && key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
@@ -518,6 +690,8 @@ function demoImage() {
 (async () => {
   prefs = await applyTheme();
   color = prefs.annotate?.color || color; stroke = prefs.annotate?.stroke || stroke;
+  if (M.ARROW_STYLES.includes(prefs.annotate?.arrowStyle)) styles.arrow = prefs.annotate.arrowStyle;
+  if (M.TEXT_STYLES.includes(prefs.annotate?.textStyle)) styles.text = prefs.annotate.textStyle;
   $('#swatch').style.background = color;
   if (prefs.platform !== 'darwin') addWindowControls();
   let src;
@@ -525,12 +699,13 @@ function demoImage() {
     const item = await still.invoke('library:get', itemId);
     if (!item) { document.body.textContent = 'This capture is no longer in the library.'; return; }
     document.title = item.title; still.send('window:setTitle', item.title);
-    if (item.project) { doc = { ...doc, ...item.project, bg: { ...doc.bg, ...(item.project.bg || {}) } }; lastState = snapshot(); }
+    if (item.project) { ({ doc, assets } = M.openProject(item.project, doc)); lastState = snapshot(); }
     src = `${still.fileUrl(item.original)}?t=${Date.now()}`;
   } else src = demoImage();
   image.crossOrigin = 'anonymous'; image.src = src; await image.decode();
-  await loadBgImage();
+  await Promise.all(Object.keys(assets).map((id) => decodeAsset(id).catch(() => {})));
+  syncSource(); await loadBgImage();
   refreshIcons(); syncPanel(); updateButtons(); setTool(doc.marks.length ? 'select' : 'arrow');
-  render(); fitZoom();
+  render(); fitZoom(); listenForDrops();
   if (params.get('recognize') === '1') recognize();
 })();
