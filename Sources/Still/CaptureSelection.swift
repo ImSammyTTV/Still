@@ -107,6 +107,13 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil); key.makeFirstResponder(key.contentView) }
         }
     }
+    /// Builds the overlay's views once, unseen, so the first capture after launch doesn't pay for loading them.
+    func prewarm() {
+        guard !active, let screen = NSScreen.main else { return }
+        _ = FirstClickHostingView(rootView: CaptureBar(selection: self)).fittingSize
+        let panel = SelectionPanel(contentRect: CGRect(x: 0, y: 0, width: 1, height: 1), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.contentView = SelectionSurface(screen: screen, coordinator: self); panel.contentView?.layoutSubtreeIfNeeded()
+    }
     /// Still's capture bar: a slim pill along the bottom of the screen the pointer is on.
     private func showBar() {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }

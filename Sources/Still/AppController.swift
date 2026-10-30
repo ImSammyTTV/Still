@@ -162,7 +162,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // A menu bar app: only open Settings the first time, so launches at login stay out of the way.
         if !UserDefaults.standard.bool(forKey: "studioSetupComplete") { showMain() }
         if CommandLine.arguments.contains("--editor-demo") { demo() }
-        DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.checkSystemScreenshotShortcut() }
+        DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.selection.prewarm(); self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
         ClipboardHistory.shared.start()
         // After an update, ask macOS to re-read Still's right-click Services.
@@ -260,7 +260,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         quit.target = NSApp; menu.addItem(quit)
         for item in menu.items where item.target == nil { item.target = self }
         decorateMenu()
-        statusItem.menu = menu
+        statusItem.menu = menu; menu.delegate = self
     }
     /// Closes Still's menu bar menu (and its submenus) if it's open, e.g. when a capture starts from a shortcut.
     func closeMenus() { menu?.cancelTrackingWithoutAnimation(); clipboardMenu.cancelTrackingWithoutAnimation() }
@@ -809,4 +809,8 @@ extension AppController {
 extension AppController: NSMenuDelegate {
     /// The Clipboard History submenu is rebuilt each time it opens, so it's always current.
     func menuNeedsUpdate(_ menu: NSMenu) { if menu === clipboardMenu { fillClipboardMenu(menu, numbered: false) } }
+    /// Carbon holds hotkeys back until an open menu closes. While the menu bar menu is open, the shortcuts with a row in
+    /// it stay out of the way, so the menu's own key equivalents close it and run the capture right away.
+    func menuWillOpen(_ menu: NSMenu) { if menu === self.menu { hotkeys.suspend([1, 2, 3, 4, 5, 8]) } }
+    func menuDidClose(_ menu: NSMenu) { if menu === self.menu { hotkeys.register() } }
 }
