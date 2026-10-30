@@ -17,7 +17,7 @@
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/capture-workflow.png">
-  <img src="assets/readme/capture-workflow.gif" width="1200" height="480" alt="An animated illustration of selecting a screen area, adding an arrow, and copying the finished capture">
+  <img src="assets/readme/capture-workflow.gif" width="100%" alt="An animated illustration of selecting a screen area, adding an arrow, and copying the finished capture">
 </picture>
 
 Still lives in your menu bar or system tray. Capture an area, a window, or a whole screen; add clear annotations; copy, save, pin, or share the result. The Mac app is native Swift. Windows and Linux use a lightweight Tauri app.
