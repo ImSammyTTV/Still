@@ -40,8 +40,8 @@ struct Session {
     scroll: Option<Arc<scroll::Control>>,
     /// Keeps the desktop icons hidden for as long as a recording runs.
     icons: Option<desktop::Hidden>,
-    /// QR codes waiting for the text from their OCR page, by page.
-    qr: std::collections::HashMap<String, Vec<String>>,
+    /// QR scans waiting for the text from their OCR page, by page.
+    qr: std::collections::HashMap<String, std::sync::mpsc::Receiver<Vec<String>>>,
 }
 
 fn occupied(s: &Session) -> bool { s.busy || s.recording.is_some() || s.scroll.is_some() }
@@ -313,8 +313,10 @@ fn recognize_file(app: &AppHandle, image: &RgbaImage) {
     let file = private_temp().join(format!("still-ocr-{}.png", uuid::Uuid::new_v4().simple()));
     let _ = std::fs::write(&file, capture::png(image));
     let label = format!("ocr-{}", uuid::Uuid::new_v4().simple());
-    let codes = qr::read(image);
-    st(app).session.lock().unwrap().qr.insert(label.clone(), codes);
+    let (found, scan) = std::sync::mpsc::channel();
+    let picture = image.clone();
+    std::thread::spawn(move || { let _ = found.send(qr::read(&picture)); });
+    st(app).session.lock().unwrap().qr.insert(label.clone(), scan);
     let _ = builder(app, &label, "ocr.html", json!({ "file": file })).title("Still OCR").inner_size(200.0, 100.0).skip_taskbar(true).build();
 }
 
@@ -866,7 +868,9 @@ async fn capture_action(app: AppHandle, action: String) { run_action(&app, &acti
 async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
     let _ = window.close();
     if let Ok(entries) = std::fs::read_dir(private_temp()) { for e in entries.flatten() { if e.file_name().to_string_lossy().starts_with("still-ocr-") { let _ = std::fs::remove_file(e.path()); } } }
-    let codes = st(&app).session.lock().unwrap().qr.remove(window.label()).unwrap_or_default();
+    // A large, noisy picture can keep the QR scan busy for many seconds. The text shouldn't wait for that.
+    let scan = st(&app).session.lock().unwrap().qr.remove(window.label());
+    let codes = scan.and_then(|s| s.recv_timeout(Duration::from_secs(2)).ok()).unwrap_or_default();
     if let Some(dir) = st(&app).session.lock().unwrap().selftest.clone() { let _ = std::fs::write(dir.join("ocr.txt"), &text); return; }
     // A failed OCR run still has the QR codes to give.
     if let Some(e) = error.filter(|_| codes.is_empty()) { notify(&app, "Text recognition failed", &e); return; }

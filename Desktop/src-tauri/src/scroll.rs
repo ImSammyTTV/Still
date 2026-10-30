@@ -1,6 +1,7 @@
 //! Scrolling capture: the selected area is grabbed again and again while the user scrolls, and each new
-//! frame is lined up against the one before it. A port of Sources/StillCore/ScrollingStitcher.swift (the
-//! Mac app) that works on plain pixels, so the stitching itself can be tested without a screen.
+//! frame is lined up against the one before it. Follows Sources/StillCore/ScrollingStitcher.swift (the Mac
+//! app) but works on plain pixels, so the stitching itself can be tested without a screen. It also checks
+//! harder before accepting a match: see SAMPLE_WIDTH, EXACT and the contenders in `stitch_frame`.
 
 use crate::{build_tray_menu, capture, complete_image, desktop, hide_floating, notify, st, Grab};
 use image::RgbaImage;
@@ -12,9 +13,23 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 
 // ---- Stitching ----------------------------------------------------------------------------------
 
-/// Frames are compared as small greyscale copies: fast, and blind to subpixel text rendering.
-const SAMPLE_WIDTH: usize = 80;
+/// Frames are compared as small greyscale copies: fast, and blind to subpixel text rendering. The Mac
+/// app samples 80 columns, but at that width lines of text blur into identical bars, so a shift of any
+/// whole number of lines looks like a match and the picture silently comes out too short.
+const SAMPLE_WIDTH: usize = 320;
+/// Columns left out on each side: scrollbars move on their own.
+const SAMPLE_EDGE: usize = SAMPLE_WIDTH / 16;
 const SAMPLE_HEIGHT: usize = 280;
+/// The worst average difference, from 0 to 1, that still counts as the same content.
+const MATCH: f64 = 0.065;
+/// The same at full height for the row 70% of the way from best to worst, where a true shift compares the
+/// very same pixels. That far up because over half the rows of a page of text are the blank ones between
+/// lines, and sticky bars can spoil the rest. Strict, because a frame that is refused can be recovered by
+/// scrolling back, and a bad match can't.
+const EXACT: f64 = 0.012;
+/// How far behind the best a shift can be and still be looked at closely, and how many are.
+const CLOSE: f64 = 0.04;
+const CONTENDERS: usize = 24;
 const MAX_HEIGHT: u32 = 30_000;
 const MAX_PIXELS: u64 = 120_000_000;
 
@@ -64,39 +79,46 @@ fn sample(image: &RgbaImage, width: usize, height: usize) -> Vec<u8> {
     out
 }
 
+#[derive(Clone, Copy)]
+struct Score { trimmed: f64, overlap: f64, upper: f64 }
+const WORST: Score = Score { trimmed: f64::MAX, overlap: f64::MAX, upper: f64::MAX };
+
 /// How badly row `y + displacement` of `a` differs from row `y` of `b`. The worst fifth of the rows is
-/// ignored, so sticky bars and small animations don't spoil a good match. The average over all rows comes
-/// second: it settles ties on pages of flat colour, where a shift that is slightly off can differ only
-/// in the rows that are ignored. (The Mac app settles those by taking the smallest shift.)
-fn score(a: &[u8], b: &[u8], height: i64, displacement: i64, margin: i64, step: usize) -> (f64, f64) {
-    let w = SAMPLE_WIDTH as i64;
+/// ignored, so sticky bars and small animations don't spoil a good match. The average over the whole
+/// overlap, margins included, comes second: it settles ties on pages of flat colour, where a shift that is
+/// slightly off can differ only in the rows that are ignored. (The Mac app takes the smallest shift.)
+fn score(a: &[u8], b: &[u8], height: i64, displacement: i64, margin: i64, step: usize) -> Score {
+    let (w, edge) = (SAMPLE_WIDTH as i64, SAMPLE_EDGE as i64);
     let (begin, end) = (margin.max(margin - displacement), (height - margin).min(height - displacement - margin));
-    if end - begin <= 20 { return (f64::MAX, f64::MAX); }
-    let mut rows: Vec<f64> = (begin..end).step_by(step).map(|y| {
-        let sum: f64 = (5..w - 5).step_by(2).map(|x| (a[((y + displacement) * w + x) as usize] as f64 - b[(y * w + x) as usize] as f64).abs()).sum();
-        sum / ((w - 10) / 2) as f64 / 255.0
-    }).collect();
+    if end - begin <= 20 { return WORST; }
+    let row = |y: i64| {
+        let sum: f64 = (edge..w - edge).step_by(2).map(|x| (a[((y + displacement) * w + x) as usize] as f64 - b[(y * w + x) as usize] as f64).abs()).sum();
+        sum / ((w - 2 * edge) / 2) as f64 / 255.0
+    };
+    let mut rows: Vec<f64> = (begin..end).step_by(step).map(row).collect();
     rows.sort_by(f64::total_cmp);
     let keep = ((rows.len() as f64 * 0.8) as usize).max(1);
-    (rows[..keep].iter().sum::<f64>() / keep as f64, rows.iter().sum::<f64>() / rows.len() as f64)
+    let overlap = (-displacement).max(0)..height.min(height - displacement);
+    let count = overlap.clone().step_by(step).count();
+    Score { trimmed: rows[..keep].iter().sum::<f64>() / keep as f64, overlap: overlap.step_by(step).map(row).sum::<f64>() / count as f64, upper: rows[rows.len() * 7 / 10] }
 }
 
 /// Whether a score beats the best so far. A tie goes to `smaller`, the one that moves the frame less.
-fn better(value: (f64, f64), best: (f64, f64), smaller: bool) -> bool {
+fn better(value: Score, best: Score, smaller: bool) -> bool {
     const SAME: f64 = 0.00001;
-    if (value.0 - best.0).abs() >= SAME { return value.0 < best.0; }
-    if (value.1 - best.1).abs() >= SAME { return value.1 < best.1; }
+    if (value.trimmed - best.trimmed).abs() >= SAME { return value.trimmed < best.trimmed; }
+    if (value.overlap - best.overlap).abs() >= SAME / 1000.0 { return value.overlap < best.overlap; }
     smaller
 }
 
 /// How many rows along one edge stayed put between two frames: a sticky header or footer.
 fn fixed_rows(a: &[u8], b: &[u8], height: usize, from_bottom: bool, full_height: usize) -> usize {
-    let w = SAMPLE_WIDTH;
+    let (w, edge) = (SAMPLE_WIDTH, SAMPLE_EDGE);
     let mut count = 0;
     for index in 0..(height / 5).max(1) {
         let y = if from_bottom { height - 1 - index } else { index };
-        let difference: f64 = (5..w - 5).map(|x| (a[y * w + x] as f64 - b[y * w + x] as f64).abs()).sum();
-        if difference / (w - 10) as f64 / 255.0 > 0.007 { break; }
+        let difference: f64 = (edge..w - edge).map(|x| (a[y * w + x] as f64 - b[y * w + x] as f64).abs()).sum();
+        if difference / (w - 2 * edge) as f64 / 255.0 > 0.007 { break; }
         count += 1;
     }
     (full_height / 4).min(count * full_height / height)
@@ -120,27 +142,36 @@ pub fn stitch_frame(combined: &RgbaImage, position: i64, previous: &RgbaImage, n
     let height = h as i64;
     let margin = (height / 18).max(3);
     let limit = (height - margin * 2 - 24).max(3);
-    let (mut best, mut shift) = ((f64::MAX, f64::MAX), 0i64);
-    for d in -limit..=limit {
-        if d.abs() <= 1 { continue; }
-        let value = score(&a, &b, height, d, margin, 2);
-        if better(value, best, d.abs() < shift.abs()) { best = value; shift = d; }
-    }
-    if best.0 >= 0.065 || shift == 0 { return Err(StitchError::NoOverlap); }
+    let shifts: Vec<i64> = (-limit..=limit).filter(|d| d.abs() > 1).collect();
+    let scores: Vec<Score> = shifts.iter().map(|d| score(&a, &b, height, *d, margin, 2)).collect();
+    let lowest = scores.iter().map(|s| s.trimmed).fold(f64::MAX, f64::min);
+    if lowest >= MATCH { return Err(StitchError::NoOverlap); }
 
-    // The sample is coarse on tall areas, so look again at full height around what it found.
-    let mut pixels = (shift as f64 * full as f64 / height as f64).round() as i64;
-    if full > height {
-        let (full_a, full_b) = (sample(previous, SAMPLE_WIDTH, full as usize), sample(next, SAMPLE_WIDTH, full as usize));
-        let radius = (full as f64 / height as f64).ceil().max(2.0) as i64 * 2;
-        let center = pixels;
-        let mut refined = (f64::MAX, f64::MAX);
+    // Repeated text can look like a match at the wrong shift, and the sample is too coarse to say which is
+    // right. The closest contenders are judged at full height: on a tie the one that overlaps most wins,
+    // because it has the most rows agreeing with it.
+    let mut contenders: Vec<usize> = (0..shifts.len()).filter(|&i| {
+        let (value, before, after) = (scores[i].trimmed, scores.get(i.wrapping_sub(1)), scores.get(i + 1));
+        value < MATCH && value <= lowest + CLOSE && before.is_none_or(|s| value <= s.trimmed) && after.is_none_or(|s| value <= s.trimmed)
+    }).collect();
+    contenders.sort_by(|x, y| scores[*x].trimmed.total_cmp(&scores[*y].trimmed).then(scores[*x].overlap.total_cmp(&scores[*y].overlap)));
+    contenders.truncate(CONTENDERS);
+    let (full_a, full_b);
+    let (exact_a, exact_b) = if full > height {
+        (full_a, full_b) = (sample(previous, SAMPLE_WIDTH, full as usize), sample(next, SAMPLE_WIDTH, full as usize));
+        (&full_a, &full_b)
+    } else { (&a, &b) };
+    let radius = (full as f64 / height as f64).ceil().max(2.0) as i64 * 2;
+    let (mut best, mut pixels) = (WORST, 0i64);
+    for index in contenders {
+        let center = (shifts[index] as f64 * full as f64 / height as f64).round() as i64;
         for candidate in center - radius..=center + radius {
             if candidate == 0 { continue; }
-            let value = score(&full_a, &full_b, full, candidate, (full / 18).max(3), (full as usize / 350).max(1));
-            if better(value, refined, false) { refined = value; pixels = candidate; }
+            let value = score(exact_a, exact_b, full, candidate, (full / 18).max(3), (full as usize / 350).max(1));
+            if better(value, best, candidate.abs() < pixels.abs()) { best = value; pixels = candidate; }
         }
     }
+    if pixels == 0 || best.upper >= EXACT { return Err(StitchError::NoOverlap); }
 
     let moved = position + pixels;
     let (before, after) = ((-moved).max(0), (moved + full - combined.height() as i64).max(0));
@@ -328,6 +359,40 @@ mod tests {
         stitcher.into_image()
     }
 
+    /// Lines of "text": same spacing and same weight all the way down, so that at a glance every line
+    /// looks like the next, and only the positions of the words tell them apart. Some paragraphs come
+    /// back word for word, as they do on real pages.
+    fn text_page(width: u32, height: u32, repeats: bool) -> RgbaImage {
+        let mut image = RgbaImage::from_pixel(width, height, Rgba([255, 255, 255, 255]));
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let next = |state: &mut u64| { *state ^= *state << 13; *state ^= *state >> 7; *state ^= *state << 17; *state };
+        let mut order = 0x2545_F491_4F6C_DD1Du64;
+        for line in 0..height / 22 {
+            if repeats && line % 6 == 0 { state = 0x9E37_79B9_7F4A_7C15 + next(&mut order) % 5; }
+            let mut x = 20;
+            while x < width - 40 {
+                let word = 12 + (next(&mut state) % 50) as u32;
+                for y in line * 22 + 6..line * 22 + 16 { for dx in 0..word.min(width - x - 1) { if (dx + y) % 3 != 0 { image.put_pixel(x + dx, y, Rgba([40, 40, 40, 255])); } } }
+                x += word + 8;
+            }
+        }
+        image
+    }
+
+    #[test]
+    fn lines_of_text_are_not_mistaken_for_each_other() {
+        let source = text_page(1100, 2400, true);
+        assert!(stitched(&source, 620, &[0, 150, 240, 541, 585, 900, 1020, 1400, 1780]) == source);
+        assert!(stitched(&source, 240, &[0, 60, 180, 213, 363, 443, 543]) == frame(&source, 0, 783));
+    }
+    #[test]
+    fn a_jump_too_big_to_follow_is_refused_rather_than_guessed() {
+        let source = text_page(1100, 1600, false);
+        let mut stitcher = Stitcher::new(frame(&source, 0, 620));
+        assert_eq!(stitcher.append(frame(&source, 540, 620)), Err(StitchError::NoOverlap));
+        stitcher.append(frame(&source, 300, 620)).unwrap();
+        assert!(stitcher.into_image() == frame(&source, 0, 920));
+    }
     #[test]
     fn scrolling_down_rebuilds_the_page() {
         let source = page(160, 500);
