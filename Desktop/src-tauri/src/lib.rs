@@ -378,6 +378,8 @@ fn window_gone(app: &AppHandle, label: &str) {
             end_recording_extras(app);
             if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); }
         }
+        // Never keep watching the keyboard with nothing on screen to show for it.
+        "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
         _ if label.starts_with("video-") => { st(app).session.lock().unwrap().export_targets.remove(label); }
         _ if label.starts_with("overlay-") => {
             let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
@@ -465,7 +467,8 @@ fn start_listening(app: &AppHandle) {
         };
     });
     match started {
-        Ok(listener) => st(app).session.lock().unwrap().listener = Some(listener),
+        // If the recording ended while this started, dropping the listener here stops it.
+        Ok(listener) => { let mut s = st(app).session.lock().unwrap(); if s.marks.is_some() { s.listener = Some(listener); } }
         Err(e) => {
             st(app).session.lock().unwrap().marks = None;
             if let Some(w) = app.get_webview_window("marks") { let _ = w.destroy(); }
@@ -1226,6 +1229,25 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             log("cloudUpload", json!(result.map_err(|e| format!("error: {e}")).unwrap_or_else(|e| e)));
             log("cloudLinkCopied", json!(app.clipboard().read_text().map(|t| t.starts_with("http")).unwrap_or(false)));
         }
+        // Recording extras: they open and listen, a missing camera closes only the bubble, and nothing outlives the recording.
+        st(&app).settings.lock().unwrap().update(&json!({ "recording": { "clicks": true, "keys": true } }));
+        let (area, screen) = (marks::Area { x: 100.0, y: 100.0, w: 400.0, h: 300.0 }, marks::Area { x: 0.0, y: 0.0, w: 1280.0, h: 720.0 });
+        { let mut s = st(&app).session.lock().unwrap(); s.recording = Some(Value::Null); s.recorded = Some(Recorded { area, display: screen, scale: 1.0 }); }
+        log("globalInput", json!(marks::available()));
+        open_marks(&app, Recorded { area, display: screen, scale: 1.0 });
+        open_camera(&app, Recorded { area, display: screen, scale: 1.0 });
+        start_listening(&app);
+        wait(1000);
+        log("marksWindow", json!(app.get_webview_window("marks").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false)));
+        log("marksListening", json!(st(&app).session.lock().unwrap().listener.is_some()));
+        wait(4000);
+        log("cameraBubbleOpen", json!(app.get_webview_window("camera").is_some()));
+        snap("5-recording-extras");
+        end_recording_extras(&app);
+        st(&app).session.lock().unwrap().recording = None;
+        st(&app).settings.lock().unwrap().update(&json!({ "recording": { "clicks": false, "keys": false } }));
+        wait(500);
+        log("extrasClosed", json!(app.get_webview_window("marks").is_none() && app.get_webview_window("camera").is_none() && st(&app).session.lock().unwrap().listener.is_none()));
         let _ = app.run_on_main_thread({ let a = app.clone(); move || { let _ = builder(&a, "ocr-probe", "ocr.html", json!({ "probe": "1" })).build(); } });
         for _ in 0..60 { if dir.join("ocr.txt").exists() { break; } wait(1000); }
         log("ocr", json!(std::fs::read_to_string(dir.join("ocr.txt")).unwrap_or_default().trim()));

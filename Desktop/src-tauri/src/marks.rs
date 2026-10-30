@@ -119,8 +119,9 @@ pub struct Listener { stop: Arc<AtomicBool> }
 
 impl Drop for Listener { fn drop(&mut self) { self.stop.store(true, Ordering::SeqCst); } }
 
-pub fn listen(options: Options, emit: impl Fn(Mark) + Send + 'static) -> Result<Listener, String> {
-    let mut source = native::open()?;
+pub fn listen(options: Options, emit: impl Fn(Mark) + Send + 'static) -> Result<Listener, String> { sample(native::open()?, options, emit) }
+
+fn sample(mut source: impl Source + Send + 'static, options: Options, emit: impl Fn(Mark) + Send + 'static) -> Result<Listener, String> {
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();
     std::thread::Builder::new().name("still-marks".into()).spawn(move || {
@@ -170,6 +171,27 @@ fn keysym_label(sym: u32) -> Option<String> {
     Some(name.to_string())
 }
 
+/// Which of the X11 modifier bits a keysym means. Alt and Super usually sit on Mod1 and Mod4, but a remapped
+/// keyboard can put anything there, including a lock that stays on, and that must never read as "a shortcut".
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct X11Mods { alt: u16, win: u16, altgr: u16 }
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+impl X11Mods {
+    fn learn(&mut self, bit: u16, sym: u32) {
+        match sym {
+            0xFFE7..=0xFFEA => self.alt |= bit, // Meta and Alt.
+            0xFFEB..=0xFFEE => self.win |= bit, // Super and Hyper.
+            0xFE03 | 0xFF7E => self.altgr |= bit, // ISO_Level3_Shift and Mode_switch.
+            _ => {}
+        }
+    }
+    fn read(&self, mask: u16) -> Mods {
+        Mods { ctrl: mask & 4 != 0, alt: mask & self.alt != 0, shift: mask & 1 != 0, win: mask & self.win != 0, altgr: mask & self.altgr != 0 }
+    }
+}
+
 // ---- Reading the desktop -------------------------------------------------------------------------
 
 #[cfg(windows)]
@@ -217,12 +239,12 @@ mod native {
 
 #[cfg(target_os = "linux")]
 mod native {
-    use super::{keysym_label, Mods, Pointer, Source};
+    use super::{keysym_label, Mods, Pointer, Source, X11Mods};
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{ConnectionExt, KeyButMask, QueryPointerReply, Window};
     use x11rb::rust_connection::RustConnection;
 
-    pub struct Native { conn: RustConnection, root: Window, first: u32, per_key: usize, keysyms: Vec<u32> }
+    pub struct Native { conn: RustConnection, root: Window, first: u32, per_key: usize, keysyms: Vec<u32>, modifiers: X11Mods }
 
     pub fn open() -> Result<Native, String> {
         let (conn, screen) = x11rb::connect(None).map_err(|e| e.to_string())?;
@@ -230,11 +252,19 @@ mod native {
         let root = setup.roots.get(screen).ok_or("No X11 screen")?.root;
         let (first, last) = (setup.min_keycode, setup.max_keycode);
         let map = conn.get_keyboard_mapping(first, last - first + 1).map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())?;
-        Ok(Native { root, first: first as u32, per_key: map.keysyms_per_keycode as usize, keysyms: map.keysyms, conn })
+        let mut native = Native { root, first: first as u32, per_key: map.keysyms_per_keycode as usize, keysyms: map.keysyms, conn, modifiers: X11Mods::default() };
+        let held = native.conn.get_modifier_mapping().map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())?.keycodes;
+        // The reply lists keys per modifier in bit order: Shift, Lock, Control, Mod1 to Mod5.
+        for (index, keys) in held.chunks(held.len().max(8) / 8).enumerate() {
+            for key in keys { if let Some(sym) = native.keysym(*key as u32) { native.modifiers.learn(1 << index, sym); } }
+        }
+        Ok(native)
     }
 
     impl Native {
         fn query(&self) -> Option<QueryPointerReply> { self.conn.query_pointer(self.root).ok()?.reply().ok() }
+        /// The first keysym is the key's own, unshifted symbol.
+        fn keysym(&self, key: u32) -> Option<u32> { self.keysyms.get(key.checked_sub(self.first)? as usize * self.per_key).copied() }
     }
 
     impl Source for Native {
@@ -243,9 +273,7 @@ mod native {
             Some(Pointer { x: p.root_x as f64, y: p.root_y as f64, left: p.mask.contains(KeyButMask::BUTTON1), right: p.mask.contains(KeyButMask::BUTTON3) })
         }
         fn mods(&mut self) -> Option<Mods> {
-            let mask = self.query()?.mask;
-            // Mod1 is Alt, Mod4 is Super and Mod5 is AltGr on the standard keyboard setups.
-            Some(Mods { ctrl: mask.contains(KeyButMask::CONTROL), alt: mask.contains(KeyButMask::MOD1), shift: mask.contains(KeyButMask::SHIFT), win: mask.contains(KeyButMask::MOD4), altgr: mask.contains(KeyButMask::MOD5) })
+            Some(self.modifiers.read(u16::from(self.query()?.mask)))
         }
         fn keys(&mut self, down: &mut Vec<u32>) {
             let Some(reply) = self.conn.query_keymap().ok().and_then(|c| c.reply().ok()) else { return };
@@ -253,10 +281,7 @@ mod native {
                 for bit in 0..8 { if bits & (1 << bit) != 0 { down.push(byte as u32 * 8 + bit); } }
             }
         }
-        fn label(&self, key: u32) -> Option<String> {
-            // The first keysym is the key's own, unshifted symbol.
-            self.keysyms.get(key.checked_sub(self.first)? as usize * self.per_key).copied().and_then(keysym_label)
-        }
+        fn label(&self, key: u32) -> Option<String> { self.keysym(key).and_then(keysym_label) }
     }
 }
 
@@ -389,6 +414,28 @@ mod tests {
         assert!(t.step(&mut f).is_none());
     }
 
+    /// Clicks on every other sample, forever, like a desktop that never goes quiet.
+    struct Clicking(bool);
+    impl Source for Clicking {
+        fn pointer(&mut self) -> Option<Pointer> { self.0 = !self.0; Some(Pointer { x: 10.0, y: 10.0, left: self.0, right: false }) }
+        fn mods(&mut self) -> Option<Mods> { None }
+        fn keys(&mut self, _: &mut Vec<u32>) {}
+        fn label(&self, _: u32) -> Option<String> { None }
+    }
+
+    #[test]
+    fn nothing_arrives_once_the_listener_is_dropped() {
+        let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = seen.clone();
+        let listener = sample(Clicking(false), Options { area: WHOLE, clicks: true, keys: false, shortcuts_only: true }, move |_| { counter.fetch_add(1, Ordering::SeqCst); }).unwrap();
+        while seen.load(Ordering::SeqCst) < 2 { std::thread::sleep(POLL); }
+        drop(listener);
+        std::thread::sleep(POLL * 3); // Anything already in flight has landed by now.
+        let after = seen.load(Ordering::SeqCst);
+        std::thread::sleep(POLL * 10);
+        assert_eq!(seen.load(Ordering::SeqCst), after);
+    }
+
     #[test]
     fn global_input_needs_a_plain_x11_session() {
         assert!(x11_input(Some("x11"), None, Some(":0")));
@@ -414,6 +461,27 @@ mod tests {
         assert_eq!(bubble_size(Some(4.0)), 100.0);
         assert_eq!(bubble_size(Some(9000.0)), 360.0);
         assert_eq!(bubble_size(Some(f64::NAN)), 180.0);
+    }
+
+    #[test]
+    fn x11_modifier_bits_come_from_what_they_mean() {
+        let mut usual = X11Mods::default();
+        for (bit, sym) in [(1 << 3, 0xFFE9), (1 << 3, 0xFFE7), (1 << 4, 0xFF7F), (1 << 6, 0xFFEB), (1 << 7, 0xFE03)] { usual.learn(bit, sym); }
+        assert!(usual.read(1 << 3).alt && usual.read(1 << 3).shortcut());
+        assert!(usual.read(1 << 6).win && usual.read(1 << 6).shortcut());
+        assert!(usual.read(4).ctrl && usual.read(4).shortcut());
+        assert!(usual.read(1).shift && !usual.read(1).shortcut());
+        assert!(!usual.read(1 << 4).shortcut()); // Num Lock on Mod2 stays on while typing.
+        assert!(!usual.read(2).shortcut()); // Caps Lock.
+        assert!(!usual.read((1 << 7) | (1 << 4)).shortcut()); // AltGr.
+        // Num Lock moved to Mod4, with nothing else there: a lock mustn't turn the keyboard on.
+        let mut remapped = X11Mods::default();
+        remapped.learn(1 << 6, 0xFF7F); remapped.learn(1 << 3, 0xFFE9);
+        assert!(!remapped.read(1 << 6).shortcut());
+        // AltGr types characters on whichever bit it's mapped to, even with Ctrl held.
+        let mut altgr = X11Mods::default();
+        altgr.learn(1 << 3, 0xFE03);
+        assert!(!altgr.read((1 << 3) | 4).shortcut());
     }
 
     #[test]

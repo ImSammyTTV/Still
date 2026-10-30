@@ -108,7 +108,7 @@ const pages = {
       toggle('Show camera bubble', 'recording.camera'),
       select('Size', 'recording.cameraSize', [[120, 'Small'], [180, 'Medium'], [240, 'Large'], [320, 'Extra large']], true),
       select('Shape', 'recording.cameraShape', [['circle', 'Circle'], ['rounded', 'Rounded square']])
-    ], `The bubble floats above your other windows and appears in the video wherever it overlaps the recorded area. Drag it to move it.${prefs.wayland ? ' On Wayland your desktop decides where it sits and whether it stays on top.' : ''}`),
+    ], `The bubble floats above your other windows and appears in the video wherever it overlaps the recorded area. Drag it to move it.${prefs.platform === 'linux' && !prefs.globalInput ? ' On Wayland your desktop decides where it sits and whether it stays on top.' : ''}`),
     group('Overlays', [
       toggle('Show clicks', 'recording.clicks', { off: !prefs.globalInput }),
       toggle('Show keystrokes', 'recording.keys', { off: !prefs.globalInput, redraw: true }),
