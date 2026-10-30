@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="#macos"><img src="https://img.shields.io/badge/macOS-3a3a3c?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS"></a>
-  <a href="#windows"><img src="https://img.shields.io/badge/Windows-3a3a3c?style=for-the-badge&logo=windows11&logoColor=4cc2ff" alt="Download for Windows"></a>
+  <a href="#windows"><img src="https://img.shields.io/badge/Windows-3a3a3c?style=for-the-badge&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzRjYzJmZiI%2BPHJlY3QgeD0iMS41IiB5PSIxLjUiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgcng9Ii42Ii8%2BPHJlY3QgeD0iMTIuNSIgeT0iMS41IiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIHJ4PSIuNiIvPjxyZWN0IHg9IjEuNSIgeT0iMTIuNSIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiByeD0iLjYiLz48cmVjdCB4PSIxMi41IiB5PSIxMi41IiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIHJ4PSIuNiIvPjwvc3ZnPg%3D%3D" alt="Download for Windows"></a>
   <a href="#linux"><img src="https://img.shields.io/badge/Linux-3a3a3c?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux"></a>
 </p>
 
