@@ -11,6 +11,13 @@ h1,h2,.wordmark { font-family:inherit; letter-spacing:-.01em; }
 .primary,.secondary,input,select,textarea,.search { border-radius:10px; }
 .brand-mark { background:linear-gradient(180deg,#3a3a3c,#1c1c1e); }
 .brand-mark svg { width:58%; height:58%; }
+.ico { width:17px; height:17px; flex:none; }
+.nav { font-size:13px; padding:9px 12px; gap:10px; }
+.nav span { font-size:13px; font-weight:500; }
+.nav.active { background:color-mix(in srgb,var(--text) 10%,transparent); color:var(--text); }
+.search .ico { color:var(--muted); width:15px; height:15px; }
+.primary .ico { width:15px; height:15px; }
+.empty>div svg { width:56px; height:56px; opacity:.45; }
 @media(prefers-color-scheme:dark) {
   :root { --bg:#1c1c1e; --surface:rgba(44,44,46,.7); --sidebar:rgba(35,35,37,.65); --text:#f5f5f7; --muted:#98989d; --line:rgba(255,255,255,.09); }
   body { background:radial-gradient(1200px 600px at 20% -10%,#2a2d33 0,transparent 60%),var(--bg); background-attachment:fixed; }
