@@ -429,7 +429,7 @@ function flattened() {
   return out;
 }
 const flatten = () => flattened().toDataURL('image/png');
-// The same picture, encoded without holding up the page: autosave happens while someone is still drawing.
+// The same picture, encoded in pieces rather than all at once: autosave happens while someone is still drawing.
 const flattenInBackground = () => new Promise((done, failed) => flattened().toBlob((blob) => {
   if (!blob) return failed(new Error('The image is too large'));
   const reader = new FileReader(); reader.onload = () => done(reader.result); reader.onerror = () => failed(reader.error); reader.readAsDataURL(blob);
@@ -442,7 +442,8 @@ async function saveEdits() {
   if (!itemId || !dirty || captureGone) return;
   dirty = false;
   // If saving fails, keep the edits marked unsaved and say so.
-  try { await still.invoke('editor:save', itemId, await flattenInBackground(), project()); }
+  // Encoding takes a moment and more edits can land meanwhile, so the project is copied now to match the picture.
+  try { const edits = JSON.parse(JSON.stringify(project())); await still.invoke('editor:save', itemId, await flattenInBackground(), edits); }
   catch (e) {
     dirty = true;
     // The capture was deleted from History: stop autosaving rather than bring it back.
