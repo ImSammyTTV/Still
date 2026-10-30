@@ -5,21 +5,36 @@
 <title>Still update</title>
 <link rel="stylesheet" href="style.css">
 <style>
-  html, body { background: transparent; }
-  .card { position: absolute; inset: 6px; border-radius: 14px; padding: 14px 16px; display: grid; grid-template-columns: 44px 1fr; gap: 4px 12px; align-items: center;
-    background: var(--bg-elevated); color: var(--text); box-shadow: 0 8px 26px rgba(0,0,0,.35), 0 0 0 1px var(--border); animation: rise .25s ease-out; }
+  html, body { background: transparent; overflow: hidden; }
+  .card { position: absolute; inset: 6px; border-radius: 16px; padding: 14px 14px 12px; display: flex; flex-direction: column; gap: 10px;
+    background: var(--bg-elevated); color: var(--text); box-shadow: 0 10px 30px rgba(0,0,0,.38), 0 0 0 1px var(--border); animation: rise .25s ease-out; }
   @keyframes rise { from { transform: translateY(16px); opacity: 0; } }
-  img { width: 44px; height: 44px; grid-row: span 2; }
-  b { font-size: 13px; }
-  .sub { font-size: 12px; color: var(--text-2); }
-  .actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+  .head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .head img { width: 42px; height: 42px; flex: none; border-radius: 10px; }
+  .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .label { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); }
+  #title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sub { font-size: 12px; color: var(--text-2); line-height: 1.35; }
+  #sub.error { color: #e5484d; }
+  .progress { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; display: none; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .card.busy .progress { display: block; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .actions .btn { min-width: 76px; }
 </style>
 </head>
 <body>
-<div class="card">
-  <img src="icon.png" alt="">
-  <b id="title"></b>
-  <span class="sub" id="sub"></span>
+<div class="card" role="dialog" aria-labelledby="title">
+  <div class="head">
+    <img src="icon.png" alt="">
+    <div class="text">
+      <span class="label">Update available</span>
+      <span id="title"></span>
+      <span id="sub"></span>
+    </div>
+  </div>
+  <div class="progress" aria-hidden="true"><i id="bar"></i></div>
   <div class="actions">
     <button class="btn" id="later">Later</button>
     <button class="btn primary" id="install">Install and Restart</button>

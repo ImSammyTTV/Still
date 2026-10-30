@@ -527,7 +527,7 @@ fn show_update_prompt(app: &AppHandle, version: &str) {
     let _ = app.run_on_main_thread(move || {
         let Some(monitor) = a.primary_monitor().ok().flatten() else { return };
         let (scale, area) = (monitor.scale_factor(), *monitor.work_area());
-        let (w, h) = (340.0, 112.0);
+        let (w, h) = (348.0, 132.0);
         let built = builder(&a, "update", "update.html", json!({ "version": version, "current": a.package_info().version.to_string() }))
             .title("Still update").inner_size(w, h).decorations(false).transparent(true).shadow(false).resizable(false)
             .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).build();
