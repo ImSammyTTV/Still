@@ -47,22 +47,29 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     private var images: [ObjectIdentifier: CGImage] = [:]
     private var views: [SelectionSurface] = []
     private var active = false
+    private var keyboardMonitor: Any?
+    private var captureTask: Task<Void, Never>?
+    private var holdingSpace = false
+    var allowsWindowSelection: Bool { purpose == .screenshot || purpose == .recording }
+    var onWindowSelected: ((CGWindowID, NSScreen, CGRect) -> Void)?
     var onSelected: ((CGImage, NSScreen, CGRect, SelectionPurpose) -> Void)?
     var onCancel: (() -> Void)?
     var onError: ((Error) -> Void)?
     func begin(_ purpose: SelectionPurpose) {
         guard !active else { return }
         self.purpose = purpose; active = true; windowMode = false; windows = OverlayWindow.onScreen()
+        installKeyboardMonitor()
         // Grab every display first, before Still takes focus, so open menus, Spotlight and hover states
         // are in the picture. The overlay then sits on that frozen image, like the system tool.
-        Task {
+        captureTask = Task {
             var shots: [ObjectIdentifier: CGImage] = [:]
             var failures: [String] = []
             for screen in NSScreen.screens {
+                guard !Task.isCancelled else { return }
                 do { shots[ObjectIdentifier(screen)] = try await ScreenCaptureAPI.image(screen: screen) }
                 catch { let error = error as NSError; failures.append("\(screen.localizedName): \(error.localizedDescription) (\(error.domain) \(error.code))") }
             }
-            guard active else { return }
+            guard active, !Task.isCancelled else { return }
             guard !shots.isEmpty else {
                 close()
                 onError?(NSError(domain: "Still", code: 2, userInfo: [NSLocalizedDescriptionKey: "Capture could not start. " + (failures.isEmpty ? "No connected displays were found." : failures.joined(separator: "\n"))]))
@@ -134,8 +141,14 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     }
     func window() { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window) } }
     func toggleWindowMode() { setWindowMode(!windowMode) }
-    func setWindowMode(_ on: Bool) { guard purpose == .screenshot || !on, on != windowMode else { return }; windowMode = on; views.forEach { $0.windowModeChanged() } }
+    func setWindowMode(_ on: Bool) { guard allowsWindowSelection || !on, on != windowMode else { return }; windowMode = on; views.forEach { $0.windowModeChanged() } }
     func capture(window: OverlayWindow) {
+        if purpose == .recording {
+            guard let primary = NSScreen.screens.first,
+                  let screen = NSScreen.screens.first(where: { CGRect(x: $0.frame.minX, y: primary.frame.maxY-$0.frame.maxY, width: $0.frame.width, height: $0.frame.height).intersects(window.frame) }) else { return }
+            let local = CGRect(x: window.frame.minX-screen.frame.minX, y: window.frame.minY-(primary.frame.maxY-screen.frame.maxY), width: window.frame.width, height: window.frame.height)
+            close(); onWindowSelected?(window.id, screen, local); return
+        }
         if window.popup, let primary = NSScreen.screens.first,
            let screen = NSScreen.screens.first(where: { CGRect(x: $0.frame.minX, y: primary.frame.maxY-$0.frame.maxY, width: $0.frame.width, height: $0.frame.height).intersects(window.frame) }) {
             let local = CGRect(x: window.frame.minX-screen.frame.minX, y: window.frame.minY-(primary.frame.maxY-screen.frame.maxY), width: window.frame.width, height: window.frame.height)
@@ -144,7 +157,28 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window, windowID: window.id) } }
     func timer() { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.area, delay: 5) } }
     func cancel() { close(); onCancel?() }
-    func close() { active = false; for panel in panels { panel.close() }; panels = []; views = []; images = [:]; bar?.close(); bar = nil }
+    private func installKeyboardMonitor() {
+        if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }
+        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            guard let self, self.active else { return event }
+            let editing = event.window?.firstResponder is NSTextView
+            switch CaptureKeyboardPolicy.action(keyCode: event.keyCode, keyUp: event.type == .keyUp, editingText: editing, windowSelectionAllowed: self.allowsWindowSelection, hasCommandModifier: !event.modifierFlags.intersection([.command, .control, .option]).isEmpty) {
+            case .cancel: self.cancel(); return nil
+            case .beginWindowSelection:
+                if !event.isARepeat, !self.windowMode, !self.views.contains(where: { $0.isSelecting }) { self.holdingSpace = true; self.setWindowMode(true) }
+                return nil
+            case .endWindowSelection:
+                if self.holdingSpace { self.holdingSpace = false; self.setWindowMode(false); return nil }
+                return event
+            case .passThrough: return event
+            }
+        }
+    }
+    func close() {
+        captureTask?.cancel(); captureTask = nil
+        if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor); self.keyboardMonitor = nil }
+        holdingSpace = false
+        active = false; for panel in panels { panel.close() }; panels = []; views = []; images = [:]; bar?.close(); bar = nil }
 }
 /// A normal-layer window from the Window Server list, front to back, in global top-left coordinates.
 struct OverlayWindow {
@@ -181,6 +215,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     var fixedSize: CGSize?
     private var snapshot: CGImage?
     private var anchor: CGPoint?
+    var isSelecting: Bool { anchor != nil }
     private var pointer = CGPoint(x: -100, y: -100)
     private var region = CGRect.zero
     private var hovered: OverlayWindow?
@@ -279,7 +314,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             else { crossH.frame = CGRect(x: pointer.x-20, y: pointer.y, width: 40, height: px); crossV.frame = CGRect(x: pointer.x, y: pointer.y-20, width: px, height: 40) }
         }
         let text: String
-        if windowMode { text = hovered == nil ? "Hold Space and move over a window" : "Click to capture window" }
+        if windowMode { text = hovered == nil ? "Hold Space and move over a window" : (coordinator.purpose == .recording ? "Click to record window" : "Click to capture window") }
         else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" }
         else { text = "" }
         label.isHidden = text.isEmpty || !onScreen; labelBack.isHidden = label.isHidden
@@ -329,7 +364,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         if event.keyCode == 53 { coordinator.cancel(); return }
         // Hold Space to pick a window; releasing it returns to area selection.
         if event.keyCode == 49 {
-            if !event.isARepeat, anchor == nil, !coordinator.windowMode, coordinator.purpose == .screenshot { spaceHeld = true; coordinator.setWindowMode(true) }
+            if !event.isARepeat, anchor == nil, !coordinator.windowMode, coordinator.allowsWindowSelection { spaceHeld = true; coordinator.setWindowMode(true) }
             return
         }
         if event.keyCode == 36, region.width > 2 { coordinator.finish(on: display, rect: region); return }

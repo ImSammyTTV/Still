@@ -25,7 +25,7 @@ function scaleWindows() {
 }
 addEventListener('resize', () => { if (config) { config.width = innerWidth; config.height = innerHeight; scaleWindows(); } });
 init(window.__STILL_PARAMS__.init);
-still.on('overlay:purpose', (next) => { purpose = next; if (next !== 'screenshot') setWindowMode(false, true); updateBar(); });
+still.on('overlay:purpose', (next) => { purpose = next; if (!StillCaptureInput.allowsWindowSelection(next)) setWindowMode(false, true); updateBar(); });
 still.on('overlay:windowMode', (on) => setWindowMode(on, true));
 still.on('overlay:clear', () => { if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
 
@@ -37,7 +37,7 @@ function resize() {
 addEventListener('resize', () => { if (config) { resize(); draw(); } });
 
 function setWindowMode(on, fromOthers = false) {
-  if (on && (!config.canSelectWindows || purpose !== 'screenshot')) {
+  if (on && (!config.canSelectWindows || !StillCaptureInput.allowsWindowSelection(purpose))) {
     if (on && !fromOthers) toastWindowUnavailable();
     on = false;
   }
@@ -48,7 +48,7 @@ function setWindowMode(on, fromOthers = false) {
   updateBar(); draw();
 }
 function toastWindowUnavailable() {
-  if (purpose !== 'screenshot') toast('Window selection works with screenshots');
+  if (!StillCaptureInput.allowsWindowSelection(purpose)) toast('Choose Screenshot or Record to select a window');
   else toast(config.wayland ? 'Window selection needs an X11 session. Drag an area instead.' : 'No windows to select');
 }
 
@@ -92,7 +92,7 @@ function draw() {
     ctx.stroke();
   }
   if (pointer.x < 0) return;
-  const hint = purpose === 'record' ? 'Drag to choose what to record' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
+  const hint = purpose === 'record' ? 'Drag to record · hold Space for a window' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
   label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : hint, pointer.x, pointer.y);
   if (config.magnifier && !anchor) drawMagnifier();
 }
@@ -160,11 +160,12 @@ addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceHeld) { spaceH
 addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
 
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') applyDimensions(); if (e.key === 'Escape') e.target.blur(); return; }
+  const action = StillCaptureInput.keyAction({ key: e.key, code: e.code, editingText: ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName), commandModifier: e.metaKey || e.ctrlKey || e.altKey, purpose });
+  if (action === 'cancel') { e.preventDefault(); e.stopImmediatePropagation(); cancel(); return; }
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') applyDimensions(); return; }
   shift = e.shiftKey;
-  if (e.key === 'Escape') return cancel();
   // Hold Space to pick a window; releasing it returns to area selection.
-  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat && !anchor && !windowMode) { spaceHeld = true; setWindowMode(true); } return; }
+  if (action === 'window') { e.preventDefault(); if (!e.repeat && !anchor && !windowMode) { spaceHeld = true; setWindowMode(true); } return; }
   if (e.key === 'Enter' && region && region.w > 2) return finish(region);
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   if (arrows[e.key] && !windowMode) {
@@ -176,16 +177,16 @@ addEventListener('keydown', (e) => {
   }
   const key = e.key.toLowerCase();
   if (key === 'a') { setPurpose('screenshot'); setWindowMode(false); }
-  else if (key === 'w') { setPurpose('screenshot'); setWindowMode(true); }
+  else if (key === 'w') { if (!StillCaptureInput.allowsWindowSelection(purpose)) setPurpose('screenshot'); setWindowMode(true); }
   else if (key === 'f') still.send('overlay:fullscreen', config.displayId);
   else if (key === 'o') { setWindowMode(false); setPurpose('text'); }
   else if (key === 'v') { setWindowMode(false); setPurpose('record'); }
   else if (key === 't') still.send('overlay:timer', 5);
   updateBar();
-});
+}, true);
 
 function finish(rect, windowId) {
-  if (purpose !== 'screenshot' || !windowId) windowId = undefined;
+  if (!StillCaptureInput.allowsWindowSelection(purpose) || !windowId) windowId = undefined;
   const r = G.normalize(rect);
   still.send('overlay:done', { displayId: config.displayId, rect: r, px: { x: r.x * pixelScale, y: r.y * pixelScale, w: r.w * pixelScale, h: r.h * pixelScale }, purpose, windowId: windowId ?? null });
 }
@@ -204,7 +205,7 @@ $('#bar').addEventListener('click', (e) => {
   const button = e.target.closest('[data-mode]'); if (!button) return;
   const mode = button.dataset.mode;
   if (mode === 'area') { setPurpose('screenshot'); setWindowMode(false); }
-  else if (mode === 'window') { setPurpose('screenshot'); setWindowMode(!windowMode); }
+  else if (mode === 'window') { if (!StillCaptureInput.allowsWindowSelection(purpose)) setPurpose('screenshot'); setWindowMode(!windowMode); }
   else if (mode === 'fullscreen') {
     if (purpose === 'record') return finish({ x: 0, y: 0, w: config.width, h: config.height });
     still.send('overlay:fullscreen', config.displayId);

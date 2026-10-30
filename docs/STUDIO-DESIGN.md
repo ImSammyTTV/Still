@@ -1,6 +1,6 @@
 # Still design
 
-Still uses a neutral graphite palette, soft grouped surfaces, a ripple brand mark and a separate viewfinder menu icon. Keep the latest native Mac design and the Windows/Linux interface visually consistent.
+Still uses a neutral graphite palette, soft grouped surfaces, a white captured-frame app icon with a lifted corner and a matching template menu icon. Keep the latest native Mac design and the Windows/Linux interface visually consistent.
 
 ## Surfaces and appearance
 

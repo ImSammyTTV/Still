@@ -176,7 +176,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         std::thread::sleep(Duration::from_millis(80));
         let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
-        let windows = if purpose == "screenshot" { capture::list_windows(factor) } else { vec![] };
+        let windows = if purpose == "screenshot" || purpose == "record" { capture::list_windows(factor) } else { vec![] };
         let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
@@ -237,7 +237,7 @@ fn finish_selection(app: &AppHandle, payload: Value) {
     if setting(app, "rememberSelection").as_bool().unwrap_or(false) && payload["windowId"].is_null() {
         st(app).settings.lock().unwrap().update(&json!({ "lastSelection": { "displayId": display, "rect": payload["rect"] } }));
     }
-    if purpose == "record" { start_recording(app, &grab, x, y, w, h); return; }
+    if purpose == "record" { start_recording(app, &grab, x, y, w, h, !payload["windowId"].is_null()); return; }
     let image = capture::crop(&grab.image, x, y, w, h);
     complete_image(app, image, purpose == "text");
 }
@@ -327,10 +327,10 @@ fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<Pat
 // ---- Recording ----------------------------------------------------------------------------------
 
 /// The HUD records with the system web engine's screen capture, crops to the selection and sends the file back.
-fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64) {
+fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64, selected_window: bool) {
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
-    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "options": rec });
+    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec });
     st(app).session.lock().unwrap().recording = Some(params.clone());
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     let built = builder(app, "hud", "hud.html", params).title("Recording").inner_size(300.0, 52.0).decorations(false).transparent(true).shadow(false)

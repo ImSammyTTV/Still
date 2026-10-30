@@ -21,15 +21,17 @@ function pickType(format) {
 async function begin() {
   const o = opts.options || {};
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder) throw new Error('Screen recording isn’t supported by this system’s web engine yet.');
-  $('#time').textContent = 'Choose a screen…';
-  const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: o.fps || 30 }, audio: !!o.systemAudio });
+  $('#time').textContent = opts.selectedWindow ? 'Choose the window…' : 'Choose a screen…';
+  const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: o.fps || 30, ...(opts.selectedWindow ? { displaySurface: 'window' } : {}) }, audio: !!o.systemAudio });
   streams.push(display);
   const track = display.getVideoTracks()[0];
+  const displaySurface = track.getSettings().displaySurface;
+  if (!StillCaptureInput.recordingSourceAllowed(opts.selectedWindow, displaySurface)) throw new Error('Window recording needs a window source. Choose your window in the system sharing picker, or use area recording instead.');
   const video = document.createElement('video'); video.muted = true; video.srcObject = new MediaStream([track]); await video.play();
   const r = opts.rect, sx = video.videoWidth / opts.imageWidth, sy = video.videoHeight / opts.imageHeight;
   const full = r.x <= 1 && r.y <= 1 && r.w >= opts.imageWidth - 2 && r.h >= opts.imageHeight - 2;
   let videoTrack = track;
-  if (!full) {
+  if (StillCaptureInput.shouldCrop(displaySurface, full)) {
     const src = { x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy };
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(2, Math.round(src.w / 2) * 2); canvas.height = Math.max(2, Math.round(src.h / 2) * 2);

@@ -36,9 +36,15 @@ enum Studio {
         return material
     }
 
-    /// The menu bar icon: a framed viewfinder square, as a template so macOS draws it black or white.
+    /// The captured-frame mark as a template, so macOS draws it black or white.
     @MainActor static func menuBarIcon() -> NSImage {
-        let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Still capture menu") ?? NSImage()
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            NSColor.black.setStroke(); NSColor.black.setFill()
+            let frame = NSBezierPath(); frame.lineWidth = 1.7; frame.lineJoinStyle = .round; frame.lineCapStyle = .round
+            frame.move(to: NSPoint(x: 11, y: 4)); frame.line(to: NSPoint(x: 2, y: 4)); frame.line(to: NSPoint(x: 2, y: 14)); frame.line(to: NSPoint(x: 16, y: 14)); frame.line(to: NSPoint(x: 16, y: 9)); frame.stroke()
+            let fold = NSBezierPath(); fold.move(to: NSPoint(x: 11, y: 4)); fold.line(to: NSPoint(x: 11, y: 9)); fold.line(to: NSPoint(x: 16, y: 9)); fold.close(); fold.fill()
+            return true
+        }
         image.isTemplate = true
         return image
     }

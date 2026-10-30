@@ -47,6 +47,20 @@ import StillCore
         targetRect = CGRect(x: screen.frame.minX+rect.minX, y: NSScreen.screens[0].frame.maxY-screen.frame.maxY+rect.minY, width: rect.width, height: rect.height)
         Task { do { let filter = try await ScreenCaptureAPI.filter(screen: screen); await start(filter) } catch { fail(error) } }
     }
+    func recordWindow(id: CGWindowID) {
+        guard !recording, !choosing, !stopping else { return }
+        newSession(); captureRegion = nil; choosing = true; starting = true
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let window = content.windows.first(where: { $0.windowID == id }) else {
+                    throw NSError(domain: "Still", code: 1, userInfo: [NSLocalizedDescriptionKey: "That window is no longer available. Choose another window to record."])
+                }
+                targetRect = window.frame
+                await start(SCContentFilter(desktopIndependentWindow: window))
+            } catch { fail(error) }
+        }
+    }
     func choose() {
         guard !recording, !choosing, !stopping else { return }
         newSession(); choosing = true; captureRegion = nil

@@ -9,7 +9,7 @@ h1,h2,.wordmark { font-family:inherit; letter-spacing:-.01em; }
 .login-card { border-radius:20px; backdrop-filter:blur(30px) saturate(1.4); -webkit-backdrop-filter:blur(30px) saturate(1.4); }
 .sidebar,.share-header,.comments-pane { backdrop-filter:blur(30px) saturate(1.4); -webkit-backdrop-filter:blur(30px) saturate(1.4); }
 .primary,.secondary,input,select,textarea,.search { border-radius:10px; }
-.brand-mark { background:linear-gradient(180deg,#3a3a3c,#1c1c1e); }
+.brand-mark { background:#fff; color:#24272b; border:1px solid #dde0e3; }
 .brand-mark svg { width:58%; height:58%; }
 .ico { width:17px; height:17px; flex:none; }
 .nav { font-size:13px; padding:9px 12px; gap:10px; }

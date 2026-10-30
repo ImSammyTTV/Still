@@ -42,7 +42,7 @@ struct MainView: View {
                 Divider().padding(.horizontal, 10).padding(.vertical, 6)
                 Button { library.page = "About" } label: {
                     HStack(spacing: 9) {
-                        RippleMark().frame(width: 24, height: 22)
+                        CaptureFrameMark().frame(width: 24, height: 22)
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Still").font(.system(size: 12, weight: .semibold))
                             Text("Version \(Updater.shared.currentVersion)").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -329,17 +329,24 @@ struct ClipboardSettings: View {
     }
 }
 
-/// The app icon's ripple without its tile: two rings and a centre drop on a transparent background.
-struct RippleMark: View {
+/// The lifted screenshot corner, drawn as a template mark on transparent surfaces.
+struct CaptureFrameMark: View {
     var body: some View {
-        let teal = LinearGradient(colors: [Color(hex: "9FE3DC"), Color(hex: "2F8F92")], startPoint: .top, endPoint: .bottom)
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            ZStack {
-                Ellipse().stroke(teal, lineWidth: 1.8).frame(width: w, height: h*0.62)
-                Ellipse().stroke(teal, lineWidth: 1.8).frame(width: w*0.56, height: h*0.34)
-                Ellipse().fill(teal).frame(width: w*0.18, height: h*0.12)
-            }.frame(width: w, height: h)
-        }
+            Path { path in
+                path.move(to: CGPoint(x: w*0.7, y: h*0.82))
+                path.addLine(to: CGPoint(x: w*0.08, y: h*0.82))
+                path.addLine(to: CGPoint(x: w*0.08, y: h*0.18))
+                path.addLine(to: CGPoint(x: w*0.92, y: h*0.18))
+                path.addLine(to: CGPoint(x: w*0.92, y: h*0.58))
+            }.stroke(.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            Path { path in
+                path.move(to: CGPoint(x: w*0.7, y: h*0.82))
+                path.addLine(to: CGPoint(x: w*0.7, y: h*0.58))
+                path.addLine(to: CGPoint(x: w*0.92, y: h*0.58))
+                path.closeSubpath()
+            }.fill(.primary)
+        }.accessibilityHidden(true)
     }
 }

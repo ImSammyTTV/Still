@@ -5,6 +5,7 @@ struct RecordingSetupView: View {
     @ObservedObject var library: Library
     @ObservedObject private var prefs = Preferences.shared
     let selectedSize: CGSize?
+    var selectedWindow = false
     let chooseArea: () -> Void
     let cancel: () -> Void
     let record: (String, Bool, Bool, CGSize) -> Void
@@ -14,13 +15,14 @@ struct RecordingSetupView: View {
     @State private var fullscreen = false
     var body: some View {
         VStack(spacing: 12) {
+            if selectedWindow && !fullscreen { Label("Selected window only", systemImage: "macwindow").font(.system(size: 12, weight: .semibold)) }
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button { details.toggle() } label: { Image(systemName: "slider.vertical.3").frame(width: 31) }.buttonStyle(.plain).help("Recording settings").popover(isPresented: $details) { VStack(alignment: .leading, spacing: 16) { Text("Recording Settings").font(.headline); Picker("Quality", selection: $prefs.recordingQuality) { ForEach(VideoQuality.allCases) { Text($0.title).tag($0.rawValue) } }; Picker("Frame Rate", selection: $prefs.recordingFPS) { ForEach([15, 24, 30, 60], id: \.self) { Text("\($0) fps").tag($0) } }; Picker("Max Resolution", selection: $prefs.recordingResolution) { Text("Original").tag(0); Text("1080p").tag(1920); Text("4K").tag(3840) }; Toggle("Show Cursor", isOn: $prefs.recordingCursor); Toggle("Show Clicks", isOn: $prefs.recordingClicks); Toggle("Show Keystrokes", isOn: $prefs.recordingKeys); Toggle("Only Command Keys", isOn: $prefs.recordingCommandKeysOnly) }.padding(20).frame(width: 280) }
                     Divider().frame(height: 25)
-                    TextField("Width", text: $width).textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 14, weight: .semibold)).frame(width: 56).padding(.vertical, 5).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
+                    TextField("Width", text: $width).disabled(selectedWindow && !fullscreen).textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 14, weight: .semibold)).frame(width: 56).padding(.vertical, 5).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
                     Text("×").foregroundStyle(.secondary)
-                    TextField("Height", text: $height).textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 14, weight: .semibold)).frame(width: 56).padding(.vertical, 5).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
+                    TextField("Height", text: $height).disabled(selectedWindow && !fullscreen).textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 14, weight: .semibold)).frame(width: 56).padding(.vertical, 5).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
                     Button { fullscreen.toggle(); let size = fullscreen ? NSScreen.main?.frame.size : selectedSize; if let size { width = String(Int(size.width)); height = String(Int(size.height)) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(fullscreen ? Color.white : Color.secondary) }.buttonStyle(.plain).help("Full screen")
                     Button(action: chooseArea) { Image(systemName: "crop").frame(width: 25) }.buttonStyle(.plain).help("Select recording area").accessibilityLabel("Select recording area")
                 }.padding(12)
