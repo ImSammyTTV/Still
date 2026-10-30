@@ -4422,7 +4422,9 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "uuid",
+ "webkit2gtk",
  "windows-sys 0.61.2",
+ "x11rb",
  "xcap",
 ]
 

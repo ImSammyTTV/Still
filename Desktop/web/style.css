@@ -74,6 +74,7 @@ select.field { padding-right: 24px; }
 .switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform 0.15s; }
 .switch:checked { background: var(--accent); }
 .switch:checked::after { transform: translateX(14px); }
+.switch:disabled { opacity: 0.4; }
 
 .menu { position: fixed; z-index: 50; min-width: 180px; padding: 5px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border); box-shadow: var(--shadow); }
 .menu button { width: 100%; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; text-align: left; }

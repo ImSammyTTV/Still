@@ -17,7 +17,8 @@ pub fn defaults() -> Value {
         "crosshair": "partial",
         "magnifier": true,
         "rememberSelection": false,
-        "recording": { "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3 },
+        "recording": { "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3, "camera": false, "cameraSize": 180, "cameraShape": "circle",
+            "clicks": false, "keys": false, "keysShortcutsOnly": true },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
         "cloud": { "provider": "still", "endpoint": "", "expiryDays": 7, "visibility": "link", "autoUpload": false, "driveAccess": "link", "driveEmail": "", "driveFolder": "" },
         "shortcuts": {
@@ -90,5 +91,11 @@ mod tests {
         assert_eq!(again.str("shortcuts.area"), "Alt+Shift+A");
         assert_eq!(again.str("shortcuts.fullscreen"), "CommandOrControl+Shift+3");
         assert_eq!(again.get("quickAccess.closeAfter").as_i64(), Some(15));
+    }
+    #[test]
+    fn overlays_start_off_and_keys_start_as_shortcuts_only() {
+        let values = defaults();
+        for key in ["camera", "clicks", "keys"] { assert_eq!(values["recording"][key], json!(false), "{key}"); }
+        assert_eq!(values["recording"]["keysShortcutsOnly"], json!(true));
     }
 }

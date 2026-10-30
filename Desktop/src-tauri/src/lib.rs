@@ -2,6 +2,7 @@ mod capture;
 mod cloud;
 mod drive;
 mod library;
+mod marks;
 mod settings;
 mod video;
 
@@ -16,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::menu::{IconMenuItem, IconMenuItemBuilder, Menu, MenuBuilder, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::webview::{PermissionKind, PermissionResponse};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
@@ -23,6 +25,10 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 // ---- State ------------------------------------------------------------------------------------
+
+/// Where the running recording is on the desktop, for the windows that float over it.
+#[derive(Clone, Copy)]
+struct Recorded { area: marks::Area, display: marks::Area, scale: f64 }
 
 #[derive(Default)]
 struct Session {
@@ -32,6 +38,9 @@ struct Session {
     overlays: Vec<String>,
     previews: Vec<(String, String)>,
     recording: Option<Value>,
+    recorded: Option<Recorded>,
+    marks: Option<marks::Options>,
+    listener: Option<marks::Listener>,
     failed_shortcuts: Vec<String>,
     update: Value,
     pending_update: Option<Arc<tauri_plugin_updater::Update>>,
@@ -344,11 +353,16 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
     let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec });
-    st(app).session.lock().unwrap().recording = Some(params.clone());
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    {
+        let mut s = st(app).session.lock().unwrap();
+        s.recording = Some(params.clone());
+        s.recorded = Some(Recorded { area: marks::Area { x: grab.x as f64 + x, y: grab.y as f64 + y, w, h }, display: marks::Area { x: grab.x as f64, y: grab.y as f64, w: iw as f64, h: ih as f64 }, scale });
+    }
     let built = builder(app, "hud", "hud.html", params).title("Recording").inner_size(300.0, 52.0).decorations(false).transparent(true).shadow(false)
-        .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).build();
+        .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).on_permission_request(hud_access).build();
     if let Ok(hud) = built {
+        media_on(&hud);
         let _ = hud.set_position(PhysicalPosition::new(grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32));
         let _ = hud.show(); let _ = hud.set_focus();
     }
@@ -361,7 +375,12 @@ fn window_gone(app: &AppHandle, label: &str) {
     match label {
         // Closing Settings while recording a shortcut would otherwise leave every shortcut unregistered.
         "settings" => register_shortcuts(app),
-        "hud" => { if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); } }
+        "hud" => {
+            end_recording_extras(app);
+            if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); }
+        }
+        // Never keep watching the keyboard with nothing on screen to show for it.
+        "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
         _ if label.starts_with("video-") => { st(app).session.lock().unwrap().export_targets.remove(label); }
         _ if label.starts_with("overlay-") => {
             let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
@@ -371,9 +390,99 @@ fn window_gone(app: &AppHandle, label: &str) {
     }
 }
 fn stop_recording_state(app: &AppHandle) {
+    end_recording_extras(app);
     st(app).session.lock().unwrap().recording = None;
     if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
     build_tray_menu(app);
+}
+
+// ---- Camera bubble, clicks and keys -------------------------------------------------------------
+//
+// These are ordinary windows floating over the screen, so the screen capture records them where they overlap
+// the selection. The HUD is the only window kept out of the video (content_protected), so neither of these
+// may be protected, and the keys only ever exist on screen and in that video.
+
+/// WebKitGTK has no permission prompt of its own: it says no to everything Still doesn't answer, and it ships
+/// with media capture switched off (see `media_on`). The user asked for the recording, so say yes here.
+/// WebView2 keeps its own prompts for the HUD.
+fn hud_access(_: tauri::Webview, kind: PermissionKind) -> PermissionResponse {
+    if cfg!(target_os = "linux") && matches!(kind, PermissionKind::DisplayCapture | PermissionKind::Microphone) { PermissionResponse::Allow } else { PermissionResponse::Default }
+}
+/// Turning the bubble on in Settings is the consent. A prompt would have to appear inside a small round window
+/// that can't take focus, mid-recording; the operating system's own camera privacy switch still applies.
+fn camera_access(_: tauri::Webview, kind: PermissionKind) -> PermissionResponse {
+    if matches!(kind, PermissionKind::Camera) { PermissionResponse::Allow } else { PermissionResponse::Deny }
+}
+fn media_on(window: &WebviewWindow) {
+    #[cfg(target_os = "linux")] {
+        let _ = window.with_webview(|view| {
+            use webkit2gtk::{SettingsExt, WebViewExt};
+            if let Some(settings) = WebViewExt::settings(&view.inner()) { settings.set_enable_media_stream(true); }
+        });
+    }
+    #[cfg(not(target_os = "linux"))] let _ = window;
+}
+
+fn open_camera(app: &AppHandle, place: Recorded) {
+    let size = marks::bubble_size(setting(app, "recording.cameraSize").as_f64());
+    let shape = if setting(app, "recording.cameraShape").as_str() == Some("rounded") { "rounded" } else { "circle" };
+    let built = builder(app, "camera", "camera.html", json!({ "shape": shape })).title("Camera").inner_size(size, size).decorations(false).transparent(true).shadow(false).resizable(false)
+        .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).visible_on_all_workspaces(true).on_permission_request(camera_access).build();
+    let Ok(win) = built else { notify(app, "Camera bubble is off", "Still couldn’t open the camera window. The recording continues without it."); return };
+    media_on(&win);
+    let (x, y) = marks::bubble_origin(place.area, place.display, size * place.scale, 24.0 * place.scale);
+    let _ = win.set_position(PhysicalPosition::new(x, y));
+    let _ = win.show();
+}
+
+/// One click-through window over the recorded area, for both the ripples and the keys.
+fn open_marks(app: &AppHandle, place: Recorded) {
+    let options = marks::Options { area: place.area, clicks: setting(app, "recording.clicks").as_bool().unwrap_or(false), keys: setting(app, "recording.keys").as_bool().unwrap_or(false),
+        shortcuts_only: setting(app, "recording.keysShortcutsOnly").as_bool().unwrap_or(true) };
+    if !options.clicks && !options.keys { return; }
+    if !marks::available() { notify(app, "Clicks and keys are off", "Wayland doesn’t let apps see clicks or keys in other windows. Sign in to an X11 session to show them."); return; }
+    let (w, h) = (place.area.w, place.area.h);
+    let built = builder(app, "marks", "marks.html", json!({})).title("Clicks and Keys").inner_size(w / place.scale, h / place.scale).decorations(false).transparent(true).shadow(false).resizable(false)
+        .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).visible_on_all_workspaces(true).build();
+    let Ok(win) = built else { notify(app, "Clicks and keys are off", "Still couldn’t open the overlay window. The recording continues without it."); return };
+    let _ = win.set_position(PhysicalPosition::new(place.area.x as i32, place.area.y as i32));
+    let _ = win.set_size(PhysicalSize::new(w as u32, h as u32));
+    let _ = win.show();
+    let _ = win.set_ignore_cursor_events(true); // GTK needs the window on screen for this.
+    st(app).session.lock().unwrap().marks = Some(options);
+}
+
+/// Only runs while the recording does: the page starts it after the countdown and stops it on pause and stop.
+fn start_listening(app: &AppHandle) {
+    let options = {
+        let s = st(app).session.lock().unwrap();
+        if s.recording.is_none() || s.listener.is_some() { return; }
+        let Some(options) = s.marks else { return };
+        options
+    };
+    let a = app.clone();
+    let started = marks::listen(options, move |mark| {
+        let _ = match mark {
+            marks::Mark::Click { x, y } => a.emit_to("marks", "marks:click", json!({ "x": x, "y": y })),
+            marks::Mark::Keys(text) => a.emit_to("marks", "marks:keys", text),
+        };
+    });
+    match started {
+        // If the recording ended while this started, dropping the listener here stops it.
+        Ok(listener) => { let mut s = st(app).session.lock().unwrap(); if s.marks.is_some() { s.listener = Some(listener); } }
+        Err(e) => {
+            st(app).session.lock().unwrap().marks = None;
+            if let Some(w) = app.get_webview_window("marks") { let _ = w.destroy(); }
+            notify(app, "Clicks and keys are off", &format!("Still couldn’t watch for them ({e}). The recording continues without them."));
+        }
+    }
+}
+
+/// The one way out for all of it, whichever way the recording ended. Dropping the listener stops it.
+fn end_recording_extras(app: &AppHandle) {
+    let listener = { let mut s = st(app).session.lock().unwrap(); s.recorded = None; s.marks = None; s.listener.take() };
+    drop(listener);
+    for label in ["marks", "camera"] { if let Some(w) = app.get_webview_window(label) { let _ = w.destroy(); } }
 }
 
 // ---- Tray, shortcuts ----------------------------------------------------------------------------
@@ -630,6 +739,7 @@ async fn settings_get(app: AppHandle) -> Value {
     v["version"] = json!(app.package_info().version.to_string());
     v["failedShortcuts"] = json!(s.failed_shortcuts);
     v["wayland"] = json!(is_wayland());
+    v["globalInput"] = json!(marks::available());
     v
 }
 #[tauri::command]
@@ -875,8 +985,28 @@ async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: 
     notify(&app, "Text copied", &text.chars().take(120).collect::<String>());
 }
 
+/// The screen has been chosen. The bubble goes up now so it's in place before the countdown ends; the camera
+/// light stays off until the user has committed to recording.
 #[tauri::command]
-async fn recording_started(app: AppHandle) { build_tray_menu(&app); }
+async fn recording_prepared(app: AppHandle) {
+    let Some(place) = st(&app).session.lock().unwrap().recorded else { return };
+    open_marks(&app, place);
+    if setting(&app, "recording.camera").as_bool().unwrap_or(false) { open_camera(&app, place); }
+    if st(&app).session.lock().unwrap().recording.is_none() { end_recording_extras(&app); }
+}
+#[tauri::command]
+async fn recording_started(app: AppHandle) { build_tray_menu(&app); start_listening(&app); }
+#[tauri::command]
+async fn recording_listen(app: AppHandle, on: bool) {
+    if on { start_listening(&app); } else { let listener = st(&app).session.lock().unwrap().listener.take(); drop(listener); }
+}
+#[tauri::command]
+async fn recording_finished(app: AppHandle) { end_recording_extras(&app); }
+#[tauri::command]
+async fn camera_failed(app: AppHandle, message: String) {
+    if let Some(w) = app.get_webview_window("camera") { let _ = w.destroy(); }
+    notify(&app, "Camera bubble is off", &message);
+}
 #[tauri::command]
 async fn recording_cancel(app: AppHandle) { stop_recording_state(&app); }
 #[tauri::command]
@@ -1143,6 +1273,25 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             log("cloudUpload", json!(result.map_err(|e| format!("error: {e}")).unwrap_or_else(|e| e)));
             log("cloudLinkCopied", json!(app.clipboard().read_text().map(|t| t.starts_with("http")).unwrap_or(false)));
         }
+        // Recording extras: they open and listen, a missing camera closes only the bubble, and nothing outlives the recording.
+        st(&app).settings.lock().unwrap().update(&json!({ "recording": { "clicks": true, "keys": true } }));
+        let (area, screen) = (marks::Area { x: 100.0, y: 100.0, w: 400.0, h: 300.0 }, marks::Area { x: 0.0, y: 0.0, w: 1280.0, h: 720.0 });
+        { let mut s = st(&app).session.lock().unwrap(); s.recording = Some(Value::Null); s.recorded = Some(Recorded { area, display: screen, scale: 1.0 }); }
+        log("globalInput", json!(marks::available()));
+        open_marks(&app, Recorded { area, display: screen, scale: 1.0 });
+        open_camera(&app, Recorded { area, display: screen, scale: 1.0 });
+        start_listening(&app);
+        wait(1000);
+        log("marksWindow", json!(app.get_webview_window("marks").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false)));
+        log("marksListening", json!(st(&app).session.lock().unwrap().listener.is_some()));
+        wait(4000);
+        log("cameraBubbleOpen", json!(app.get_webview_window("camera").is_some()));
+        snap("5-recording-extras");
+        end_recording_extras(&app);
+        st(&app).session.lock().unwrap().recording = None;
+        st(&app).settings.lock().unwrap().update(&json!({ "recording": { "clicks": false, "keys": false } }));
+        wait(500);
+        log("extrasClosed", json!(app.get_webview_window("marks").is_none() && app.get_webview_window("camera").is_none() && st(&app).session.lock().unwrap().listener.is_none()));
         let _ = app.run_on_main_thread({ let a = app.clone(); move || { let _ = builder(&a, "ocr-probe", "ocr.html", json!({ "probe": "1" })).build(); } });
         for _ in 0..60 { if dir.join("ocr.txt").exists() { break; } wait(1000); }
         log("ocr", json!(std::fs::read_to_string(dir.join("ocr.txt")).unwrap_or_default().trim()));
@@ -1220,7 +1369,8 @@ pub fn run() {
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
-            recording_started, recording_cancel, recording_error, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
+            recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
+            recording_cancel, recording_error, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
             update_status, update_check, update_install,
             cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect
         ])
