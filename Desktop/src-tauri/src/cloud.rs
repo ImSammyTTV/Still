@@ -60,6 +60,14 @@ impl Cloud {
     }
 }
 
+/// The iCloud Drive folder from iCloud for Windows, if it's installed. Apple offers no iCloud client for Linux,
+/// and the Mac app has its own native version of this.
+pub fn icloud_folder() -> Option<std::path::PathBuf> {
+    if !cfg!(windows) { return None; }
+    let folder = std::path::PathBuf::from(std::env::var_os("USERPROFILE")?).join("iCloudDrive");
+    folder.is_dir().then_some(folder)
+}
+
 fn friendly(error: reqwest::Error) -> String {
     if error.is_connect() || error.is_timeout() { "Couldn’t reach the cloud server. Check the address and your connection.".into() } else { error.to_string() }
 }

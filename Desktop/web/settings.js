@@ -127,10 +127,10 @@ const pages = {
     const disconnect = el('button', { class: 'btn', onclick: async () => { await still.invoke('cloud:disconnect'); cloudState = { connected: false, hasToken: false }; prefs = await still.invoke('settings:get'); render(); } }, 'Disconnect');
     return [
       group('Upload to', [
-        select('Destination', 'cloud.provider', [['still', 'Still Cloud'], ['drive', 'Google Drive']]),
+        select('Destination', 'cloud.provider', [['still', 'Still Cloud'], ['drive', 'Google Drive'], ...(driveState.icloud ? [['icloud', 'iCloud Drive']] : [])]),
         driveState.available ? row(driveState.connected ? `Google Drive: ${driveState.email}` : 'Google Drive', driveButton) : row('Google Drive', el('span', { style: 'color:var(--text-2)' }, 'Not available in this build')),
         driveState.connected ? select('Who can open Drive links', 'cloud.driveAccess', [['link', 'Anyone with the link'], ['private', 'Only me']]) : null
-      ], 'Files go into a Still folder in your Drive. Still can only see files it put there.'),
+      ], prefs.cloud.provider === 'icloud' ? 'Upload saves into a Still folder in iCloud Drive. iCloud has no share link, so nothing is copied to your clipboard.' : 'Files go into a Still folder in your Drive. Still can only see files it put there.'),
       group('Server', [row('Server address', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
         'Run your own Still Cloud server (see Cloud/README.md in the project). Uploads only happen when you press Upload or turn on automatic upload. The token is stored in your user profile, readable only by you.'),
       group('Uploads', [

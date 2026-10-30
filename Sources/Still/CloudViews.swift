@@ -15,7 +15,7 @@ struct CloudSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             card("Upload To") {
-                HStack { Text("Destination"); Spacer(); Picker("Destination", selection: $prefs.cloudProvider) { Text("Still Cloud").tag("still"); Text("Google Drive").tag("drive") }.labelsHidden().fixedSize() }
+                HStack { Text("Destination"); Spacer(); Picker("Destination", selection: $prefs.cloudProvider) { Text("Still Cloud").tag("still"); Text("Google Drive").tag("drive"); if ICloudDrive.available { Text("iCloud Drive").tag("icloud") } }.labelsHidden().fixedSize() }
                 if GoogleDrive.available {
                     HStack {
                         Text(driveConnected ? "Google Drive: \(prefs.driveEmail)" : "Google Drive"); Spacer()
@@ -24,6 +24,7 @@ struct CloudSettingsView: View {
                     if driveConnected { HStack { Text("Who can open Drive links"); Spacer(); Picker("Who can open Drive links", selection: $prefs.driveAccess) { Text("Anyone with the link").tag("link"); Text("Only me").tag("private") }.labelsHidden().fixedSize() } }
                     Text("Files go into a Still folder in your Drive. Still can only see files it put there.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else { Text("Google Drive isn’t available in this build.").font(.system(size: 10)).foregroundStyle(.secondary) }
+                if prefs.cloudProvider == "icloud" { Text("Upload saves into a Still folder in iCloud Drive and syncs to your devices. iCloud has no share link, so nothing is copied to your clipboard.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 if !driveStatus.isEmpty { Text(driveStatus).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             card("Account") {

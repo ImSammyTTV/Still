@@ -629,7 +629,7 @@ $('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:
 $('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${e}`); } };
 $('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', flatten(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${e}`); } };
 $('#pin').onclick = () => still.invoke('editor:pin', flatten());
-$('#upload').onclick = async () => { finishTextEdit(); toast('Uploading…'); try { await still.invoke('cloud:uploadData', flatten(), document.title); toast('Link copied'); } catch (error) { toast(String(error)); } };
+$('#upload').onclick = async () => { finishTextEdit(); toast('Uploading…'); try { const result = await still.invoke('cloud:uploadData', flatten(), document.title); toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive'); } catch (error) { toast(String(error)); } };
 $('#ocr').onclick = () => recognize();
 async function recognize() {
   toast('Recognising text…');

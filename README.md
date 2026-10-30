@@ -122,6 +122,8 @@ Screenshots and text recognition stay on your computer unless you upload them. S
 
 You can also send uploads to **Google Drive**: connect it in **Settings → Cloud**, and captures go into a Still folder in your Drive with the link copied for you. Still can only see the files it put there.
 
+On Mac and Windows you can pick **iCloud Drive** instead. Upload then saves into a Still folder that syncs to your devices. iCloud has no share links, so there’s nothing to copy.
+
 [Set up Still Cloud →](Cloud/README.md)
 
 Connect it in **Settings → Cloud**, then choose **Upload**. Uploads include recognised text and any recording transcript so your server can search them. Auto-upload is a separate opt-in setting.

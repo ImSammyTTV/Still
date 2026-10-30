@@ -467,6 +467,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch { model.error = error.localizedDescription }
     }
     private func presentUpload(file: URL, item: CaptureItem?, title: String, temporary: Bool = false) {
+        if Preferences.shared.cloudProvider == "icloud" {
+            defer { if temporary { try? FileManager.default.removeItem(at: file) } }
+            do { try ICloudDrive.save(file, title: title); showCopyToast("Saved to iCloud Drive") }
+            catch { showError("Couldn’t save to iCloud Drive", error.localizedDescription) }
+            return
+        }
         let usesDrive = Preferences.shared.cloudProvider == "drive"
         guard usesDrive ? GoogleDrive.refreshToken != nil : !Preferences.shared.cloudEndpoint.isEmpty else {
             if temporary { try? FileManager.default.removeItem(at: file) }

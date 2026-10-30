@@ -74,6 +74,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 |---|---|---|
 | Upload to your own Still Cloud server and copy the link | ☑️ | ✅ tested against a real server |
 | Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
+| Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
 | Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
 | Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM | ✅ 13 server tests | (same server) |
 

@@ -96,7 +96,7 @@ import StillCore
     @AppStorage("annotateDefaultWidth") var annotateDefaultWidth: Double = 5
     @AppStorage("cloudEndpoint") var cloudEndpoint = ""
     @AppStorage("cloudExpiry") var cloudExpiry = 7
-    /// Where Upload sends files: "still" (a Still Cloud server) or "drive" (Google Drive).
+    /// Where Upload sends files: "still" (a Still Cloud server), "drive" (Google Drive) or "icloud" (iCloud Drive).
     @AppStorage("cloudProvider") var cloudProvider = "still"
     @AppStorage("driveAccess") var driveAccess = "link"
     @AppStorage("driveEmail") var driveEmail = ""

@@ -986,7 +986,20 @@ async fn drive_share(app: &AppHandle, file: &Path, title: &str) -> Result<String
     if uploaded.folder != folder { st(app).settings.lock().unwrap().update(&json!({ "cloud": { "driveFolder": uploaded.folder } })); }
     Ok(uploaded.link)
 }
+fn save_to_icloud(file: &Path, title: &str) -> Result<String, String> {
+    let folder = cloud::icloud_folder().ok_or("iCloud Drive wasn’t found. Install iCloud for Windows and turn on iCloud Drive.")?.join("Still");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let target = unique_path(&folder, title, file.extension().and_then(|e| e.to_str()).unwrap_or("png"));
+    std::fs::copy(file, &target).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
 async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> Result<String, String> {
+    if setting(app, "cloud.provider").as_str() == Some("icloud") {
+        // iCloud has no share links: the file is saved and synced, and there's nothing to copy.
+        let saved = save_to_icloud(&file, &title);
+        match &saved { Ok(_) => notify(app, "Saved to iCloud Drive", &title), Err(e) => notify(app, "Upload failed", e) }
+        return saved;
+    }
     let result = if setting(app, "cloud.provider").as_str() == Some("drive") { drive_share(app, &file, &title).await }
         else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) } };
     match &result {
@@ -1019,7 +1032,7 @@ async fn cloud_disconnect(app: AppHandle) {
     st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": "", "autoUpload": false } }));
 }
 #[tauri::command]
-async fn drive_get(app: AppHandle) -> Value { json!({ "available": drive::available(), "connected": !drive_token(&app).is_empty(), "email": setting(&app, "cloud.driveEmail") }) }
+async fn drive_get(app: AppHandle) -> Value { json!({ "available": drive::available(), "connected": !drive_token(&app).is_empty(), "email": setting(&app, "cloud.driveEmail"), "icloud": cloud::icloud_folder().is_some() }) }
 #[tauri::command]
 async fn drive_connect(app: AppHandle) -> Result<String, String> {
     let connected = drive::connect().await?;
