@@ -34,7 +34,7 @@ struct MainView: View {
                 Divider().padding(.horizontal, 10).padding(.vertical, 6)
                 Button { library.page = "About" } label: {
                     HStack(spacing: 9) {
-                        Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 22, height: 22)
+                        RippleMark().frame(width: 24, height: 22)
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Still").font(.system(size: 12, weight: .semibold))
                             Text("Version \(Updater.shared.currentVersion)").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -317,6 +317,21 @@ struct ClipboardSettings: View {
                     HStack { Text("\(history.items.count) items saved").foregroundStyle(.secondary); Spacer(); Button("Clear History") { history.clear() }.disabled(history.items.isEmpty) }
                 }.padding(6)
             } label: { Text("Privacy").fontWeight(.semibold) }
+        }
+    }
+}
+
+/// The app icon's ripple without its tile: two rings and a centre drop on a transparent background.
+struct RippleMark: View {
+    var body: some View {
+        let teal = LinearGradient(colors: [Color(hex: "9FE3DC"), Color(hex: "2F8F92")], startPoint: .top, endPoint: .bottom)
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            ZStack {
+                Ellipse().stroke(teal, lineWidth: 1.8).frame(width: w, height: h*0.62)
+                Ellipse().stroke(teal, lineWidth: 1.8).frame(width: w*0.56, height: h*0.34)
+                Ellipse().fill(teal).frame(width: w*0.18, height: h*0.12)
+            }.frame(width: w, height: h)
         }
     }
 }
