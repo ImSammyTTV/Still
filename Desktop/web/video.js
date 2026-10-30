@@ -3,10 +3,11 @@
 // How trimming works, and its limits: a web engine has no way to cut a WebM or MP4 without re-encoding it,
 // and the recorder writes keyframes too rarely to cut cleanly at the container level. So a trimmed export
 // plays the kept part in an unseen player and records that with MediaRecorder, the same engine and bitrate
-// as the original recording. That means it runs in real time, is a second generation of the picture, and
-// In and Out land within a frame or two. It pauses while the window is hidden, because the page's timers
-// slow down then. An untrimmed export skips all this and copies the file exactly. Trim points aren't saved
-// with the recording; only the exported file keeps them.
+// as the original recording. That means it runs in real time and is a second generation of the picture.
+// In Chromium, In and Out land within a frame or two. The canvas route for engines without captureStream is
+// looser: on WebKit a 1.5 second clip came out about 0.6 seconds too long. It pauses while the window is hidden,
+// because the page's timers slow down then. An untrimmed export skips all this and copies the file exactly.
+// Trim points aren't saved with the recording; only the exported file keeps them.
 const id = params.get('id');
 const video = $('#video');
 const BITRATE = 12_000_000; // Matches the recording HUD.
