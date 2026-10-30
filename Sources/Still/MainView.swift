@@ -333,18 +333,19 @@ struct ClipboardSettings: View {
 struct CaptureFrameMark: View {
     var body: some View {
         GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
+            let side = min(geo.size.width, geo.size.height)
+            let w = side, h = side
             Path { path in
-                path.move(to: CGPoint(x: w*0.7, y: h*0.82))
-                path.addLine(to: CGPoint(x: w*0.08, y: h*0.82))
-                path.addLine(to: CGPoint(x: w*0.08, y: h*0.18))
-                path.addLine(to: CGPoint(x: w*0.92, y: h*0.18))
-                path.addLine(to: CGPoint(x: w*0.92, y: h*0.58))
+                path.move(to: CGPoint(x: w*0.7, y: h*0.92))
+                path.addLine(to: CGPoint(x: w*0.08, y: h*0.92))
+                path.addLine(to: CGPoint(x: w*0.08, y: h*0.08))
+                path.addLine(to: CGPoint(x: w*0.92, y: h*0.08))
+                path.addLine(to: CGPoint(x: w*0.92, y: h*0.7))
             }.stroke(.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             Path { path in
-                path.move(to: CGPoint(x: w*0.7, y: h*0.82))
-                path.addLine(to: CGPoint(x: w*0.7, y: h*0.58))
-                path.addLine(to: CGPoint(x: w*0.92, y: h*0.58))
+                path.move(to: CGPoint(x: w*0.7, y: h*0.92))
+                path.addLine(to: CGPoint(x: w*0.7, y: h*0.7))
+                path.addLine(to: CGPoint(x: w*0.92, y: h*0.7))
                 path.closeSubpath()
             }.fill(.primary)
         }.accessibilityHidden(true)
