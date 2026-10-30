@@ -8,14 +8,16 @@ How Still looks and sounds, in one page. The design tokens that implement this a
 
 ## Mark
 
-A captured frame with a lifted corner: a square outline whose bottom-right corner peels away, as if the screenshot were being picked up off the screen. It is drawn as a line icon (stroke 2.6 on a 32 grid) on a white tile with a soft ink border, in both appearances.
+A capture frame with a folded corner: a landscape rounded rectangle in a thick ink stroke (about a tenth of its width), with a viewfinder-style break at the top-left corner and a white page corner folding over the bottom-right, where the stroke stops beneath it. It sits on a white tile with a soft grey border, and the tile stays white in both appearances.
+
+The vector source is `assets/brand/mark.svg` (32 grid, stroke 1.6, square caps). Every rendering of the mark is traced from `assets/brand/icon.png`; do not redraw it from memory.
 
 - App icon and README: `assets/brand/icon.png`
 - Mac menu bar: `Resources/MenuBarIcon.png`, a template image so macOS draws it black or white
 - Windows and Linux tray: `Desktop/src-tauri/icons/tray-white.png` and `tray-black.png`
-- Still Cloud: the inline SVG in `Cloud/static/index.html`
+- Still Cloud: `assets/brand/mark.svg` inlined in `Cloud/static/index.html`
 
-Keep the tile white, keep the corner lifted, and never colour the frame. The mark is the only place pure white is a brand colour.
+Keep the tile white, keep the folded corner at the bottom-right and the break at the top-left, and never colour the frame. The mark is the only place pure white is a brand colour.
 
 ## Tagline and voice
 

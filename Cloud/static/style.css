@@ -28,7 +28,7 @@
   --shadow-dialog: 0 22px 80px rgba(0, 0, 0, 0.2);
   --hud: rgba(30, 30, 32, 0.92); --on-chrome: #f5f5f7;
   /* The brand mark is always a white tile with an ink frame, in both appearances. */
-  --mark-bg: #ffffff; --mark-fg: #24272b; --mark-border: #dde0e3;
+  --mark-bg: #ffffff; --mark-fg: #24272b; --mark-border: #dde0e3; --mark-shade: #b9bdc3;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -83,8 +83,13 @@ input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
 
 /* Brand: the captured-frame mark on a white tile, as in the app icon. */
 .brand-mark { display: flex; align-items: center; justify-content: center; width: 58px; height: 58px; border-radius: var(--radius-xl); background: var(--mark-bg); color: var(--mark-fg); border: 1px solid var(--mark-border); }
-.brand-mark svg { width: 58%; height: 58%; }
+.brand-mark svg { width: 100%; height: 100%; }
 .brand-mark.small { width: 30px; height: 30px; border-radius: var(--radius-md); }
+/* The folded corner: a white page over a shaded underside on the tile; on a bare page it takes the page colour. */
+.brand-mark .flap { fill: var(--mark-bg); stroke: var(--mark-shade); stroke-width: .6; }
+.brand-mark .shade { fill: var(--mark-shade); stroke: none; }
+.empty .flap { fill: var(--bg); stroke: currentColor; stroke-width: .6; }
+.empty .shade { fill: currentColor; stroke: none; opacity: .5; }
 .wordmark { display: flex; align-items: center; gap: 10px; font-size: var(--text-lg); font-weight: var(--weight-heading); color: var(--text); letter-spacing: -.01em; }
 .wordmark:hover { text-decoration: none; }
 

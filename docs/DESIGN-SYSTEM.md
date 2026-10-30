@@ -1,6 +1,6 @@
 # Still design system
 
-Still is one product on three surfaces: a native Mac app (Swift), a Tauri app for Windows and Linux (`Desktop/web`), and the Still Cloud sharing site (`Cloud/static`). They share one visual language: a neutral graphite palette, soft grouped surfaces, system type, line icons, and a white captured-frame mark with a lifted corner. This document is the reference for that language. The brand itself (name, mark, voice) is in [BRAND.md](BRAND.md).
+Still is one product on three surfaces: a native Mac app (Swift), a Tauri app for Windows and Linux (`Desktop/web`), and the Still Cloud sharing site (`Cloud/static`). They share one visual language: a neutral graphite palette, soft grouped surfaces, system type, line icons, and a white tile carrying the capture-frame mark with its folded corner (`assets/brand/mark.svg`). This document is the reference for that language. The brand itself (name, mark, voice) is in [BRAND.md](BRAND.md).
 
 Tokens live in three places and must stay in step:
 
