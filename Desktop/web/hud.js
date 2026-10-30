@@ -21,10 +21,11 @@ function pickType(format) {
 }
 
 async function begin() {
+  if (reloadForMedia()) return;
   const o = opts.options || {};
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder) throw new Error('Screen recording isn’t supported by this system’s web engine yet.');
   $('#time').textContent = 'Choose a screen…';
-  const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: o.fps || 30 }, audio: !!o.systemAudio });
+  const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: o.fps || 30, displaySurface: 'monitor' }, audio: !!o.systemAudio });
   streams.push(display);
   const track = display.getVideoTracks()[0];
   const video = document.createElement('video'); video.muted = true; video.srcObject = new MediaStream([track]); await video.play();
@@ -56,15 +57,21 @@ async function begin() {
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   recorder.onstop = finish;
   track.addEventListener('ended', () => stop());
-  for (let n = o.countdown || 0; n > 0; n--) { $('#time').textContent = `Starts in ${n}`; await new Promise((res) => setTimeout(res, 1000)); if (cancelled) return finish(); }
+  await still.invoke('recording:prepared').catch(() => {}); // The camera and overlays are extras: never a reason not to record.
+  for (let n = o.countdown || 0; n > 0; n--) { $('#time').textContent = `Starts in ${n}`; await new Promise((res) => setTimeout(res, 1000)); if (cancelled || finishing) break; }
+  if (cancelled || finishing) return finish();
   recorder.start(1000); start = performance.now(); $('#time').textContent = '0:00';
   still.invoke('recording:started');
 }
 
-function stop() { if (recorder && recorder.state !== 'inactive') recorder.stop(); else finish(); }
+function stop() {
+  still.send('recording:listen', false); // Keys stop here, not when the file has finished saving.
+  if (recorder && recorder.state !== 'inactive') recorder.stop(); else finish();
+}
 async function finish() {
   if (finishing) return; // Stop can arrive twice now that the tray offers it too.
   finishing = true;
+  still.send('recording:finished'); // After the recorder, so the bubble doesn't vanish in the last frames.
   clearInterval(cropTimer);
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); audioContext?.close();
   if (cancelled || !chunks.length) return still.invoke('recording:cancel');
@@ -75,9 +82,13 @@ async function finish() {
 }
 
 function togglePause() {
-  if (!recorder) return;
+  if (!recorder || recorder.state === 'inactive') return; // Nothing to pause in the countdown, and nothing to listen for yet.
   if (recorder.state === 'recording') { recorder.pause(); paused = true; pausedAt = performance.now(); }
   else if (recorder.state === 'paused') { recorder.resume(); paused = false; pausedTotal += performance.now() - pausedAt; }
+  showPaused();
+}
+function showPaused() {
+  still.send('recording:listen', !paused);
   $('#hud').classList.toggle('paused', paused);
   $('#pause').innerHTML = icon(paused ? 'play' : 'pause'); $('#pause').title = paused ? 'Resume' : 'Pause'; refreshIcons();
 }
@@ -85,6 +96,6 @@ function togglePause() {
 $('#stop').onclick = () => stop();
 $('#pause').onclick = () => togglePause();
 $('#cancel').onclick = () => { cancelled = true; stop(); };
-$('#restart').onclick = () => { if (!recorder) return; chunks = []; recorder.stop(); recorder.onstop = () => { chunks = []; recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; }; };
+$('#restart').onclick = () => { if (!recorder) return; chunks = []; recorder.stop(); recorder.onstop = () => { chunks = []; recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
 begin().catch((error) => still.invoke('recording:error', error.message || String(error)));

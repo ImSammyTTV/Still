@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Camera</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: transparent; }
+  /* Inset so the ring and shadow aren't cut off by the edge of the window. */
+  .bubble { position: fixed; inset: 5px; display: grid; place-items: center; overflow: hidden; border-radius: 50%; background: var(--hud); color: rgba(255,255,255,.7);
+    box-shadow: 0 0 0 2px rgba(255,255,255,.75), 0 2px 5px rgba(0,0,0,.35); cursor: grab; }
+  .rounded .bubble { border-radius: 18px; }
+  .bubble svg { pointer-events: none; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; pointer-events: none; }
+  .live video { opacity: 1; }
+  .live svg { display: none; }
+</style>
+</head>
+<body>
+<div class="bubble" id="bubble" data-tauri-drag-region="deep" title="Drag to move">
+  <i data-lucide="video" style="width:28px;height:28px"></i>
+  <video id="video" muted playsinline></video>
+</div>
+<script src="bridge.js"></script>
+<script src="vendor/lucide.min.js"></script>
+<script src="common.js"></script>
+<script src="shared/marks.js"></script>
+<script src="camera.js"></script>
+</body>
+</html>

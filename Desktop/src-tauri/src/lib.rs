@@ -414,7 +414,7 @@ fn media_on(window: &WebviewWindow) {
     #[cfg(target_os = "linux")] {
         let _ = window.with_webview(|view| {
             use webkit2gtk::{SettingsExt, WebViewExt};
-            if let Some(settings) = view.inner().settings() { settings.set_enable_media_stream(true); }
+            if let Some(settings) = WebViewExt::settings(&view.inner()) { settings.set_enable_media_stream(true); }
         });
     }
     #[cfg(not(target_os = "linux"))] let _ = window;

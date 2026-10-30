@@ -14,7 +14,9 @@ const group = (title, rows, hint) => [title ? el('div', { class: 'group-title' }
 const row = (label, control) => el('div', { class: 'row' }, [el('span', {}, label), control]);
 const get = (path) => path.split('.').reduce((o, k) => o?.[k], prefs);
 const patchFor = (path, value) => path.split('.').reduceRight((acc, k) => ({ [k]: acc }), value);
-const toggle = (label, path) => row(label, el('input', { type: 'checkbox', class: 'switch', 'aria-label': label, checked: !!get(path), onchange: (e) => set(patchFor(path, e.target.checked)) }));
+// `off` is for a feature this desktop can't do: it shows as off whatever was saved. `disabled` only locks the switch.
+const toggle = (label, path, { disabled = false, off = false, redraw = false } = {}) => row(label, el('input', { type: 'checkbox', class: 'switch', 'aria-label': label, checked: !!get(path) && !off, disabled: disabled || off,
+  onchange: async (e) => { await set(patchFor(path, e.target.checked)); if (redraw) render(); } }));
 const select = (label, path, options, number = false) => {
   const s = el('select', { class: 'field', 'aria-label': label, onchange: (e) => set(patchFor(path, number ? Number(e.target.value) : e.target.value)) },
     options.map(([value, text]) => el('option', { value, selected: String(get(path)) === String(value) }, text)));
@@ -101,7 +103,18 @@ const pages = {
       select('Countdown', 'recording.countdown', [[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], true)
     ]),
     group('Audio', [toggle('Record microphone', 'recording.microphone'), ...(prefs.platform === 'win32' ? [toggle('Record computer audio', 'recording.systemAudio')] : [])],
-      prefs.platform === 'win32' ? null : 'Computer audio recording is available on Windows.')
+      prefs.platform === 'win32' ? null : 'Computer audio recording is available on Windows.'),
+    group('Camera', [
+      toggle('Show camera bubble', 'recording.camera'),
+      select('Size', 'recording.cameraSize', [[120, 'Small'], [180, 'Medium'], [240, 'Large'], [320, 'Extra large']], true),
+      select('Shape', 'recording.cameraShape', [['circle', 'Circle'], ['rounded', 'Rounded square']])
+    ], `The bubble floats above your other windows and appears in the video wherever it overlaps the recorded area. Drag it to move it.${prefs.wayland ? ' On Wayland your desktop decides where it sits and whether it stays on top.' : ''}`),
+    group('Overlays', [
+      toggle('Show clicks', 'recording.clicks', { off: !prefs.globalInput }),
+      toggle('Show keystrokes', 'recording.keys', { off: !prefs.globalInput, redraw: true }),
+      toggle('Shortcuts only', 'recording.keysShortcutsOnly', { disabled: !prefs.globalInput || !get('recording.keys') })
+    ], `Keys appear on screen and in the video, and Still never saves, logs or sends them. It only watches while recording. With Shortcuts only on, it reads the keyboard only while ${prefs.platform === 'win32' ? 'Ctrl, Alt or Win' : 'Ctrl, Alt or Super'} is held, so plain typing isn’t seen at all. With Shortcuts only off, everything you type appears in the recording, including passwords: Still can’t tell when you’re in a password field.`),
+    prefs.globalInput ? null : el('div', { class: 'hint warning' }, 'Your desktop doesn’t let apps see clicks or keys in other windows, so these are off. They work in an X11 session.')
   ],
   Annotate: () => [
     group('Defaults', [

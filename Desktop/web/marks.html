@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Clicks and Keys</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: transparent; }
+  body { pointer-events: none; }
+  /* The resting state is a visible ring, so a click still shows when reduced motion turns the animation off. */
+  .ripple { position: fixed; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; border: 3px solid rgba(255,255,255,.95);
+    background: color-mix(in srgb, var(--accent) 35%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 80%, transparent); animation: ripple .55s ease-out forwards; }
+  @keyframes ripple { from { transform: scale(.35); opacity: 1; } to { transform: scale(1.1); opacity: 0; } }
+  .keys { position: fixed; left: 16px; right: 16px; bottom: 12%; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .key { padding: 8px 14px; border-radius: 12px; background: var(--hud); color: #fff; font: 600 20px/1.2 var(--font); box-shadow: 0 0 0 1px rgba(255,255,255,.14), var(--shadow); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="clicks"></div>
+<div class="keys" id="keys"></div>
+<script src="bridge.js"></script>
+<script src="common.js"></script>
+<script src="shared/marks.js"></script>
+<script src="marks.js"></script>
+</body>
+</html>

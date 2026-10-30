@@ -46,6 +46,15 @@ function popupMenu(anchor, items) {
   setTimeout(() => addEventListener('mousedown', function close(e) { if (!menu.contains(e.target)) { menu.remove(); removeEventListener('mousedown', close); } }), 0);
 }
 
+// WebKitGTK only offers media capture to pages loaded after Still switched it on, which can be just too late for
+// the first load of a new window. Reloads once and returns true if the page should stop here.
+function reloadForMedia() {
+  if (navigator.mediaDevices || still.platform !== 'linux' || sessionStorage.getItem('stillMediaReload')) return false;
+  sessionStorage.setItem('stillMediaReload', '1');
+  location.reload();
+  return true;
+}
+
 async function applyTheme() {
   const prefs = await still.invoke('settings:get');
   document.documentElement.dataset.theme = prefs.theme === 'system' ? '' : prefs.theme;
