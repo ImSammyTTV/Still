@@ -237,7 +237,7 @@ pub fn place_controls(area: Rect, bounds: Rect, size: (f64, f64), gap: f64) -> (
 // ---- The capture session ------------------------------------------------------------------------
 
 const TICK: Duration = Duration::from_millis(600);
-const CONTROLS: (f64, f64) = (488.0, 68.0);
+const CONTROLS: (f64, f64) = (536.0, 68.0);
 const SCROLLING: &str = "Scroll slowly inside the area, then click Done.";
 const RUNNING: u8 = 0;
 const DONE: u8 = 1;
