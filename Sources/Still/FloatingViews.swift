@@ -21,7 +21,7 @@ struct PreviewView: View {
                 .contentShape(Rectangle()).onTapGesture(count: 2) { AppController.shared.openItem(item); dismiss() }
                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
             HStack(spacing: 2) {
-                Button { library.copy(item); dismiss() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 9).frame(height: 24).foregroundStyle(Color.white).background(Self.signal, in: Capsule()) }.buttonStyle(.plain)
+                Button { library.copy(item); dismiss() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 9).frame(height: 24).foregroundStyle(Studio.onAccent).background(Self.signal, in: Capsule()) }.buttonStyle(.plain)
                 Spacer(minLength: 2)
                 action("square.and.arrow.down", "Save") { if NSEvent.modifierFlags.contains(.option) { library.export(item) } else { library.quickSave(item) }; dismiss() }
                 action(item.isVideo ? "play.fill" : "pencil", item.isVideo ? "Edit Video" : "Annotate") { AppController.shared.openItem(item); dismiss() }

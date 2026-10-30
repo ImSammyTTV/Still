@@ -6,16 +6,16 @@
 <link rel="stylesheet" href="style.css">
 <style>
   html, body { background: transparent; }
-  .hud { position: absolute; inset: 4px; border-radius: 999px; background: rgba(30,30,32,.92); color: #fff; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 14px;
-    box-shadow: 0 6px 22px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.1); -webkit-app-region: drag; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #ff453a; animation: pulse 1.4s infinite; }
-  .paused .dot { animation: none; background: #ffd60a; }
+  .hud { position: absolute; inset: 4px; border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); display: flex; align-items: center; gap: 6px; padding: 0 8px 0 14px;
+    box-shadow: var(--shadow-float); -webkit-app-region: drag; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); animation: pulse 1.4s infinite; }
+  .paused .dot { animation: none; background: var(--yellow); }
   @keyframes pulse { 50% { opacity: .35; } }
   .time { font: 600 13px var(--mono); min-width: 52px; }
   .spacer { flex: 1; }
-  button { -webkit-app-region: no-drag; width: 32px; height: 32px; border: 0; border-radius: 50%; background: rgba(255,255,255,.1); color: #fff; display: grid; place-items: center; }
-  button:hover { background: rgba(255,255,255,.2); }
-  button.stop { background: #ff453a; }
+  button { -webkit-app-region: no-drag; width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--chrome-surface); color: var(--on-chrome); display: grid; place-items: center; }
+  button:hover { background: var(--chrome-surface-strong); }
+  button.stop { background: var(--red); color: #fff; }
   button svg { width: 15px; height: 15px; }
 </style>
 </head>

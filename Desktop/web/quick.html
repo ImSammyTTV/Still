@@ -7,26 +7,29 @@
 <style>
   html, body { background: transparent; }
   /* Still's floating preview: the capture on top, a permanent action bar underneath. */
-  .card { position: absolute; inset: 6px; border-radius: 14px; overflow: hidden; display: grid; grid-template-rows: 30px 1fr 36px; background: #1f2021;
-    box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.12); animation: slide .28s cubic-bezier(.2,.9,.3,1.1); cursor: grab; }
+  .card { position: absolute; inset: 6px; border-radius: var(--radius-xl); overflow: hidden; display: grid; grid-template-rows: 30px 1fr 36px; background: var(--chrome); color: var(--on-chrome);
+    box-shadow: var(--shadow-float); animation: slide .28s cubic-bezier(.2,.9,.3,1.1); cursor: grab; }
+  .card header { display: flex; justify-content: space-between; align-items: center; padding: 0 10px; }
+  .card header .label { color: var(--on-chrome-2); }
+  .card header b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
   body.right .card { animation-name: slide-right; }
   @keyframes slide { from { transform: translateX(-120%); } }
   @keyframes slide-right { from { transform: translateX(120%); } }
   .card.leaving { transition: transform .22s ease-in, opacity .22s; transform: translateX(-120%); opacity: 0; }
   body.right .card.leaving { transform: translateX(120%); }
-  #media { position: relative; overflow: hidden; background: #111; border-bottom: 2px solid var(--accent); }
+  #media { position: relative; overflow: hidden; background: var(--chrome-deep); border-bottom: 2px solid var(--accent); }
   .media { width: 100%; height: 100%; object-fit: contain; display: block; -webkit-user-drag: none; }
-  .badge { position: absolute; right: 8px; bottom: 8px; padding: 2px 7px; border-radius: 999px; font-size: 11px; background: rgba(0,0,0,.6); color: #fff; }
+  .badge { position: absolute; right: 8px; bottom: 8px; padding: 2px 7px; border-radius: var(--radius-pill); font-size: var(--text-xs); background: var(--hud); color: var(--on-chrome); }
   .actions { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; cursor: default; }
-  .actions button { width: 30px; height: 26px; border: 0; border-radius: 8px; background: transparent; color: #e8e8ea; display: grid; place-items: center; }
-  .actions button:hover { background: rgba(255,255,255,.1); }
-  .actions button.primary { width: auto; padding: 0 10px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; gap: 5px; display: inline-flex; align-items: center; }
+  .actions button { width: 30px; height: 26px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--on-chrome); display: grid; place-items: center; }
+  .actions button:hover { background: var(--chrome-surface); }
+  .actions button.primary { width: auto; padding: 0 10px; background: var(--accent); color: var(--accent-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); gap: 5px; display: inline-flex; align-items: center; }
   .actions svg { width: 15px; height: 15px; }
 </style>
 </head>
 <body>
 <div class="card" id="card">
-  <header style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-elevated);color:var(--text);font:11px var(--mono)"><span>CAPTURE READY</span><span>Still.</span></header>
+  <header><span class="label">Capture ready</span><b>Still.</b></header>
   <div id="media"></div>
   <div class="actions">
     <button class="primary" id="copy" title="Copy"><i data-lucide="copy"></i>Copy</button>

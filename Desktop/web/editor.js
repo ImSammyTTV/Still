@@ -2,6 +2,8 @@ const G = StillGeometry;
 const stage = $('#stage'), ctx = stage.getContext('2d');
 const scroller = $('#scroller');
 const itemId = params.get('id') || null;
+// The functional selection colour for handles and crop frames comes from the stylesheet.
+const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('--selection').trim() || '#0a84ff';
 
 const TOOLS = [
   ['select', 'mouse-pointer-2', 'Select', 'v'], ['arrow', 'move-up-right', 'Arrow', 'a'], ['rect', 'square', 'Rectangle', 'r'],
@@ -168,7 +170,7 @@ function handlePoints(m) {
 
 function drawHandles(t, m) {
   const s = 1 / displayScale(), b = bounds(m);
-  t.save(); t.setLineDash([4 * s, 3 * s]); t.strokeStyle = '#0A84FF'; t.lineWidth = 1 * s;
+  t.save(); t.setLineDash([4 * s, 3 * s]); t.strokeStyle = SELECTION; t.lineWidth = 1 * s;
   if (!isSegment(m)) t.strokeRect(b.x - 4 * s, b.y - 4 * s, b.w + 8 * s, b.h + 8 * s);
   t.setLineDash([]);
   for (const p of handlePoints(m)) { t.fillStyle = '#fff'; t.beginPath(); t.arc(p.x, p.y, 5 * s, 0, Math.PI * 2); t.fill(); t.stroke(); }
