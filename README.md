@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/icon.svg" width="96" height="96" alt="The Still icon: a captured screen with one corner lifted">
+  <img src="assets/brand/logo.png" width="112" height="112" alt="The Still logo: a captured screen with one corner lifted">
 </p>
 
 <h1 align="center">Still</h1>
