@@ -13,6 +13,7 @@ function init(data) {
   purpose = data.purpose === 'record' ? 'record' : data.purpose;
   if (data.primary) document.body.classList.add('primary');
   if (data.last) region = data.last;
+  $('.mode[data-mode="scroll"]').hidden = !data.canScroll;
   image.onload = () => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); };
   image.src = still.fileUrl(data.imagePath);
   refreshIcons();
@@ -57,7 +58,7 @@ function setPurpose(next) { purpose = next; still.send('overlay:purpose', next);
 function updateBar() {
   $$('.mode[data-mode]').forEach((b) => {
     const m = b.dataset.mode;
-    b.classList.toggle('active', (m === 'area' && purpose === 'screenshot' && !windowMode) || (m === 'window' && windowMode) || (m === 'text' && purpose === 'text') || (m === 'record' && purpose === 'record'));
+    b.classList.toggle('active', (m === 'area' && purpose === 'screenshot' && !windowMode) || (m === 'window' && windowMode) || (m === 'text' && purpose === 'text') || (m === 'scroll' && purpose === 'scroll') || (m === 'record' && purpose === 'record'));
   });
   if (region && region.w > 0) { $('#width').value = Math.round(region.w); $('#height').value = Math.round(region.h); }
 }
@@ -92,7 +93,7 @@ function draw() {
     ctx.stroke();
   }
   if (pointer.x < 0) return;
-  const hint = purpose === 'record' ? 'Drag to record · hold Space for a window' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
+  const hint = purpose === 'record' ? 'Drag to record · hold Space for a window' : purpose === 'scroll' ? 'Drag over the area you will scroll' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
   label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : hint, pointer.x, pointer.y);
   if (config.magnifier && !anchor) drawMagnifier();
 }
@@ -181,6 +182,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'f') still.send('overlay:fullscreen', config.displayId);
   else if (key === 'o') { setWindowMode(false); setPurpose('text'); }
   else if (key === 'v') { setWindowMode(false); setPurpose('record'); }
+  else if (key === 's' && config.canScroll) { setWindowMode(false); setPurpose('scroll'); }
   else if (key === 't') still.send('overlay:timer', 5);
   updateBar();
 }, true);
@@ -207,12 +209,13 @@ $('#bar').addEventListener('click', (e) => {
   if (mode === 'area') { setPurpose('screenshot'); setWindowMode(false); }
   else if (mode === 'window') { if (!StillCaptureInput.allowsWindowSelection(purpose)) setPurpose('screenshot'); setWindowMode(!windowMode); }
   else if (mode === 'fullscreen') {
-    if (purpose === 'record') return finish({ x: 0, y: 0, w: config.width, h: config.height });
+    if (purpose === 'record' || purpose === 'scroll') return finish({ x: 0, y: 0, w: config.width, h: config.height });
     still.send('overlay:fullscreen', config.displayId);
   }
   else if (mode === 'timer') popupMenu(button, [3, 5, 10].map((s) => ({ label: `${s} seconds`, icon: 'timer', action: () => still.send('overlay:timer', s) })));
   else if (mode === 'text') { setWindowMode(false); setPurpose(purpose === 'text' ? 'screenshot' : 'text'); }
   else if (mode === 'record') { setWindowMode(false); setPurpose(purpose === 'record' ? 'screenshot' : 'record'); }
+  else if (mode === 'scroll') { setWindowMode(false); setPurpose(purpose === 'scroll' ? 'screenshot' : 'scroll'); }
   updateBar();
 });
 $('#aspect').addEventListener('click', (e) => popupMenu(e.currentTarget, [['Freeform', 0], ['1:1', 1], ['4:3', 4 / 3], ['16:9', 16 / 9], ['9:16', 9 / 16]].map(([label, value]) => ({ label, action: () => { aspect = value; fixed = null; } }))));

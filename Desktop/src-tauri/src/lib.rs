@@ -1,8 +1,12 @@
 mod capture;
 mod cloud;
+mod desktop;
 mod drive;
 mod library;
 mod marks;
+mod previous;
+mod qr;
+mod scroll;
 mod settings;
 mod video;
 
@@ -47,7 +51,14 @@ struct Session {
     selftest: Option<PathBuf>,
     stop_item: Option<IconMenuItem<tauri::Wry>>,
     export_targets: HashMap<String, PathBuf>,
+    scroll: Option<Arc<scroll::Control>>,
+    /// Keeps the desktop icons hidden for as long as a recording runs.
+    icons: Option<desktop::Hidden>,
+    /// QR scans waiting for the text from their OCR page, by page.
+    qr: std::collections::HashMap<String, std::sync::mpsc::Receiver<Vec<String>>>,
 }
+
+fn occupied(s: &Session) -> bool { s.busy || s.recording.is_some() || s.scroll.is_some() }
 
 struct State { settings: Mutex<Settings>, library: Mutex<Library>, session: Mutex<Session> }
 
@@ -187,7 +198,7 @@ fn hide_floating(app: &AppHandle, hidden: bool) {
 fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool) {
     {
         let mut s = st(app).session.lock().unwrap();
-        if s.busy || s.recording.is_some() { drop(s); notify(app, "Still", "Finish the current capture or recording first."); return; }
+        if occupied(&s) { drop(s); notify(app, "Still", "Finish the current capture or recording first."); return; }
         s.busy = true; s.purpose = purpose.to_string();
     }
     let app = app.clone();
@@ -195,6 +206,8 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
     std::thread::spawn(move || {
         if delay > 0 { notify(&app, "Still", &format!("Capture starts in {delay} seconds")); std::thread::sleep(Duration::from_secs(delay)); }
         hide_floating(&app, true);
+        // The overlay shows a frozen picture, so the icons only need to be gone for the grab itself.
+        let _icons = desktop::hide(&app);
         std::thread::sleep(Duration::from_millis(80));
         let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
@@ -212,7 +225,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 .map(|r| json!({ "id": r.id, "x": r.x - g.x as f64, "y": r.y - g.y as f64, "w": r.w, "h": r.h })).collect();
             let under_cursor = cursor.x >= g.x as f64 && cursor.x < (g.x + w as i32) as f64 && cursor.y >= g.y as f64 && cursor.y < (g.y + h as i32) as f64;
             let init = json!({
-                "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(),
+                "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(), "canScroll": scroll::supported(),
                 "imagePath": file, "imageWidth": w, "imageHeight": h, "windows": mine,
                 "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"),
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
@@ -259,7 +272,9 @@ fn finish_selection(app: &AppHandle, payload: Value) {
     if setting(app, "rememberSelection").as_bool().unwrap_or(false) && payload["windowId"].is_null() {
         st(app).settings.lock().unwrap().update(&json!({ "lastSelection": { "displayId": display, "rect": payload["rect"] } }));
     }
+    previous::remember(app, &payload, &grab);
     if purpose == "record" { start_recording(app, &grab, x, y, w, h, !payload["windowId"].is_null()); return; }
+    if purpose == "scroll" { scroll::start(app, &grab, x, y, w, h); return; }
     let image = capture::crop(&grab.image, x, y, w, h);
     complete_image(app, image, purpose == "text");
 }
@@ -267,12 +282,14 @@ fn finish_selection(app: &AppHandle, payload: Value) {
 fn capture_fullscreen(app: &AppHandle) {
     {
         let mut s = st(app).session.lock().unwrap();
-        if s.busy || s.recording.is_some() { return; }
+        if occupied(&s) { return; }
         s.busy = true;
     }
     hide_floating(app, true);
+    let icons = desktop::hide(app);
     std::thread::sleep(Duration::from_millis(120));
     let result = capture::grab_all();
+    drop(icons);
     { st(app).session.lock().unwrap().busy = false; }
     hide_floating(app, false);
     match result {
@@ -318,6 +335,10 @@ fn recognize_file(app: &AppHandle, image: &RgbaImage) {
     let file = private_temp().join(format!("still-ocr-{}.png", uuid::Uuid::new_v4().simple()));
     let _ = std::fs::write(&file, capture::png(image));
     let label = format!("ocr-{}", uuid::Uuid::new_v4().simple());
+    let (found, scan) = std::sync::mpsc::channel();
+    let picture = image.clone();
+    std::thread::spawn(move || { let _ = found.send(qr::read(&picture)); });
+    st(app).session.lock().unwrap().qr.insert(label.clone(), scan);
     let _ = builder(app, &label, "ocr.html", json!({ "file": file })).title("Still OCR").inner_size(200.0, 100.0).skip_taskbar(true).build();
 }
 
@@ -363,6 +384,8 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
         .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).on_permission_request(hud_access).build();
     if let Ok(hud) = built {
         media_on(&hud);
+        let icons = desktop::hide(app);
+        st(app).session.lock().unwrap().icons = icons;
         let _ = hud.set_position(PhysicalPosition::new(grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32));
         let _ = hud.show(); let _ = hud.set_focus();
     }
@@ -377,11 +400,12 @@ fn window_gone(app: &AppHandle, label: &str) {
         "settings" => register_shortcuts(app),
         "hud" => {
             end_recording_extras(app);
-            if st(app).session.lock().unwrap().recording.is_some() { st(app).session.lock().unwrap().recording = None; build_tray_menu(app); }
+            if st(app).session.lock().unwrap().recording.is_some() { { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; } build_tray_menu(app); }
         }
         // Never keep watching the keyboard with nothing on screen to show for it.
         "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
         _ if label.starts_with("video-") => { st(app).session.lock().unwrap().export_targets.remove(label); }
+        "scroll" => scroll::stop(app, false),
         _ if label.starts_with("overlay-") => {
             let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
             if !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
@@ -391,7 +415,7 @@ fn window_gone(app: &AppHandle, label: &str) {
 }
 fn stop_recording_state(app: &AppHandle) {
     end_recording_extras(app);
-    st(app).session.lock().unwrap().recording = None;
+    { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; }
     if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
     build_tray_menu(app);
 }
@@ -487,7 +511,8 @@ fn end_recording_extras(app: &AppHandle) {
 
 // ---- Tray, shortcuts ----------------------------------------------------------------------------
 
-const ACTIONS: [(&str, &str); 8] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Fullscreen"),
+const ACTIONS: [(&str, &str); 10] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Fullscreen"),
+    ("previous", "Capture Previous Area"), ("scrolling", "Scrolling Capture"),
     ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture")];
 
 fn run_action(app: &AppHandle, action: &str) {
@@ -495,6 +520,12 @@ fn run_action(app: &AppHandle, action: &str) {
         "area" | "allInOne" => start_selection(app, "screenshot", 0, false),
         "window" => start_selection(app, "screenshot", 0, true),
         "fullscreen" => { let a = app.clone(); std::thread::spawn(move || capture_fullscreen(&a)); }
+        "previous" => { let a = app.clone(); std::thread::spawn(move || previous::capture_again(&a)); }
+        "scrolling" => {
+            if scroll::active(app) { scroll::stop(app, true); }
+            else if scroll::supported() { start_selection(app, "scroll", 0, false); }
+            else { notify(app, "Still", "Scrolling capture needs an X11 session."); }
+        }
         "text" => start_selection(app, "text", 0, false),
         "record" => {
             if st(app).session.lock().unwrap().recording.is_some() { let _ = app.emit_to("hud", "hud:stop", ()); }
@@ -565,6 +596,7 @@ fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
         "allInOne" => include_bytes!("../icons/menu/allInOne.png"), "area" => include_bytes!("../icons/menu/area.png"),
         "window" => include_bytes!("../icons/menu/window.png"), "fullscreen" => include_bytes!("../icons/menu/fullscreen.png"),
         "timer" => include_bytes!("../icons/menu/timer.png"), "text" => include_bytes!("../icons/menu/text.png"),
+        "previous" => include_bytes!("../icons/menu/previous.png"), "scrolling" => include_bytes!("../icons/menu/scrolling.png"),
         "record" => include_bytes!("../icons/menu/record.png"), "open" => include_bytes!("../icons/menu/open.png"),
         "history" => include_bytes!("../icons/menu/history.png"), "restore" => include_bytes!("../icons/menu/restore.png"),
         "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
@@ -584,6 +616,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         b.build(app)
     };
     let recording = st(app).session.lock().unwrap().recording.is_some();
+    let scrolling = scroll::active(app);
     let update = st(app).session.lock().unwrap().update.clone();
     let mut timers = SubmenuBuilder::new(app, "Timed Capture");
     if let Some(icon) = menu_icon("timer") { timers = timers.submenu_icon(icon); }
@@ -605,6 +638,8 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&item("area", "Capture Area", "area", accel("area"), true)?)
         .item(&item("window", "Capture Window", "window", accel("window"), true)?)
         .item(&item("fullscreen", "Capture Fullscreen", "fullscreen", accel("fullscreen"), true)?)
+        .item(&item("previous", "Capture Previous Area", "previous", accel("previous"), true)?)
+        .item(&item("scrolling", if scrolling { "Finish Scrolling Capture" } else { "Scrolling Capture" }, "scrolling", accel("scrolling"), true)?)
         .item(&timers)
         .item(&item("text", "Capture Text (OCR)", "text", accel("text"), true)?);
     if !recording { menu = menu.item(&item("record", "Record Screen", "record", accel("record"), true)?); }
@@ -977,9 +1012,13 @@ async fn capture_action(app: AppHandle, action: String) { run_action(&app, &acti
 async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
     let _ = window.close();
     if let Ok(entries) = std::fs::read_dir(private_temp()) { for e in entries.flatten() { if e.file_name().to_string_lossy().starts_with("still-ocr-") { let _ = std::fs::remove_file(e.path()); } } }
+    // A large, noisy picture can keep the QR scan busy for many seconds. The text shouldn't wait for that.
+    let scan = st(&app).session.lock().unwrap().qr.remove(window.label());
+    let codes = scan.and_then(|s| s.recv_timeout(Duration::from_secs(2)).ok()).unwrap_or_default();
     if let Some(dir) = st(&app).session.lock().unwrap().selftest.clone() { let _ = std::fs::write(dir.join("ocr.txt"), &text); return; }
-    if let Some(e) = error { notify(&app, "Text recognition failed", &e); return; }
-    let text = text.trim().to_string();
+    // A failed OCR run still has the QR codes to give.
+    if let Some(e) = error.filter(|_| codes.is_empty()) { notify(&app, "Text recognition failed", &e); return; }
+    let text = qr::with_text(&text, &codes);
     if text.is_empty() { notify(&app, "No text found", "Try selecting a larger area with clearer text."); return; }
     let _ = app.clipboard().write_text(text.clone());
     notify(&app, "Text copied", &text.chars().take(120).collect::<String>());
@@ -1249,6 +1288,28 @@ fn self_test(app: AppHandle, dir: PathBuf) {
         let first = st(&app).library.lock().unwrap().items.first().cloned();
         log("areaSize", json!(first.as_ref().map(|i| format!("{}x{}", i.width, i.height))));
         snap("3-after-area");
+        let before = count();
+        previous::capture_again(&app);
+        wait(2000);
+        log("previousAreaAdded", json!(count() == before + 1));
+        log("previousAreaSize", json!(st(&app).library.lock().unwrap().items.first().map(|i| format!("{}x{}", i.width, i.height))));
+        let before = count();
+        start_selection(&app, "scroll", 0, false);
+        wait(3000);
+        let display = st(&app).session.lock().unwrap().grabs.first().map(|g| g.id).unwrap_or(0);
+        finish_selection(&app, json!({ "displayId": display, "purpose": "scroll", "px": { "x": 50, "y": 50, "w": 300, "h": 200 }, "rect": Value::Null }));
+        wait(2500);
+        log("scrollControls", json!(app.get_webview_window("scroll").is_some()));
+        snap("3b-scrolling");
+        scroll::stop(&app, true);
+        wait(2500);
+        log("scrollAdded", json!(count() == before + 1));
+        st(&app).settings.lock().unwrap().update(&json!({ "hideDesktopIcons": true }));
+        let hidden = desktop::hide(&app);
+        log("desktopIconsHidden", json!(hidden.is_some()));
+        snap("3c-icons-hidden");
+        drop(hidden);
+        st(&app).settings.lock().unwrap().update(&json!({ "hideDesktopIcons": false }));
         if let Some(item) = first {
             let label = format!("editor-{}", item.id);
             let a = app.clone(); let id = item.id.clone();
@@ -1310,6 +1371,7 @@ fn run_args(app: &AppHandle, args: &[String]) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if desktop::watch() { return; }
     tauri::Builder::default()
         .on_window_event(|window, event| if let tauri::WindowEvent::Destroyed = event { window_gone(window.app_handle(), window.label()); })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| { if !run_args(app, &args) { open_settings(app, None); } }))
@@ -1322,6 +1384,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             if let Ok(cache) = app.path().app_cache_dir() { init_private_temp(cache); }
+            desktop::recover();
             clear_private_temp();
             let handle = app.handle().clone();
             let config = app.path().app_config_dir()?;
@@ -1372,7 +1435,7 @@ pub fn run() {
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
             update_status, update_check, update_install,
-            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect
+            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")

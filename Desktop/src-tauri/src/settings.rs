@@ -17,6 +17,7 @@ pub fn defaults() -> Value {
         "crosshair": "partial",
         "magnifier": true,
         "rememberSelection": false,
+        "hideDesktopIcons": false,
         "recording": { "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3, "camera": false, "cameraSize": 180, "cameraShape": "circle",
             "clicks": false, "keys": false, "keysShortcutsOnly": true },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
@@ -28,6 +29,8 @@ pub fn defaults() -> Value {
             "window": "CommandOrControl+Alt+Shift+4",
             "record": "CommandOrControl+Shift+6",
             "text": "CommandOrControl+Shift+2",
+            "previous": "",
+            "scrolling": "",
             "history": "",
             "restore": ""
         }

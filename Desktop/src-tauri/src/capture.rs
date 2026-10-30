@@ -15,23 +15,33 @@ pub struct Grab {
     pub factor: f64,
 }
 
+fn grab_monitor(m: &Monitor) -> Result<Grab, String> {
+    let image = m.capture_image().map_err(|e| e.to_string())?;
+    let width = m.width().unwrap_or(image.width()).max(1);
+    let factor = image.width() as f64 / width as f64;
+    Ok(Grab {
+        id: m.id().unwrap_or(0),
+        x: (m.x().unwrap_or(0) as f64 * factor).round() as i32,
+        y: (m.y().unwrap_or(0) as f64 * factor).round() as i32,
+        image,
+        factor,
+    })
+}
+
 pub fn grab_all() -> Result<Vec<Grab>, String> {
     let monitors = Monitor::all().map_err(|e| e.to_string())?;
     let mut grabs = Vec::new();
     for m in monitors {
-        let image = match m.capture_image() { Ok(i) => i, Err(e) => { eprintln!("capture failed: {e}"); continue; } };
-        let width = m.width().unwrap_or(image.width()).max(1);
-        let factor = image.width() as f64 / width as f64;
-        grabs.push(Grab {
-            id: m.id().unwrap_or(0),
-            x: (m.x().unwrap_or(0) as f64 * factor).round() as i32,
-            y: (m.y().unwrap_or(0) as f64 * factor).round() as i32,
-            image,
-            factor,
-        });
+        match grab_monitor(&m) { Ok(g) => grabs.push(g), Err(e) => eprintln!("capture failed: {e}") }
     }
     if grabs.is_empty() { return Err("Still couldn’t read the screen.".into()); }
     Ok(grabs)
+}
+
+/// One display, for repeated grabs where reading the others would be wasted work.
+pub fn grab_display(id: u32) -> Result<Grab, String> {
+    let monitors = Monitor::all().map_err(|e| e.to_string())?;
+    grab_monitor(monitors.iter().find(|m| m.id().unwrap_or(0) == id).ok_or("That display is no longer connected.")?)
 }
 
 /// A window frame in physical pixels, front to back.

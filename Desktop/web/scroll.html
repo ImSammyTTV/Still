@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Scrolling Capture</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: transparent; }
+  .controls { position: absolute; inset: 4px; border-radius: var(--radius); background: var(--hud); color: #fff; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px; box-shadow: 0 6px 22px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.1); }
+  .status { flex: 1; min-width: 0; display: grid; gap: 1px; }
+  .status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #size { font-weight: 600; font-size: 12px; }
+  #message { font-size: 11px; color: rgba(255,255,255,.66); }
+  #cancel { color: #fff; }
+  #cancel:hover { background: rgba(255,255,255,.12); }
+</style>
+</head>
+<body>
+<div class="controls">
+  <div class="status"><span id="size">Scrolling Capture</span><span id="message"></span></div>
+  <button class="btn plain" id="cancel">Cancel</button>
+  <button class="btn primary" id="done">Done</button>
+</div>
+<script src="bridge.js"></script>
+<script src="vendor/lucide.min.js"></script>
+<script src="shared/geometry.js"></script>
+<script src="common.js"></script>
+<script src="scroll.js"></script>
+</body>
+</html>

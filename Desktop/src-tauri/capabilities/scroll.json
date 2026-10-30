@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "scroll",
+  "description": "The scrolling capture controls",
+  "windows": [
+    "scroll"
+  ],
+  "permissions": [
+    "allow-scroll-stop"
+  ]
+}
