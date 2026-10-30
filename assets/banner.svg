@@ -1,12 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420">
-<rect width="1280" height="420" fill="#f4f0e7"/>
-<path d="M64 54H1216M64 365H1216M840 54V365" stroke="#cac4b7"/>
-<text x="64" y="98" fill="#68685f" font-family="monospace" font-size="13" letter-spacing="4">YOUR CAPTURE STUDIO</text>
-<text x="58" y="253" fill="#242522" font-family="Baskerville,Georgia,serif" font-size="170">Still.</text>
-<text x="68" y="320" fill="#53564b" font-family="Trebuchet MS,sans-serif" font-size="24">Keep the moment. Make your mark.</text>
-<rect x="917" y="124" width="185" height="208" fill="#b5b1a5"/>
-<rect x="943" y="98" width="185" height="208" fill="#fffcf5" stroke="#242522" stroke-width="2"/>
-<circle cx="1035" cy="191" r="29" fill="#d64b32"/>
-<path d="M967 264H1035" stroke="#242522" stroke-width="5"/>
-<text x="64" y="395" fill="#68685f" font-family="monospace" font-size="11" letter-spacing="2">CAPTURE / ANNOTATE / RECORD / SHARE</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440">
+<defs><linearGradient id="water" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#124c5c"/><stop offset="1" stop-color="#062430"/></linearGradient>
+<radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#7fd6d0" stop-opacity=".22"/><stop offset="1" stop-color="#7fd6d0" stop-opacity="0"/></radialGradient>
+<linearGradient id="glint" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2994a" stop-opacity="0"/><stop offset=".5" stop-color="#ffb46b"/><stop offset="1" stop-color="#f2994a" stop-opacity="0"/></linearGradient>
+<style>
+.ring { fill:none; stroke:#7fd6d0; transform-origin:960px 230px; animation:spread 6s ease-out infinite; opacity:0 }
+.r2 { animation-delay:2s } .r3 { animation-delay:4s }
+@keyframes spread { 0% { transform:scale(.25); opacity:0; stroke-width:6 } 15% { opacity:.9 } 100% { transform:scale(1.6); opacity:0; stroke-width:1 } }
+.glint { animation:shine 6s ease-in-out infinite }
+@keyframes shine { 0%,100% { opacity:.35 } 50% { opacity:1 } }
+@media (prefers-reduced-motion: reduce) { .ring,.glint { animation:none; opacity:1 } .ring { opacity:.5 } }
+</style></defs>
+<rect width="1280" height="440" rx="28" fill="url(#water)"/>
+<circle cx="960" cy="230" r="300" fill="url(#glow)"/>
+<g transform="translate(960 230) scale(1 .42) translate(-960 -230)">
+<ellipse class="ring" cx="960" cy="230" rx="170" ry="170"/>
+<ellipse class="ring r2" cx="960" cy="230" rx="170" ry="170"/>
+<ellipse class="ring r3" cx="960" cy="230" rx="170" ry="170"/>
+<circle cx="960" cy="230" r="70" fill="none" stroke="#7fd6d0" stroke-width="7" opacity=".9"/>
+<circle cx="960" cy="230" r="135" fill="none" stroke="#7fd6d0" stroke-width="6" opacity=".6"/>
+<circle cx="960" cy="230" r="200" fill="none" stroke="#7fd6d0" stroke-width="4" opacity=".3"/>
+</g>
+<path class="glint" d="M1000 178 Q1060 186 1100 204" stroke="url(#glint)" stroke-width="6" stroke-linecap="round" fill="none"/>
+<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<text x="80" y="118" fill="#7fd6d0" font-size="14" font-weight="600" letter-spacing="5">SCREENSHOTS · RECORDINGS · CLIPBOARD</text>
+<text x="74" y="250" fill="#f3fbfa" font-size="140" font-weight="700" letter-spacing="-5">Still</text>
+<text x="80" y="312" fill="#a9cfd0" font-size="28">Capture the moment. Keep it calm.</text>
+<text x="80" y="372" fill="#5f9aa0" font-size="16" letter-spacing="1">macOS  ·  Windows  ·  Linux</text>
+</g>
 </svg>

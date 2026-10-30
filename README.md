@@ -1,14 +1,18 @@
 <p align="center">
+  <img src="assets/icon.png" alt="" width="96">
+</p>
+
+<p align="center">
   <img src="assets/banner.svg" alt="Still: capture, annotate and share, on macOS, Windows and Linux" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=for-the-badge&color=d64b32&labelColor=242522&label=Download" alt="Latest release"></a>
-  <a href="https://github.com/ImSammyTTV/Still/releases"><img src="https://img.shields.io/github/downloads/ImSammyTTV/Still/total?style=for-the-badge&color=d64b32&labelColor=242522&label=Downloads" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-242522?style=for-the-badge" alt="macOS, Windows and Linux">
+  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=for-the-badge&color=7fd6d0&labelColor=0d3a47&label=Download" alt="Latest release"></a>
+  <a href="https://github.com/ImSammyTTV/Still/releases"><img src="https://img.shields.io/github/downloads/ImSammyTTV/Still/total?style=for-the-badge&color=7fd6d0&labelColor=0d3a47&label=Downloads" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-0d3a47?style=for-the-badge" alt="macOS, Windows and Linux">
 </p>
 
-<h3 align="center">A fast, quiet screenshot tool that gets out of your way.</h3>
+<h3 align="center">A calm, fast screenshot tool that stays out of your way.</h3>
 
 <p align="center">
   Press a shortcut, grab an area or a window, mark it up and send it, usually in under five seconds.<br>
@@ -154,6 +158,21 @@ with your own server connected.
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+#### 📋 Clipboard history (Mac)
+Press `⇧⌘V` for everything you've copied lately: text, images and files. Pick one to put it back on your clipboard.
+Anything a password manager marks as private is skipped.
+
+</td>
+<td valign="top">
+
+#### 🌊 Lives in your menu bar
+No Dock icon and no window to manage. Still waits quietly in the menu bar or tray until you press a shortcut.
+
+</td>
+</tr>
 </table>
 
 <p align="center">
@@ -170,6 +189,7 @@ with your own server connected.
 | Capture the whole screen | `⌃⇧⌘5` | `Ctrl + Shift + 3` |
 | Copy text from the screen | set it in Settings | `Ctrl + Shift + 2` |
 | Start or stop recording | `⌃⇧⌘6` | `Ctrl + Shift + 6` |
+| Clipboard history | `⇧⌘V` | — |
 
 Change any of them in **Settings → Shortcuts**.
 
