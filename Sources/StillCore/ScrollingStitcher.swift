@@ -65,7 +65,9 @@ public final class ScrollingStitcher: @unchecked Sendable {
             var count = 0
             for index in 0..<max(1,h/5) {
                 let y = fromBottom ? h-1-index : index
-                let delta = (5..<w-5).reduce(0.0) { $0+abs(Double(a[y*w+$1])-Double(b[y*w+$1])) }/Double(w-10)/255
+                var difference = 0.0
+                for x in 5..<w-5 { difference += abs(Double(a[y*w+x])-Double(b[y*w+x])) }
+                let delta = difference/Double(w-10)/255
                 if delta > 0.007 { break }; count += 1
             }
             return min(image.height/4, Int(Double(count)*Double(image.height)/Double(h)))
