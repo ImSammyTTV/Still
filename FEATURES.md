@@ -15,6 +15,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Feature | Mac | Windows & Linux |
 |---|---|---|
 | Area capture with crosshair, magnifier, size label | ✅ | ✅ |
+| Scroll wheel zooms the magnifier (2× to 16×, remembered) | ☑️ | ☑️ |
 | Hold Space to capture a window | ✅ | ✅ Windows · ☑️ Linux (X11 only) |
 | Whole-screen capture, per display | ✅ | ✅ |
 | Capture Bar (modes, exact size, aspect lock, timer) | ✅ | ✅ |

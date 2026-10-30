@@ -238,6 +238,9 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     private var anchor: CGPoint?
     var isSelecting: Bool { anchor != nil }
     private var pointer = CGPoint(x: -100, y: -100)
+    /// Source pixels shown across the magnifier; fewer means more zoom. The scroll wheel steps through these.
+    private static let magnifierPatches: [CGFloat] = [39, 27, 19, 13, 9, 7, 5]
+    private var magnifierPatch: CGFloat = 13
     private var region = CGRect.zero
     private var hovered: OverlayWindow?
     private var spaceHeld = false
@@ -350,13 +353,20 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         magnifier.isHidden = !showMagnifier
         if showMagnifier, let snapshot {
             let w = CGFloat(snapshot.width), h = CGFloat(snapshot.height), sx = w/bounds.width, sy = h/bounds.height
-            let patch: CGFloat = 13
+            let patch = magnifierPatch
             magnifier.contentsRect = CGRect(x: (pointer.x*sx-patch/2)/w, y: (pointer.y*sy-patch/2)/h, width: patch/w, height: patch/h)
             magnifier.frame = CGRect(x: min(bounds.width-100, pointer.x+22), y: max(10, pointer.y-110), width: 88, height: 88)
         }
     }
 
     override func mouseMoved(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); updateHover(); refresh() }
+    /// Scrolling up zooms the magnifier in, scrolling down zooms it out.
+    override func scrollWheel(with event: NSEvent) {
+        guard Preferences.shared.magnifier, anchor == nil, !windowMode, event.scrollingDeltaY != 0 else { return }
+        let steps = Self.magnifierPatches, index = steps.firstIndex(of: magnifierPatch) ?? 3
+        magnifierPatch = steps[max(0, min(steps.count-1, index + (event.scrollingDeltaY > 0 ? 1 : -1)))]
+        refresh()
+    }
     override func mouseExited(with event: NSEvent) { pointer = CGPoint(x: -100, y: -100); refresh() }
     override func mouseDown(with event: NSEvent) {
         pointer = convert(event.locationInWindow, from: nil)
