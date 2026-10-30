@@ -1,73 +1,123 @@
 <p align="center">
-  <img src="assets/brand/icon.svg" width="100" height="100" alt="Still — a captured screen with a lifted corner">
+  <img src="assets/brand/icon.svg" width="96" height="96" alt="The Still icon: a captured screen with one corner lifted">
 </p>
 
 <h1 align="center">Still</h1>
-<p align="center"><strong>A screenshot is only the beginning.</strong><br>Capture a moment, make your point, and keep moving.</p>
 
 <p align="center">
-  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=flat-square&color=33373e&label=download" alt="Latest release"></a>
-  <a href="https://github.com/ImSammyTTV/Still/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ImSammyTTV/Still/ci.yml?branch=main&style=flat-square&label=checks" alt="Build and test status"></a>
-  <img src="https://img.shields.io/badge/macOS%20%2F%20Windows%20%2F%20Linux-33373e?style=flat-square" alt="Mac, Windows and Linux">
+  <strong>Take a screenshot. Point out what matters. Share it in seconds.</strong><br>
+  A small, free screenshot and screen-recording app for Mac, Windows and Linux.
 </p>
 
 <p align="center">
-  <a href="#download">Download</a> · <a href="#why-still">Features</a> · <a href="#getting-started">Getting started</a> · <a href="#shortcuts">Shortcuts</a> · <a href="#sharing">Sharing</a> · <a href="#development">Development</a>
+  <a href="https://github.com/ImSammyTTV/Still/releases/latest"><img src="https://img.shields.io/github/v/release/ImSammyTTV/Still?style=flat-square&color=33373e&label=latest%20version" alt="Latest version"></a>
+  <a href="https://github.com/ImSammyTTV/Still/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ImSammyTTV/Still/ci.yml?branch=main&style=flat-square&label=tests" alt="Test status"></a>
+  <img src="https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-33373e?style=flat-square" alt="Works on macOS, Windows and Linux">
+</p>
+
+<p align="center">
+  <a href="#download">Download</a> ·
+  <a href="#what-you-can-do">What you can do</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#keyboard-shortcuts">Shortcuts</a> ·
+  <a href="#sharing-and-privacy">Sharing &amp; privacy</a> ·
+  <a href="#questions-and-fixes">Help</a> ·
+  <a href="#for-developers">For developers</a>
 </p>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/capture-workflow.png">
-  <img src="assets/readme/capture-workflow.gif" width="100%" alt="An animated illustration of selecting a screen area, adding an arrow, and copying the finished capture">
+  <img src="assets/readme/capture-workflow.gif" width="100%" alt="Selecting part of the screen, drawing an arrow on it, and copying the result">
 </picture>
 
-Still lives in your menu bar or system tray. Capture an area, a window, or a whole screen; add clear annotations; copy, save, pin, or share the result. The Mac app is native Swift. Windows and Linux use a lightweight Tauri app.
+## What is Still?
 
-<a id="download"></a>
+Still sits quietly in your menu bar (Mac) or system tray (Windows and Linux) until you need it. Press a shortcut, pick the part of the screen you want, and the picture is on your clipboard before you let go of the mouse. A small preview appears in the corner so you can draw on it, save it, pin it to the screen, or upload it to your own sharing server.
+
+It is built for the everyday moments: showing a teammate where the bug is, saving a receipt, keeping a chart from a meeting, or pulling the text out of an image you can't copy from.
+
+- **Free and open source.** No account, no subscription, no tracking.
+- **Private by default.** Your screenshots stay on your computer unless you choose to upload them.
+- **Native on every platform.** The Mac app is written for the Mac. The Windows and Linux app is a lightweight desktop app that shares one codebase.
+
 ## Download
 
-**[Get the latest release →](https://github.com/ImSammyTTV/Still/releases/latest)**
+**[Get the latest version →](https://github.com/ImSammyTTV/Still/releases/latest)**
 
-| Platform | Choose this download | Architecture |
-| :--- | :--- | :--- |
-| **macOS 15+** | `Still-…-mac-universal.zip` | Apple silicon + Intel in one app |
-| **Windows** | `Still_…_x64-setup.exe` or `Still_…_arm64-setup.exe` | x64 / ARM64 |
-| **Linux** | `.AppImage`, `.deb`, or `.rpm` | x64 / ARM64 |
+| Your computer | Download this file |
+| :--- | :--- |
+| **Mac** (macOS 15 or newer) | `Still-…-mac-universal.zip` (works on Apple silicon and Intel) |
+| **Windows** | `Still_…_x64-setup.exe` for most PCs, or `Still_…_arm64-setup.exe` for ARM PCs |
+| **Linux** | `.AppImage` (runs anywhere), `.deb` (Debian, Ubuntu) or `.rpm` (Fedora and similar) |
 
-Windows portable executables are included too. Each release includes `SHA256SUMS`; update packages also carry the project's update signatures.
+Not sure which Windows file you need? Pick **x64**. There are also portable Windows versions that run without installing anything.
 
-<a id="why-still"></a>
-## Small tool. Useful details.
+Every release ships with a `SHA256SUMS` file so you can check the download was not tampered with. See [Getting started](#getting-started) for platform-specific install notes.
 
-| Capture | Make it clear | Keep it moving |
-| :--- | :--- | :--- |
-| Areas, windows, and whole screens | Arrows, text, shapes, and numbered steps | Automatic clipboard copy |
-| Timers and exact dimensions | Highlighter, spotlight, and solid redaction | A floating preview with quick actions |
-| Text recognition on your computer | Backgrounds, padding, corners, and shadows | Pin captures and reopen history |
-| Screen recording | Editable annotations and undo | Upload to your own Still Cloud server |
+## What you can do
 
-**More on Mac:** scrolling capture, clipboard history, video editing, GIF export, camera overlays, cursor effects, QR recognition, and image Services in Finder.
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>📸 Capture</h3>
+      <ul>
+        <li>Grab a selected area, a single window, or a whole screen</li>
+        <li>Set a timer so menus and pop-ups stay open</li>
+        <li>Type an exact size or lock the aspect ratio</li>
+        <li>Copy text straight out of anything on screen</li>
+        <li>Record your screen as a video</li>
+      </ul>
+    </td>
+    <td width="33%" valign="top">
+      <h3>✏️ Make your point</h3>
+      <ul>
+        <li>Arrows, boxes, circles, lines and freehand pen</li>
+        <li>Text labels and numbered steps</li>
+        <li>Highlighter and spotlight to draw the eye</li>
+        <li>Blur, pixelate or solidly black out private details</li>
+        <li>Add a background, padding, rounded corners and a shadow</li>
+        <li>Undo, redo, and come back to edit later</li>
+      </ul>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🚀 Keep moving</h3>
+      <ul>
+        <li>Copied to your clipboard automatically</li>
+        <li>A floating preview with one-click actions</li>
+        <li>Pin a capture so it floats above other windows</li>
+        <li>Browse, search and reopen everything you've captured</li>
+        <li>Upload to a sharing server you control</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+**Extra on Mac:** scrolling capture for long pages, clipboard history, a video editor with trimming and zoom, GIF export, a camera bubble for recordings, click and keystroke overlays, QR code reading, and right-click actions on images in Finder.
 
 > [!NOTE]
-> Platform support varies. [FEATURES.md](FEATURES.md) separates implemented features from those checked by tests or hands-on use. Windows/Linux recording depends on the system's screen-sharing support; hover-based window selection requires Windows or Linux X11.
+> Not everything is available on every platform yet, and some features have had more testing than others. [FEATURES.md](FEATURES.md) has the full checklist, feature by feature, for Mac and for Windows/Linux.
 
-<a id="getting-started"></a>
-## Your first capture
+## Getting started
 
-1. **Install and open Still.** The setup assistant walks you through the essentials.
-2. **Allow screen capture when asked.** Camera, microphone, and cloud setup are optional.
-3. **Choose Capture Area** from the menu bar or tray, then drag. Hold **Space** to select a window; **Escape** cancels selection.
-4. **Paste or edit.** The capture is copied to your clipboard. Use the floating preview to annotate, save, pin, or upload it.
+1. **Install Still and open it.** A short setup assistant walks you through the first run.
+2. **Allow screen capture when your system asks.** Camera, microphone and cloud setup are optional and can be skipped.
+3. **Take your first capture.** Pick **Capture Area** from the Still menu, then drag over part of the screen. Hold **Space** to switch to picking a window, or press **Escape** to cancel.
+4. **Use it.** The capture is already on your clipboard, so you can paste it anywhere. The floating preview lets you draw on it, save it, pin it or upload it.
 
-Save actions use **Documents/Still** unless you choose another export folder in Settings. Capture History keeps the app's editable originals separately.
+Saved images go to **Documents/Still** unless you choose another folder in Settings. Still also keeps its own editable copy of every capture in **Capture History**, so you can go back and change annotations later.
 
 <details>
 <summary><strong>Installing on Mac</strong></summary>
 
-Extract the universal ZIP, move **Still.app** to **Applications**, and open it. Still appears in the menu bar rather than the Dock.
+<br>
 
-Still uses the project's own signing certificate and is not notarized by Apple. If macOS blocks the first launch, review its notice under **System Settings → Privacy & Security** before opening the app.
+Unzip the download, drag **Still.app** into your **Applications** folder, and open it. Still appears in the menu bar at the top of the screen rather than in the Dock.
 
-The repository also includes an installer that verifies the release checksums and Still's signing identity:
+**If macOS says the app can't be opened:** Still is signed with the project's own certificate rather than one from Apple, so the first launch may be blocked. Open **System Settings → Privacy & Security**, scroll down to the notice about Still, and choose **Open Anyway**.
+
+**Screen permission:** when asked, turn on **Still** in the **Screen & System Audio Recording** list (the upper one). The separate "System Audio Recording Only" list does not allow screenshots. You can rerun the guide any time from **Settings → General → Open Setup Assistant**.
+
+**Prefer the Terminal?** This installer downloads the latest release, checks its checksum and signature, and installs it for you:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ImSammyTTV/Still/main/install-mac.sh -o install-still.sh
@@ -75,138 +125,221 @@ less install-still.sh
 sh install-still.sh
 ```
 
-For screen access, enable **Still** in the upper **Screen & System Audio Recording** list. The **System Audio Recording Only** list does not permit screenshots. You can reopen the guide from **Settings → General → Open Setup Assistant**.
-
 </details>
 
 <details>
 <summary><strong>Installing on Windows</strong></summary>
 
-Choose the **x64** installer for most PCs, or **ARM64** for an ARM-based PC. Portable executables are available if you prefer not to run an installer. Still uses the system's Edge WebView2 engine.
+<br>
 
-Windows downloads are not yet signed with a Windows publisher certificate. Review the release source and checksums if Windows displays a first-launch warning.
+Run the installer. Choose **x64** for most PCs, or **ARM64** if you have an ARM-based laptop such as a Snapdragon device. Still uses the Edge web engine that is already part of Windows, so there is nothing else to install.
+
+**If Windows shows a blue "protected your PC" warning:** Still is not yet signed with a Windows publisher certificate. Click **More info**, then **Run anyway**. If you want to double-check the file first, compare it against the `SHA256SUMS` file on the release page.
 
 </details>
 
 <details>
 <summary><strong>Installing on Linux</strong></summary>
 
-- **AppImage:** make the downloaded file executable, then run it.
-- **Debian / Ubuntu:** install the `.deb` package.
-- **Fedora / other RPM distributions:** install the `.rpm` package.
+<br>
 
-Linux builds use Ubuntu 24.04 and need compatible WebKitGTK and desktop screen-sharing libraries. Wayland uses your desktop's sharing portal. If global shortcuts are restricted, bind a desktop shortcut to `still --capture=area`. Other actions include `window`, `fullscreen`, `text`, `record`, `allInOne`, and `history`.
+- **AppImage:** mark the file as executable (right-click → Properties, or `chmod +x`), then run it.
+- **Debian or Ubuntu:** install the `.deb` package.
+- **Fedora and other RPM-based systems:** install the `.rpm` package.
+
+Still is built on Ubuntu 24.04 and needs a recent WebKitGTK and your desktop's screen-sharing support. On Wayland, capture goes through your desktop's screen-sharing dialog.
+
+If your desktop does not allow apps to register global shortcuts, you can bind a desktop shortcut to one of these commands instead:
+
+```sh
+still --capture=area
+```
+
+Other options are `window`, `fullscreen`, `text`, `record`, `allInOne` (the Capture Bar) and `history`.
 
 </details>
 
-<a id="shortcuts"></a>
-## A few keys to remember
+## Keyboard shortcuts
 
-| Action | Mac | Windows / Linux |
+These are the defaults. You can change any of them in **Settings → Shortcuts**.
+
+| What it does | Mac | Windows / Linux |
 | :--- | :--- | :--- |
-| Capture an area | `⇧⌘4` | `Ctrl Shift 4` |
-| Capture Bar | `⌃⇧⌘S` | `Ctrl Shift 5` |
-| Capture a window | `⌃⇧⌘4` | `Ctrl Alt Shift 4` |
-| Whole screen | `⌃⇧⌘5` | `Ctrl Shift 3` |
-| Start / stop recording | `⌃⇧⌘6` | `Ctrl Shift 6` |
-| Clipboard history | `⇧⌘V` | — |
+| Capture an area | `⇧ ⌘ 4` | `Ctrl Shift 4` |
+| Capture a window | `⌃ ⇧ ⌘ 4` | `Ctrl Alt Shift 4` |
+| Capture the whole screen | `⌃ ⇧ ⌘ 5` | `Ctrl Shift 3` |
+| Open the Capture Bar | `⌃ ⇧ ⌘ S` | `Ctrl Shift 5` |
+| Copy text from the screen | — | `Ctrl Shift 2` |
+| Start or stop recording | `⌃ ⇧ ⌘ 6` | `Ctrl Shift 6` |
+| Clipboard history | `⇧ ⌘ V` | — |
 
-**While selecting:** hold **Space** for a window, press **Enter** to confirm an area, or **Escape** to cancel. Arrow keys nudge; **Shift** makes larger nudges. Shortcuts can be changed in **Settings → Shortcuts**.
+**While selecting an area:** hold **Space** to pick a window instead, press **Enter** to confirm, or **Escape** to cancel. The arrow keys nudge the selection by a pixel, and **Shift** plus an arrow key moves it further.
 
-macOS reserves `⇧⌘4` for its screenshot tool. To use it with Still, turn off the matching selected-area shortcut in **Keyboard → Keyboard Shortcuts → Screenshots**, or choose a different shortcut in Still.
+> [!TIP]
+> On a Mac, `⇧⌘4` normally belongs to the built-in screenshot tool. To give it to Still, open **System Settings → Keyboard → Keyboard Shortcuts → Screenshots** and turn off "Save picture of selected area as a file". Or just pick a different shortcut in Still.
 
-<a id="sharing"></a>
-## Your captures. Your server.
+## Sharing and privacy
 
-Screenshots and text recognition stay on your computer unless you upload them. Still Cloud is an optional server you run yourself, with share links, comments, passwords, expiry, and team access.
+Still never sends anything anywhere on its own. Screenshots, recordings and recognised text all stay on your computer.
 
-[Set up Still Cloud →](Cloud/README.md)
+If you want to share captures by link, Still comes with **Still Cloud**: a small sharing server you run yourself, on your own machine or on a server you rent. You get share links with optional passwords, expiry dates and view limits, comments on images and videos, and team accounts. Because you host it, you decide where your files live.
 
-Connect it in **Settings → Cloud**, then choose **Upload**. Uploads include recognised text and any recording transcript so your server can search them. Auto-upload is a separate opt-in setting.
+- **Set it up:** follow the [Still Cloud guide](Cloud/README.md).
+- **Connect the app:** go to **Settings → Cloud**, paste your server address and token, then use **Upload** on any capture.
 
-<a id="help"></a>
-## Need a hand?
+Uploads include any text Still recognised in the image and any transcript from a recording, so your server can search them. Automatic uploading after every capture is off by default and is a separate setting you can switch on.
+
+## Questions and fixes
 
 <details>
-<summary><strong>Screen access is enabled, but capture still fails</strong></summary>
+<summary><strong>I allowed screen access, but capture still doesn't work (Mac)</strong></summary>
 
-Keep a single copy of Still in Applications, reopen it, and run the check in the setup assistant. macOS associates access with the app's signing identity: a differently signed development build can appear enabled while capture is denied. Release updates retain the same signing identity.
+<br>
+
+Make sure only one copy of Still is installed, in the Applications folder, then quit and reopen it. Rerun the check in the setup assistant. macOS ties the permission to the app's signature, so a different build of Still (for example one you compiled yourself) can show as allowed while actually being blocked. Updates from the release page keep the same signature, so they keep working.
 
 </details>
 
 <details>
-<summary><strong>Can I safely hide private information with blur?</strong></summary>
+<summary><strong>Is blur enough to hide private information?</strong></summary>
 
-Use **Redact** for private information. It replaces the covered pixels in the exported image. Blur and pixelation are visual effects. Editable projects retain the original image, so share a flattened image export rather than the project file when redacting.
+<br>
+
+No. Blur and pixelate are visual effects and can sometimes be reversed. Use the **Redact** tool, which paints solid black over the area and removes those pixels from the exported image. One more thing to know: Still's editable project files keep the original picture underneath so you can change your edits later, so share the exported image rather than the project file.
 
 </details>
 
 <details>
-<summary><strong>Where are the editable originals?</strong></summary>
+<summary><strong>Where does Still keep my captures?</strong></summary>
 
-| System | App data |
+<br>
+
+Exported images go to **Documents/Still** by default. The editable originals that power Capture History live in the app's own data folder:
+
+| System | Folder |
 | :--- | :--- |
 | Mac | `~/Library/Application Support/Still` |
 | Windows | `%AppData%\app.still.desktop` |
 | Linux | `~/.local/share/app.still.desktop` and `~/.config/app.still.desktop` |
 
-These folders are separate from **Documents/Still**, the default export location. Updating the app preserves your capture library.
+Updating Still keeps your capture library intact.
 
 </details>
 
-**[Report a bug](https://github.com/ImSammyTTV/Still/issues/new)** with your system, what you expected, and what happened. For updates, use **Check for Updates** in the menu bar or **Settings → About** on Windows/Linux.
+<details>
+<summary><strong>How do I update?</strong></summary>
 
-<a id="development"></a>
-## Build and contribute
+<br>
+
+On Mac, choose **Check for Updates** from the Still menu. On Windows and Linux, open **Settings → About**. Still downloads the update, checks its signature, and relaunches.
+
+</details>
 
 <details>
-<summary><strong>Native Mac app</strong></summary>
+<summary><strong>Something else is wrong</strong></summary>
 
-Requires Xcode with the macOS 15+ SDK.
+<br>
+
+**[Open an issue](https://github.com/ImSammyTTV/Still/issues/new)** and include your operating system, what you expected to happen, and what happened instead. Screenshots help, naturally.
+
+</details>
+
+## For developers
+
+Still is three projects in one repository:
+
+| Folder | What it is | Built with |
+| :--- | :--- | :--- |
+| `Sources/` | The Mac app | Swift, SwiftUI and AppKit |
+| `Desktop/` | The Windows and Linux app | Tauri (Rust) with a plain HTML and JavaScript interface |
+| `Cloud/` | The optional sharing server | Python, standard library only |
+
+<details>
+<summary><strong>Mac app</strong></summary>
+
+<br>
+
+You need Xcode with the macOS 15 SDK.
 
 ```sh
 swift test
+```
+
+```sh
 ./scripts/build.sh
 ```
 
-Keep development builds separate from the installed release. Changing the signing identity can invalidate existing screen permissions. Maintainers can use the **Mac Preview** workflow and `scripts/install-mac.sh` to preserve the release identity.
+Keep your own builds separate from the installed release. Because macOS ties the screen-capture permission to the app's signature, installing a locally signed build over the release can make macOS forget that permission. Maintainers can use the **Mac Preview** workflow together with `scripts/install-mac.sh` to install a build that keeps the release signature.
 
 </details>
 
 <details>
 <summary><strong>Windows and Linux app</strong></summary>
 
-Requires Node.js 20+, Rust, and the platform dependencies listed in [the release workflow](.github/workflows/release.yml).
+<br>
+
+You need Node.js 20 or newer, a Rust toolchain, and on Linux the system libraries listed in [the release workflow](.github/workflows/release.yml).
 
 ```sh
 cd Desktop
+```
+
+```sh
 npm ci
+```
+
+```sh
 npm test
+```
+
+```sh
 npm start
+```
+
+```sh
 npm run build
 ```
 
-The app uses Tauri with shared web views. CI also runs `still --self-test=<folder>` on Windows and Linux.
+`npm start` opens the app in development mode. The app also has a built-in self-test, `still --self-test=<folder>`, which the CI runs on real Windows and Linux machines.
 
 </details>
 
 <details>
-<summary><strong>Sharing server and releases</strong></summary>
+<summary><strong>Sharing server</strong></summary>
 
-The server uses Python's standard library:
+<br>
+
+The server needs Python 3.10 or newer and nothing else.
 
 ```sh
 python3 -m unittest discover -s Cloud/tests -v
 ```
 
-Maintainers publish through **Actions → Release → Run workflow** with a version such as `v1.2.7`. Every platform must finish before the workflow publishes downloads, update signatures, checksums, and the updater feed.
-
-README motion artwork is generated by `scripts/readme-artwork.py` with Pillow. The animation plays once, then rests; reduced-motion viewers receive a static image.
+The [Still Cloud guide](Cloud/README.md) covers running it locally, hosting it behind HTTPS with the included Docker setup, and every configuration option.
 
 </details>
 
-No project license has been added yet.
+<details>
+<summary><strong>Releases</strong></summary>
+
+<br>
+
+Maintainers publish from **Actions → Release → Run workflow** with a version number such as `v1.2.7`. The workflow builds every platform, and only once all of them succeed does it publish the downloads, update signatures, checksums and the automatic-update feed.
+
+The animated artwork at the top of this README is generated by `scripts/readme-artwork.py`. It plays once and then rests, and readers who prefer reduced motion get a still image instead.
+
+</details>
+
+Pull requests and bug reports are welcome. If you are planning a larger change, open an issue first so we can talk it through.
+
+## License
+
+No license has been chosen yet, which means the code is viewable but not yet formally licensed for reuse. This will be sorted out in a future update.
 
 ---
 
-<p align="center">Made by <a href="https://github.com/ImSammyTTV">ImSammyTTV</a> · <a href="FEATURES.md">Feature status</a> · <a href="https://github.com/ImSammyTTV/Still/releases">Release history</a></p>
+<p align="center">
+  Made by <a href="https://github.com/ImSammyTTV">ImSammyTTV</a> ·
+  <a href="FEATURES.md">Feature checklist</a> ·
+  <a href="https://github.com/ImSammyTTV/Still/releases">All releases</a>
+</p>
