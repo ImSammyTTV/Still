@@ -173,6 +173,10 @@ with your own server connected.
 
 Change any of them in **Settings → Shortcuts**.
 
+**From the right-click menu (Mac):** Still's image actions are also macOS Services. Right-click an image in Finder, or
+a selected image in another app, for **Open in Still**, **Copy Text from Image with Still** and **Pin Image with Still**.
+**System Settings → Keyboard → Keyboard Shortcuts → Services** can switch them off or give them a shortcut.
+
 **While selecting:** hold `Space` over a window and click to capture it · `Shift` keeps it square · arrow keys nudge
 (`Shift` for 10 px, `Alt` / `Option` to resize) · `Enter` captures · `Esc` cancels.
 

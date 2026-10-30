@@ -86,6 +86,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Settings: appearance, sounds, export folder, after-capture actions, start at login | ☑️ | ☑️ |
 | Automatic updates | ☑️ check, download, verify, relaunch | ☑️ signed updates, install card, About button |
 | `still://` actions (Mac) / `still --capture=…` (Windows & Linux) | ☑️ | ✅ |
+| Right-click Services for images: Open in Still, Copy Text from Image, Pin Image | ☑️ | — |
 
 ## Not done yet
 

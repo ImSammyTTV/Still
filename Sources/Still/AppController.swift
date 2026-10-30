@@ -43,6 +43,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppController.shared = self
+        NSApp.servicesProvider = self
         NSApp.setActivationPolicy(.accessory)
         applyAppearance()
         setupMenu()
@@ -476,7 +477,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func importURL(_ url: URL) {
-        if url.pathExtension == "stillshot" {
+        if url.pathExtension.lowercased() == "stillshot" {
             do { let document = try ProjectDocument.read(url); if let source = document.sourceImage() { let item = try library.add(image: source, title: url.deletingPathExtension().lastPathComponent); try library.update(item, image: ImageRenderer.render(source, marks: document.marks), document: document); openItem(item) } }
             catch { showError("Couldn’t open project", error.localizedDescription) }; return
         }
@@ -662,12 +663,9 @@ extension AppController {
             let item = try library.add(image: image, title: library.captureName(width: image.width, height: image.height))
             if library.captureSound { NSSound(named: "Tink")?.play() }
             if text {
-                let language = Preferences.shared.ocrLanguage, keepLines = Preferences.shared.ocrLineBreaks
                 Task {
                     do {
-                        let result = try await Task.detached(priority: .userInitiated) { try TextRecognition.recognize(image, language: language == "auto" ? nil : language, keepLineBreaks: keepLines) }.value
-                        let codes = try await Task.detached { try TextRecognition.codes(image) }.value
-                        let output = [result, codes.joined(separator: "\n")].filter { !$0.isEmpty }.joined(separator: "\n")
+                        let output = try await recognizeText(in: image)
                         if output.isEmpty { showError("No text found", "Select a larger or clearer area and try again.") }
                         else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string); library.updateText(item, text: output); showCopyToast("Text copied to clipboard") }
                     } catch { showError("Text recognition failed", error.localizedDescription) }
@@ -682,7 +680,7 @@ extension AppController {
             if Preferences.shared.autoUploadImages { upload(item) }
         } catch { showError("Couldn’t save capture", error.localizedDescription) }
     }
-    private func showCopyToast(_ text: String) {
+    func showCopyToast(_ text: String) {
         guard let screen = NSScreen.main else { return }
         let panel = NSPanel(contentRect: CGRect(x: screen.visibleFrame.midX-150, y: screen.visibleFrame.minY+60, width: 300, height: 44), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.level = .floating; panel.hidesOnDeactivate = false
