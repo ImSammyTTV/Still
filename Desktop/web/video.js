@@ -34,12 +34,20 @@ const separateCursor = () => project.cursor === 'separate';
 const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
 // Text shown over the video for a stretch of it, and the one being edited.
 let captions = [], selectedCaption = -1;
+// Background music: { name, path, volume, duck, speech } — the file copied in beside the recording, its volume
+// (0 to 1), whether it dips while someone speaks, and where the speech is (recording time, found once).
+let music = null;
+const musicPlayer = new Audio();
+// Chapter markers, and the one being edited.
+let chapters = [], selectedChapter = -1;
+// Arrows, boxes and spotlights shown for a stretch, and the one being edited.
+let callouts = [], selectedCallout = -1;
 // Parts of the picture blurred for a stretch, and the one being edited.
 let blurs = [], selectedBlur = -1;
 // How the video opens and closes: 'none', 'fade' or 'rise'.
 let opening = 'none', closing = 'none';
 const ends = (t) => StillTransitions.at(t, trim, opening, closing);
-const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing) || blurs.length > 0;
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing) || blurs.length > 0 || !!music || callouts.length > 0;
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -124,17 +132,23 @@ $('#cut').onclick = () => {
   else { const before = cuts.length; cuts = StillTrim.addCut(cuts, cutStart, video.currentTime, trim); cutStart = null; if (cuts.length === before && !cuts.some((c) => c.end - c.start > 0)) toast('Too short to cut'); }
   render();
 };
+// The recording's loudness in decibels for each 0.05 s, for Tighten Pauses and music ducking.
+let levelsCache = null;
+async function recordingLevels() {
+  if (levelsCache) return levelsCache;
+  const data = await (await fetch(video.currentSrc || source)).arrayBuffer();
+  const context = new (window.AudioContext || window.webkitAudioContext)();
+  let sound;
+  try { sound = await context.decodeAudioData(data); } finally { context.close(); }
+  const mono = new Float32Array(sound.length);
+  for (let c = 0; c < sound.numberOfChannels; c++) { const channel = sound.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += channel[i] / sound.numberOfChannels; }
+  return (levelsCache = StillTrim.levelsOf(mono, sound.sampleRate));
+}
 // Tighten Pauses: listens to the recording for silences longer than a second and cuts each down to a short beat.
 $('#tighten').onclick = async () => {
   $('#tighten').disabled = true; toast('Listening for pauses…');
   try {
-    const data = await (await fetch(video.currentSrc || source)).arrayBuffer();
-    const context = new (window.AudioContext || window.webkitAudioContext)();
-    let sound;
-    try { sound = await context.decodeAudioData(data); } finally { context.close(); }
-    const mono = new Float32Array(sound.length);
-    for (let c = 0; c < sound.numberOfChannels; c++) { const channel = sound.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += channel[i] / sound.numberOfChannels; }
-    const found = StillTrim.pauses(StillTrim.levelsOf(mono, sound.sampleRate), 0.05, trim);
+    const found = StillTrim.pauses(await recordingLevels(), 0.05, trim);
     const before = StillTrim.keptLength(trim, cuts);
     cuts = StillTrim.normalizeCuts([...cuts, ...found], trim); render();
     const saved = before - StillTrim.keptLength(trim, cuts);
@@ -146,7 +160,7 @@ const isWhole = () => StillTrim.isFull(trim, duration) && !cuts.length;
 
 function render() {
   cuts = StillTrim.normalizeCuts(cuts, trim);
-  renderCuts();
+  renderCuts(); renderChapters(false);
   const start = StillTrim.position(trim.start, duration) * 100, end = StillTrim.position(trim.end, duration) * 100;
   $('#shadeIn').style.width = `${start}%`; $('#shadeOut').style.width = `${100 - end}%`;
   $('#kept').style.left = `${start}%`; $('#kept').style.width = `${end - start}%`;
@@ -166,7 +180,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, music, callouts: callouts.length ? callouts : null, chapters: chapters.length ? chapters : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -241,6 +255,7 @@ function renderView() {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return;
   const t = video.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(vw, vh, z);
+  syncMusic();
   const e = ends(t);
   const zoomed = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
   $('#clip').style.opacity = e.level < 1 ? String(e.level) : ''; $('#clip').style.transform = e.scale < 1 ? `scale(${e.scale})` : '';
@@ -249,6 +264,7 @@ function renderView() {
   const fx = $('#fx'), ctx = fx.getContext('2d');
   ctx.clearRect(0, 0, fx.width, fx.height);
   drawBlurs(ctx, video, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
+  drawCallouts(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   drawOverlays(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   if (selectedBlur >= 0 && blurs[selectedBlur]) { const b = blurs[selectedBlur], k = fx.width / vw; ctx.save(); ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.strokeRect((b.x * vw - src.x) * z.scale * k, (b.y * vh - src.y) * z.scale * k, b.w * vw * z.scale * k, b.h * vh * z.scale * k); ctx.restore(); }
 }
@@ -266,6 +282,28 @@ function drawBlurs(ctx, media, t, src, scale, k, ox, oy, vw, vh) {
     b2.drawImage(media, sx, sy, sw, sh, 0, 0, blurCanvas.width, blurCanvas.height);
     ctx.save(); ctx.beginPath(); ctx.roundRect(dx, dy, dw, dh, Math.min(dw, dh) * 0.12); ctx.clip();
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(blurCanvas, dx, dy, dw, dh);
+    ctx.restore();
+  }
+}
+
+// Callouts: arrows, boxes and spotlights, placed on the recording's picture so they follow it through zooms.
+function drawCallouts(ctx, t, src, scale, k, ox, oy, vw, vh) {
+  const px = (x, y) => ({ x: ox + (x * vw - src.x) * scale * k, y: oy + (y * vh - src.y) * scale * k });
+  const unit = Math.max(1, Math.min(vw, vh) / 360) * k * Math.min(2, scale);
+  for (const { callout: c, alpha } of StillCallouts.at(callouts, t)) {
+    ctx.save(); ctx.globalAlpha = Math.max(0, alpha); ctx.strokeStyle = c.color; ctx.fillStyle = c.color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 4 * unit;
+    if (c.kind === 'arrow') {
+      const tip = px(c.x, c.y), tail = px(c.x2, c.y2), [l, r] = StillCallouts.head(tail, tip, 16 * unit);
+      ctx.lineWidth = 5 * unit; ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(tip.x, tip.y); ctx.lineTo(r.x, r.y); ctx.closePath(); ctx.fill();
+    } else {
+      const a = px(c.x, c.y), b = px(c.x + c.w, c.y + c.h);
+      if (c.kind === 'spotlight') {
+        ctx.shadowColor = 'transparent'; ctx.fillStyle = 'rgba(0,0,0,.6)';
+        ctx.beginPath(); ctx.rect(ox, oy, vw * k, vh * k); ctx.roundRect(a.x, a.y, b.x - a.x, b.y - a.y, 10 * unit); ctx.fill('evenodd');
+      } else { ctx.lineWidth = 4 * unit; ctx.beginPath(); ctx.roundRect(a.x, a.y, b.x - a.x, b.y - a.y, 8 * unit); ctx.stroke(); }
+    }
     ctx.restore();
   }
 }
@@ -343,9 +381,130 @@ function drawFrame(ctx, player, F) {
   ctx.globalAlpha = e.level;
   ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
   drawBlurs(ctx, player, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
+  drawCallouts(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
+
+// ---- Music --------------------------------------------------------------------------------------
+
+// The music's volume at `t` (recording time): its own volume, dipped under speech, faded with the opening and closing.
+const musicLevel = (t) => !music ? 0 : music.volume * (music.duck ? StillTrim.duck(t, music.speech) : 1) * ends(t).level;
+function renderMusic(save = true) {
+  $('#musicName').textContent = music ? music.name : 'None';
+  $('#musicTools').hidden = !music;
+  if (music) { $('#musicVolume').value = String(Math.round(music.volume * 100)); $('#musicDuck').checked = !!music.duck; }
+  if (save) saveProject();
+}
+async function loadMusic() {
+  if (!music) { musicPlayer.removeAttribute('src'); musicPlayer.load(); return; }
+  musicPlayer.src = still.fileUrl(music.path); musicPlayer.loop = true; musicPlayer.preload = 'auto';
+}
+$('#chooseMusic').onclick = async () => {
+  let picked;
+  try { picked = await still.invoke('video:music'); } catch (error) { return toast(message(error)); }
+  if (!picked) return;
+  music = { name: picked.name, path: picked.path, volume: music ? music.volume : 0.3, duck: music ? music.duck : true, speech: [] };
+  await loadMusic(); renderMusic();
+  try { music.speech = StillTrim.speech(await recordingLevels(), 0.05); saveProject(); toast(music.speech.length ? 'Music added. It dips whenever someone speaks.' : 'Music added'); }
+  catch { toast('Music added. Couldn’t listen for speech, so it stays at one volume.'); }
+};
+$('#musicVolume').oninput = (e) => { if (music) { music = { ...music, volume: Number(e.target.value) / 100 }; renderView(); renderMusic(); } };
+$('#musicDuck').onchange = (e) => { if (music) { music = { ...music, duck: e.target.checked }; renderMusic(); } };
+$('#musicRemove').onclick = () => { music = null; loadMusic(); renderMusic(); };
+// The preview plays the music along with the video, from the finished video's moment, looping when it's short.
+function syncMusic() {
+  if (!music || !musicPlayer.src) return;
+  if (video.paused) { if (!musicPlayer.paused) musicPlayer.pause(); return; }
+  const at = StillTrim.outputAt(video.currentTime, StillTrim.kept(trim, cuts)), d = musicPlayer.duration;
+  const want = Number.isFinite(d) && d > 0 ? at % d : at;
+  if (Math.abs(musicPlayer.currentTime - want) > 0.3) musicPlayer.currentTime = want;
+  musicPlayer.volume = Math.max(0, Math.min(1, musicLevel(video.currentTime)));
+  if (musicPlayer.paused) musicPlayer.play().catch(() => {});
+}
+video.addEventListener('pause', syncMusic);
+
+// ---- Chapters -----------------------------------------------------------------------------------
+
+function renderChapters(save = true) {
+  if (selectedChapter >= chapters.length) selectedChapter = -1;
+  const holder = $('#chapters'); holder.replaceChildren();
+  chapters.forEach((c, i) => {
+    const b = el('button', { class: i === selectedChapter ? 'selected' : '', style: `left:${StillTrim.position(c.time, duration) * 100}%`, title: `${c.title} · ${StillTrim.clock(c.time)}`, 'aria-label': `Chapter ${c.title}` });
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => { e.stopPropagation(); selectedChapter = i === selectedChapter ? -1 : i; if (selectedChapter >= 0) jump(c.time); renderChapters(); });
+    holder.append(b);
+  });
+  const c = chapters[selectedChapter];
+  $('#chapterTools').hidden = !c;
+  if (c && document.activeElement !== $('#chapterTitle')) $('#chapterTitle').value = c.title;
+  $('#copyChapters').disabled = !chapters.length;
+  if (save) saveProject();
+}
+$('#addChapter').onclick = () => {
+  const before = new Set(chapters); chapters = StillChapters.add(chapters, video.currentTime);
+  selectedChapter = chapters.findIndex((c) => !before.has(c)); renderChapters(); $('#chapterTitle').focus(); $('#chapterTitle').select();
+};
+$('#chapterTitle').addEventListener('input', (e) => { chapters = chapters.map((c, i) => (i === selectedChapter ? { ...c, title: e.target.value } : c)); renderChapters(); });
+$('#chapterTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+$('#chapterHere').onclick = () => { const moved = { ...chapters[selectedChapter], time: video.currentTime }; chapters = chapters.map((c, i) => (i === selectedChapter ? moved : c)).sort((a, b) => a.time - b.time); selectedChapter = chapters.indexOf(moved); renderChapters(); };
+$('#chapterRemove').onclick = () => { chapters = chapters.filter((_, i) => i !== selectedChapter); selectedChapter = -1; renderChapters(); };
+$('#copyChapters').onclick = async () => {
+  const speed = Number(exportChoice.speed) || 1, text = StillChapters.list(chapters, trim, cuts, speed);
+  if (!text) return toast('No chapters in the part you keep');
+  try { await navigator.clipboard.writeText(text); toast(`Chapters copied${speed > 1 ? ` (timed for ${speed}× export)` : ''}`); }
+  catch { toast('Couldn’t copy the chapters'); }
+};
+
+// ---- Callouts -----------------------------------------------------------------------------------
+
+function renderCallouts(save = true) {
+  if (selectedCallout >= callouts.length) selectedCallout = -1;
+  const lane = $('#calloutLane'); lane.replaceChildren();
+  callouts.forEach((c, i) => {
+    const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
+    lane.append(el('button', { class: i === selectedCallout ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `${c.kind[0].toUpperCase()}${c.kind.slice(1)} ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}`, 'aria-pressed': String(i === selectedCallout),
+      onclick: () => { pickCallout(i === selectedCallout ? -1 : i); if (selectedCallout >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); } }));
+  });
+  const c = callouts[selectedCallout];
+  $('#calloutTools').hidden = !c;
+  if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag on the video from the tail to the tip.' : 'Drag on the video to place it.'; }
+  $('#pointClicks').hidden = !clicks().length;
+  $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
+  renderView(); if (save) saveProject();
+}
+function pickCallout(i) { selectedCallout = i; if (i >= 0) { selectedBlur = -1; pickZoom(-1, false); renderZooms(); renderBlurs(); } renderCallouts(); }
+const changeCallout = (patch) => { let changed = null; callouts = callouts.map((c, i) => (i === selectedCallout ? (changed = { ...c, ...patch }) : c)).sort((a, b) => a.start - b.start); if (changed) selectedCallout = callouts.indexOf(changed); renderCallouts(); };
+for (const [button, kind] of [['#addArrow', 'arrow'], ['#addBox', 'box'], ['#addSpot', 'spotlight']]) {
+  $(button).onclick = () => { const before = new Set(callouts); callouts = StillCallouts.add(callouts, kind, video.currentTime, trim); pickCallout(callouts.findIndex((c) => !before.has(c))); toast(kind === 'arrow' ? 'Drag on the video from where the arrow starts to what it points at' : 'Drag on the video to place it'); };
+}
+$('#pointClicks').onclick = () => {
+  const found = StillCallouts.fromClicks(clicks(), trim);
+  if (!found.length) return toast('No clicks in the part you keep');
+  callouts = [...callouts, ...found].sort((a, b) => a.start - b.start); pickCallout(-1);
+  toast(`${found.length} arrow${found.length === 1 ? '' : 's'} added, one for each click`);
+};
+$('#calloutColor').onchange = (e) => changeCallout({ color: e.target.value });
+$('#calloutIn').onclick = () => { const c = callouts[selectedCallout]; if (c && video.currentTime < c.end - 0.2) changeCallout({ start: video.currentTime }); };
+$('#calloutOut').onclick = () => { const c = callouts[selectedCallout]; if (c && video.currentTime > c.start + 0.2) changeCallout({ end: video.currentTime }); };
+$('#calloutRemove').onclick = () => { callouts = callouts.filter((_, i) => i !== selectedCallout); selectedCallout = -1; renderCallouts(); };
+// With a callout picked, dragging on the video places it: an arrow from its tail to its tip, a box or spotlight
+// across the drag.
+$('#clip').addEventListener('pointerdown', (down) => {
+  if (selectedCallout < 0 || down.button !== 0) return;
+  down.preventDefault(); down.stopPropagation();
+  const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
+  const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
+  const share = (e) => ({ x: Math.min(1, Math.max(0, (src.x + (e.clientX - r.left) / r.width * src.w) / vw)), y: Math.min(1, Math.max(0, (src.y + (e.clientY - r.top) / r.height * src.h) / vh)) });
+  const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
+  const move = (e) => {
+    const to = share(e), c = callouts[selectedCallout];
+    callouts[selectedCallout] = c.kind === 'arrow' ? { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y } : { ...c, ...StillBlurs.fromDrag(from, to) };
+    renderView();
+  };
+  const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderCallouts(); };
+  clip.addEventListener('pointermove', move); clip.addEventListener('pointerup', up);
+}, true);
 
 // ---- Blur ---------------------------------------------------------------------------------------
 
@@ -355,10 +514,10 @@ function renderBlurs() {
   blurs.forEach((b, i) => {
     const left = StillTrim.position(b.start, duration) * 100, width = StillTrim.position(b.end, duration) * 100 - left;
     lane.append(el('button', { class: i === selectedBlur ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Blur ${StillTrim.clock(b.start)} to ${StillTrim.clock(b.end)}`, 'aria-pressed': String(i === selectedBlur),
-      onclick: () => { selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }));
+      onclick: () => { selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { selectedCallout = -1; renderCallouts(false); pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }));
   });
   $('#blurTools').hidden = selectedBlur < 0;
-  $('#clip').classList.toggle('placing', selectedBlur >= 0);
+  $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
   renderView(); saveProject();
 }
 const changeBlur = (patch) => { let changed = null; blurs = blurs.map((b, i) => (i === selectedBlur ? (changed = { ...b, ...patch }) : b)).sort((a, b) => a.start - b.start); if (changed) selectedBlur = blurs.indexOf(changed); renderBlurs(); };
@@ -471,7 +630,7 @@ $('#cursorStyle').onchange = (e) => { cursorFx = { ...cursorFx, style: e.target.
 $('#cursorSmooth').onchange = (e) => { cursorFx = { ...cursorFx, smooth: e.target.checked }; renderZooms(); };
 // With a zoom selected, a click on the video picks the point it zooms to, wherever the view is zoomed right now.
 $('#clip').addEventListener('click', (e) => {
-  if (selectedZoom < 0 || selectedBlur >= 0) return;
+  if (selectedZoom < 0 || selectedBlur >= 0 || selectedCallout >= 0) return;
   e.stopPropagation();
   const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
   const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
@@ -527,6 +686,10 @@ addEventListener('keydown', (e) => {
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
   else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCallout >= 0) $('#calloutRemove').click();
+  else if ((e.key === 'a' || e.key === 'A') && !$('#addArrow').disabled) $('#addArrow').click();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedChapter >= 0) $('#chapterRemove').click();
+  else if ((e.key === 'm' || e.key === 'M') && !$('#addChapter').disabled) { e.preventDefault(); $('#addChapter').click(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlur >= 0) $('#blurRemove').click();
   else if ((e.key === 'b' || e.key === 'B') && !$('#addBlur').disabled) $('#addBlur').click();
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaption >= 0) $('#captionRemove').click();
@@ -562,7 +725,7 @@ const save = (bytes) => { setProgress(1); $('#cancel').disabled = true; return s
 // A background always goes through the canvas, which draws it into each frame.
 // The frames to record, at `size` (the export's chosen size): straight from the player when nothing is drawn on
 // them and the size is unchanged, otherwise through a canvas.
-function captureSource(player, size) {
+function captureSource(player, size, musicBuffer = null) {
   const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg);
   const out = size || { width: F.w, height: F.h }, scaled = out.width < F.w - 1 || out.height < F.h - 1;
   if (player.captureStream && !needsCanvas() && !scaled) return { stream: player.captureStream(), stop() {} };
@@ -571,25 +734,43 @@ function captureSource(player, size) {
   const draw = () => { ctx.setTransform(out.width / F.w, 0, 0, out.height / F.h, 0, 0); drawFrame(ctx, player, F); };
   draw();
   const timer = setInterval(draw, 1000 / 30);
-  let audio = null, sound, gain = null;
-  // The opening and closing fade the sound too, so it goes through a volume control.
-  if (player.captureStream && !StillTransitions.active(opening, closing)) sound = player.captureStream().getAudioTracks();
+  let audio = null, sound, gain = null, musicGain = null, musicSource = null;
+  // The opening and closing fade the sound too, and music is mixed in, so they go through Web Audio.
+  if (player.captureStream && !StillTransitions.active(opening, closing) && !musicBuffer) sound = player.captureStream().getAudioTracks();
   else {
     player.muted = false;
     audio = new AudioContext(); const mix = audio.createMediaStreamDestination();
     gain = audio.createGain(); audio.createMediaElementSource(player).connect(gain).connect(mix);
+    if (musicBuffer) {
+      musicSource = audio.createBufferSource(); musicSource.buffer = musicBuffer; musicSource.loop = true;
+      musicGain = audio.createGain(); musicGain.gain.value = 0; musicSource.connect(musicGain).connect(mix);
+    }
     sound = mix.stream.getAudioTracks();
   }
-  const level = setInterval(() => { if (gain) gain.gain.value = ends(player.currentTime).level; }, 20);
+  const level = setInterval(() => {
+    if (gain) gain.gain.value = ends(player.currentTime).level;
+    if (musicGain) musicGain.gain.value = musicLevel(player.currentTime);
+  }, 20);
   const tracks = [...canvas.captureStream(30).getVideoTracks(), ...sound];
-  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); clearInterval(level); if (audio) audio.close(); } };
+  return {
+    stream: new MediaStream(tracks),
+    // The music starts with the recording, and holds while a cut is skipped so it stays in step with the picture.
+    start() { if (musicSource) musicSource.start(); },
+    hold(on) { if (audio) (on ? audio.suspend() : audio.resume()).catch(() => {}); },
+    stop() { clearInterval(timer); clearInterval(level); if (audio) audio.close(); },
+  };
 }
 
 async function recordClip(run, type, plan) {
   const clip = { ...trim }, clipCuts = cuts.map((c) => ({ ...c })), segments = StillTrim.kept(clip, clipCuts), total = StillTrim.keptLength(clip, clipCuts), player = await unseenPlayer();
   await seek(player, clip.start);
   if (run.cancelled) return null;
-  const capture = captureSource(player, plan.size), chunks = [];
+  let musicBuffer = null;
+  if (music) {
+    try { const context = new AudioContext(); try { musicBuffer = await context.decodeAudioData(await (await fetch(still.fileUrl(music.path))).arrayBuffer()); } finally { context.close(); } }
+    catch { setSheetNote('The music couldn’t be read, so this export has none.'); }
+  }
+  const capture = captureSource(player, plan.size, musicBuffer), chunks = [];
   const recorder = new MediaRecorder(capture.stream, { mimeType: type, videoBitsPerSecond: plan.bitrate });
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   let watcher;
@@ -612,7 +793,7 @@ async function recordClip(run, type, plan) {
     // Playback starts first, so a slow start can't become a frozen opening frame.
     await player.play();
     if (run.cancelled) return null;
-    recorder.start(1000);
+    recorder.start(1000); capture.start?.();
     // A cut is skipped with the recorder paused, so the finished video runs straight across it.
     let jumping = false;
     watcher = setInterval(() => {
@@ -621,8 +802,8 @@ async function recordClip(run, type, plan) {
       if (player.ended || player.currentTime >= clip.end) return finish();
       const next = StillTrim.skip(player.currentTime, clipCuts);
       if (next !== player.currentTime && recorder.state === 'recording') {
-        jumping = true; recorder.pause(); player.pause();
-        player.addEventListener('seeked', () => { player.play().catch(() => {}); recorder.resume(); jumping = false; }, { once: true });
+        jumping = true; recorder.pause(); player.pause(); capture.hold?.(true);
+        player.addEventListener('seeked', () => { capture.hold?.(false); player.play().catch(() => {}); recorder.resume(); jumping = false; }, { once: true });
         player.currentTime = next;
       }
     }, 10);
@@ -762,6 +943,12 @@ async function open() {
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
   captions = (Array.isArray(project.captions) ? project.captions : []).filter((c) => c && c.end > c.start && typeof c.text === 'string');
+  music = project.music && typeof project.music.path === 'string' ? { name: String(project.music.name || 'Music'), path: project.music.path, volume: Math.min(1, Math.max(0, Number(project.music.volume) || 0.3)), duck: project.music.duck !== false, speech: Array.isArray(project.music.speech) ? project.music.speech : [] } : null;
+  await loadMusic(); renderMusic(false);
+  callouts = (Array.isArray(project.callouts) ? project.callouts : []).filter((c) => c && StillCallouts.KINDS.includes(c.kind) && c.end > c.start);
+  renderCallouts(false);
+  chapters = (Array.isArray(project.chapters) ? project.chapters : []).filter((c) => c && Number.isFinite(c.time)).map((c) => ({ time: c.time, title: String(c.title || 'Chapter') })).sort((a, b) => a.time - b.time);
+  renderChapters(false);
   blurs = (Array.isArray(project.blurs) ? project.blurs : []).filter((b) => b && b.end > b.start).map((b) => ({ start: b.start, end: b.end, ...StillBlurs.fit(b) }));
   renderBlurs();
   opening = StillTransitions.STYLES.includes(project.opening) ? project.opening : 'none'; closing = StillTransitions.STYLES.includes(project.closing) ? project.closing : 'none';
@@ -770,7 +957,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

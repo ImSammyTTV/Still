@@ -83,6 +83,9 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: Export Video asks for a size (Original, 4K, 1440p, 1080p, 720p, 480p; never enlarged) a quality (Maximum, High, Balanced, Smaller File or a bitrate preset) and a speed (1× to 3×, voice at its normal pitch), with the length and file size it comes to | ☑️ | ☑️ downscaled export checked in Chromium |
 | Video editor: text over the video (titles, steps, notes) for a stretch you choose, top, middle or bottom, in three sizes, fading in and out | ☑️ | ☑️ export checked in Chromium |
 | Video editor: Blur boxes for a stretch, following the picture through zooms; Find Private Info reads the frame and blurs emails, card numbers, keys, IP addresses and phone numbers | ☑️ | ☑️ export checked in Chromium |
+| Video editor: background music, looped to length, that dips whenever someone speaks (Lower under speech) | ☑️ | ☑️ export measured in Chromium: louder in the gaps, lower under speech |
+| Video editor: callouts (arrow, box, spotlight) for a stretch, following the picture through zooms; Point at Clicks adds an arrow for each recorded click | ☑️ | ☑️ export checked in Chromium |
+| Video editor: Chapters (M) and Copy Chapters, a list for a video description timed to the finished video after cuts and export speed | ☑️ | ☑️ checked in Chromium |
 | Video editor: Tighten Pauses finds silences over a second and cuts each down to a short beat (each one a normal cut you can put back) | ☑️ | ☑️ checked in Chromium on a recording with gaps |
 | Video editor: Opening and Closing (Fade, or Rise: the picture grows out of its background), picture and sound easing over 0.6 s | ☑️ | ☑️ export checked in Chromium, sound included |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |

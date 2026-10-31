@@ -95,3 +95,21 @@ test('loudness levels from samples', () => {
   const lv = T.levelsOf(new Float32Array([1, -1, 1, -1, 0, 0, 0, 0]), 40, 0.1);
   assert.deepEqual(lv.map((v) => Math.round(v)), [0, -120]);
 });
+
+// The same cases are in the Mac app's MusicDuckingTests.
+test('speech is found, joined across short gaps and padded', () => {
+  const s = -20, q = -70;
+  const levels = [...Array(5).fill(q), ...Array(10).fill(s), ...Array(2).fill(q), ...Array(5).fill(s), ...Array(20).fill(q), ...Array(5).fill(s)];
+  const r = T.speech(levels, 0.1);
+  assert.equal(r.length, 2);
+  assert.ok(Math.abs(r[0].start - 0.3) < 1e-9 && Math.abs(r[0].end - 2.4) < 1e-9, JSON.stringify(r));
+  assert.ok(Math.abs(r[1].start - 4) < 1e-9 && Math.abs(r[1].end - 4.9) < 1e-9, JSON.stringify(r));
+});
+
+test('music dips while someone speaks and eases back', () => {
+  const r = [{ start: 2, end: 4 }];
+  assert.equal(T.duck(1, r), 1);
+  assert.equal(T.duck(3, r), 0.3);
+  assert.ok(Math.abs(T.duck(1.925, r) - 0.65) < 1e-9);
+  assert.ok(Math.abs(T.duck(4.075, r) - 0.65) < 1e-9);
+});

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import AVKit
+import UniformTypeIdentifiers
 import StillCore
 
 @MainActor final class VideoEditorModel: ObservableObject {
@@ -59,7 +60,7 @@ import StillCore
         do {
             let wasPlaying = player.rate > 0, position = playhead
             let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
-            let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: settings, metadata: metadata, cameraURL: camera)
+            let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: settings, metadata: metadata, cameraURL: camera, musicURL: musicURL)
             guard !Task.isCancelled else { return }
             prepared = result
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
@@ -82,6 +83,46 @@ import StillCore
     }
     /// Tighten Pauses: listens to the recording for silences longer than a second and cuts each down to a short beat.
     @Published var listening = false
+    /// The recording's loudness in decibels for each 0.05 s, read at 16 kHz mono.
+    nonisolated static func levels(of url: URL) async throws -> [Double] {
+        try await Task.detached(priority: .userInitiated) { () -> [Double] in
+            let asset = AVURLAsset(url: url)
+            guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
+            reader.add(output); reader.startReading()
+            var samples: [Float] = []
+            while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
+                let length = CMBlockBufferGetDataLength(block)
+                var chunk = [Float](repeating: 0, count: length / 4)
+                _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
+                samples.append(contentsOf: chunk)
+            }
+            return AudioPauses.levels(samples, rate: 16000)
+        }.value
+    }
+    /// The music file, copied in beside the recording.
+    var musicURL: URL? { settings.music.map { library.root.appendingPathComponent($0.filename) } }
+    /// Background music: copies the chosen file in beside the recording and finds where the speech is, so the music
+    /// can dip under it.
+    func chooseMusic() {
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.audio]; panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let picked = panel.url else { return }
+        let ext = picked.pathExtension.isEmpty ? "m4a" : picked.pathExtension.lowercased(), filename = "\(item.id).music.\(ext)"
+        let target = library.root.appendingPathComponent(filename)
+        do {
+            if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+            try FileManager.default.copyItem(at: picked, to: target)
+        } catch { self.error = "Couldn’t add the music: \(error.localizedDescription)"; return }
+        settings.music = VideoMusic(filename: filename, name: picked.deletingPathExtension().lastPathComponent, volume: settings.music?.volume ?? 0.3, duck: settings.music?.duck ?? true)
+        let url = library.videoSource(item)
+        Task {
+            let levels = (try? await Self.levels(of: url)) ?? []
+            let speech = AudioPauses.speech(levels: levels, step: 0.05)
+            settings.music?.speech = speech
+            library.toast(speech.isEmpty ? "Music added" : "Music added. It dips whenever someone speaks.")
+        }
+    }
     func tightenPauses() {
         guard !listening else { return }
         listening = true
@@ -89,21 +130,7 @@ import StillCore
         Task {
             defer { listening = false }
             do {
-                let levels = try await Task.detached(priority: .userInitiated) { () -> [Double] in
-                    let asset = AVURLAsset(url: url)
-                    guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
-                    let reader = try AVAssetReader(asset: asset)
-                    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
-                    reader.add(output); reader.startReading()
-                    var samples: [Float] = []
-                    while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
-                        let length = CMBlockBufferGetDataLength(block)
-                        var chunk = [Float](repeating: 0, count: length / 4)
-                        _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
-                        samples.append(contentsOf: chunk)
-                    }
-                    return AudioPauses.levels(samples, rate: 16000)
-                }.value
+                let levels = try await Self.levels(of: url)
                 guard !levels.isEmpty else { library.toast("This recording has no sound to listen to"); return }
                 let found = AudioPauses.find(levels: levels, step: 0.05, start: start, end: end)
                 guard !found.isEmpty else { library.toast("No long pauses found"); return }
@@ -199,14 +226,14 @@ import StillCore
         guard panel.runModal() == .OK, let url = panel.url else { return }
         player.pause(); exporting = true; exportProgress = 0
         var settings = self.settings; if !gif { settings.exportHeight = exportLimit > 0 ? exportLimit : nil; settings.speed = exportSpeed > 1 ? exportSpeed : nil }
-        let metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
+        let metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }, music = musicURL
         // Export to a temporary file and only then replace the destination, so a failed or cancelled
         // export never destroys a file you chose to replace.
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("Still-export-\(UUID()).\(gif ? "gif" : "mp4")")
         exportTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let prepared = try await VideoEngine.prepare(url: source, settings: settings, metadata: metadata, cameraURL: camera)
+                let prepared = try await VideoEngine.prepare(url: source, settings: settings, metadata: metadata, cameraURL: camera, musicURL: music)
                 let progress: @Sendable (Double) -> Void = { [weak self] value in Task { @MainActor in self?.exportProgress = value } }
                 if gif { try await VideoEngine.gif(prepared, to: temp, fps: Preferences.shared.gifFPS, width: Preferences.shared.gifWidth, progress: progress) }
                 else { try await VideoEngine.export(prepared, to: temp, progress: progress) }
@@ -254,7 +281,7 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Callouts", "arrow.up.right.circle"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
@@ -312,6 +339,52 @@ struct VideoEditorView: View {
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
             }
             if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Chapters":
+            HStack {
+                Button("Add Chapter at Playhead") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
+                Button("Copy Chapters") {
+                    let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed)
+                    if text.isEmpty { model.library.toast("No chapters in the part you keep") } else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string); model.library.toast(model.exportSpeed > 1 ? "Chapters copied (timed for \(model.exportSpeed.formatted())× export)" : "Chapters copied") }
+                }.disabled((model.settings.chapters ?? []).isEmpty).help("Copy a chapter list for a video description, timed to the finished video")
+            }
+            ForEach(Binding(get: { model.settings.chapters ?? [] }, set: { model.settings.chapters = $0.isEmpty ? nil : $0 })) { $chapter in
+                HStack {
+                    Button(time(chapter.time)) { model.seek(chapter.time) }.buttonStyle(.plain).monospacedDigit().foregroundStyle(.secondary).help("Go to this chapter")
+                    TextField("Name", text: $chapter.title)
+                    Button { chapter.time = model.playhead } label: { Image(systemName: "scope") }.buttonStyle(.plain).help("Move this chapter to the playhead")
+                    Button { model.settings.chapters?.removeAll { $0.id == chapter.id }; if model.settings.chapters?.isEmpty == true { model.settings.chapters = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove chapter")
+                }.padding(9).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.chapters ?? []).isEmpty { Text("Mark chapters (M), then Copy Chapters for a list to paste into a video description. Times follow the finished video, after cuts and export speed.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Music":
+            HStack { Button(model.settings.music == nil ? "Choose Music…" : "Replace Music…") { model.chooseMusic() }; if let music = model.settings.music { Text(music.name).lineLimit(1).foregroundStyle(.secondary) } }
+            if model.settings.music != nil {
+                slider("Volume", value: Binding(get: { (model.settings.music?.volume ?? 0.3)*100 }, set: { model.settings.music?.volume = $0/100 }), range: 0...100)
+                Toggle("Lower under speech", isOn: Binding(get: { model.settings.music?.duck ?? true }, set: { model.settings.music?.duck = $0 }))
+                Button("Remove Music", role: .destructive) { model.settings.music = nil }
+            }
+            Text("Music plays under the whole video, looping if it’s shorter, and dips whenever someone speaks so the voice stays clear.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        case "Callouts":
+            HStack {
+                ForEach([("Arrow", "arrow"), ("Box", "box"), ("Spotlight", "spotlight")], id: \.1) { title, kind in
+                    Button(title) { var list = model.settings.callouts ?? []; list.append(VideoCallout.new(kind, at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.callouts = list.sorted { $0.start < $1.start } }
+                }
+                if !model.metadata.clicks.isEmpty { Button("Point at Clicks") { let found = VideoCallout.fromClicks(model.metadata.clicks, start: model.settings.start, end: model.settings.end); model.settings.callouts = ((model.settings.callouts ?? []) + found).sorted { $0.start < $1.start }; model.library.toast("\(found.count) arrow\(found.count == 1 ? "" : "s") added, one for each click") } }
+            }
+            ForEach(Binding(get: { model.settings.callouts ?? [] }, set: { model.settings.callouts = $0.isEmpty ? nil : $0 })) { $callout in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text(callout.kind.capitalized).fontWeight(.medium)
+                        Picker("Colour", selection: $callout.color) { ForEach(VideoCallout.colors, id: \.self) { hex in Text(["FF453A": "Red", "FFD60A": "Yellow", "32D74B": "Green", "0A84FF": "Blue", "FFFFFF": "White"][hex] ?? hex).tag(hex) } }.labelsHidden().fixedSize()
+                        Spacer(); Button { model.settings.callouts?.removeAll { $0.id == callout.id }; if model.settings.callouts?.isEmpty == true { model.settings.callouts = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove callout")
+                    }
+                    HStack { TextField("Start", value: $callout.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $callout.end, format: .number.precision(.fractionLength(2))) }
+                    HStack { Text(callout.kind == "arrow" ? "Tip X" : "X"); Slider(value: $callout.x, in: 0...1); Text("Y"); Slider(value: $callout.y, in: 0...1) }
+                    if callout.kind == "arrow" { HStack { Text("Tail X"); Slider(value: Binding(get: { callout.x2 ?? 0.38 }, set: { callout.x2 = $0 }), in: 0...1); Text("Y"); Slider(value: Binding(get: { callout.y2 ?? 0.36 }, set: { callout.y2 = $0 }), in: 0...1) } }
+                    else { HStack { Text("W"); Slider(value: Binding(get: { callout.w ?? 0.3 }, set: { callout.w = $0 }), in: 0.02...1); Text("H"); Slider(value: Binding(get: { callout.h ?? 0.3 }, set: { callout.h = $0 }), in: 0.02...1) } }
+                }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.callouts ?? []).isEmpty { Text("Point things out: an arrow, a box, or a spotlight that dims everything else. Point at Clicks adds an arrow for each click you made while recording.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
@@ -391,6 +464,8 @@ struct VideoEditorView: View {
                             .frame(width: max(4, x(cut.end)-x(cut.start)), height: 52).offset(x: x(cut.start))
                             .onTapGesture { model.removeCut(cut) }.help("Cut \(time(cut.start)) to \(time(cut.end)): click to put it back")
                     }
+                    // Chapter markers along the top.
+                    ForEach(model.settings.chapters ?? []) { chapter in Circle().fill(.yellow).overlay(Circle().strokeBorder(.black.opacity(0.5), lineWidth: 1)).frame(width: 12, height: 12).offset(x: x(chapter.time)-6, y: -26).help(chapter.title).onTapGesture { model.seek(chapter.time) } }
                     if let from = model.cutStart { Rectangle().fill(.red).frame(width: 2, height: 64).offset(x: x(from)-1).allowsHitTesting(false) }
                     Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(model.playhead)-1).allowsHitTesting(false)
                     // Handles move by how far you drag from where you grabbed them.

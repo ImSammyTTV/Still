@@ -50,6 +50,10 @@
   /* Zooms sit in a lane under the film strip; the selected one is outlined. */
   /* Stretches cut out of the middle: struck through, and a click on one puts it back. */
   .cuts { position: absolute; inset: 0; pointer-events: none; }
+  /* Chapter markers: a flag on the top edge of the trim bar. */
+  .chapters { position: absolute; inset: 0; pointer-events: none; }
+  .chapters button { position: absolute; top: -6px; width: 14px; height: 14px; margin-left: -7px; padding: 0; border: 2px solid var(--bg); border-radius: 50%; background: var(--yellow); pointer-events: auto; cursor: pointer; }
+  .chapters button.selected { outline: 2px solid var(--text); outline-offset: 1px; }
   .cuts .cut { position: absolute; top: 0; bottom: 0; pointer-events: auto; cursor: pointer; border: 0; padding: 0; border-radius: 4px;
     background: repeating-linear-gradient(135deg, var(--hud) 0 6px, transparent 6px 12px); box-shadow: inset 0 0 0 2px var(--red); }
   .cuts .cut:hover { background: repeating-linear-gradient(135deg, var(--red) 0 6px, transparent 6px 12px); }
@@ -58,6 +62,8 @@
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane.captions button { background: var(--text); opacity: .4; }
   .lane.blurs button { background: var(--red); opacity: .45; }
+  .lane.callouts button { background: var(--yellow); opacity: .45; }
+  .lane.callouts button.selected { opacity: .95; }
   .lane.blurs button.selected { opacity: .95; }
   .clip.placing { cursor: crosshair; }
   .lane.captions button.selected { opacity: .9; }
@@ -142,6 +148,43 @@
     </span>
   </div>
   <div class="trim-head">
+    <b>Music</b>
+    <button class="btn" id="chooseMusic" title="Add background music; it dips whenever someone speaks" disabled><i data-lucide="music"></i>Choose Music…</button>
+    <span class="dim" id="musicName">None</span>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="musicTools" hidden>
+      <label>Volume <input type="range" id="musicVolume" min="0" max="100" step="1"></label>
+      <label><input type="checkbox" id="musicDuck"> Lower under speech</label>
+      <button class="btn plain" id="musicRemove" title="Remove the music"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
+    <b>Chapters</b>
+    <button class="btn" id="addChapter" title="Mark a chapter at the playhead (M)" disabled><i data-lucide="bookmark-plus"></i>Add Chapter</button>
+    <button class="btn" id="copyChapters" title="Copy a chapter list for a video description, timed to the finished video" disabled><i data-lucide="list-ordered"></i>Copy Chapters</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="chapterTools" hidden>
+      <input class="field" id="chapterTitle" aria-label="Chapter name" maxlength="80" style="width:200px">
+      <button class="btn" id="chapterHere" title="Move this chapter to the playhead"><i data-lucide="locate-fixed"></i>Move Here</button>
+      <button class="btn plain" id="chapterRemove" title="Remove this chapter (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
+    <b>Callouts</b>
+    <button class="btn" id="addArrow" title="An arrow from the playhead for 3 seconds (A)" disabled><i data-lucide="move-up-right"></i>Arrow</button>
+    <button class="btn" id="addBox" title="A box from the playhead for 3 seconds" disabled><i data-lucide="square"></i>Box</button>
+    <button class="btn" id="addSpot" title="Dim everything but one part, from the playhead for 3 seconds" disabled><i data-lucide="sun-dim"></i>Spotlight</button>
+    <button class="btn" id="pointClicks" title="An arrow pointing at each click you made while recording" hidden><i data-lucide="mouse-pointer-click"></i>Point at Clicks</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="calloutTools" hidden>
+      <span class="dim" id="calloutHint">Drag on the video to place it.</span>
+      <select class="field" id="calloutColor" aria-label="Colour"><option value="#FF453A">Red</option><option value="#FFD60A">Yellow</option><option value="#32D74B">Green</option><option value="#0A84FF">Blue</option><option value="#FFFFFF">White</option></select>
+      <button class="btn" id="calloutIn" title="Start this callout at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="calloutOut" title="End this callout at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="calloutRemove" title="Remove this callout (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
     <b>Blur</b>
     <button class="btn" id="addBlur" title="Blur part of the video from the playhead (B)" disabled><i data-lucide="eye-off"></i>Add Blur</button>
     <button class="btn" id="findPrivate" title="Read the frame on screen and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds" disabled><i data-lucide="shield-check"></i>Find Private Info</button>
@@ -185,6 +228,7 @@
     <div class="shade" id="shadeOut"></div>
     <div class="kept" id="kept"></div>
     <div class="cuts" id="cuts"></div>
+    <div class="chapters" id="chapters"></div>
     <div class="playhead" id="playhead"></div>
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
@@ -192,6 +236,7 @@
   <div class="lane" id="lane" aria-label="Zooms"></div>
   <div class="lane captions" id="captionLane" aria-label="Text"></div>
   <div class="lane blurs" id="blurLane" aria-label="Blurs"></div>
+  <div class="lane callouts" id="calloutLane" aria-label="Callouts"></div>
   <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
@@ -226,12 +271,14 @@
 <script src="vendor/lucide.min.js"></script>
 <script src="shared/geometry.js"></script>
 <script src="shared/trim.js"></script>
+<script src="shared/chapters.js"></script>
 <script src="shared/backdrop.js"></script>
 <script src="shared/zoom.js"></script>
 <script src="shared/cursor.js"></script>
 <script src="shared/captions.js"></script>
 <script src="shared/transitions.js"></script>
 <script src="shared/blurs.js"></script>
+<script src="shared/callouts.js"></script>
 <script src="shared/private.js"></script>
 <script src="vendor/ocr/tesseract.min.js"></script>
 <script src="ocr.js"></script>

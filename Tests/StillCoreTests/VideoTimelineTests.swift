@@ -94,4 +94,48 @@ final class VideoTimelineTests: XCTestCase {
         let p = VideoBlur.fromPixels(CGRect(x: 104, y: 54, width: 192, height: 12), width: 400, height: 200, at: 0, start: 0, end: 5)
         XCTAssertEqual(p.x, 0.25, accuracy: 1e-9); XCTAssertEqual(p.y, 0.25, accuracy: 1e-9); XCTAssertEqual(p.w, 0.5, accuracy: 1e-9); XCTAssertEqual(p.h, 0.1, accuracy: 1e-9)
     }
+
+    /// The same cases as Desktop/test/chapters.test.js.
+    func testChaptersListInTheFinishedVideosTime() {
+        let chapters = [VideoChapter(time: 75, title: "Setting up"), VideoChapter(time: 10, title: "Welcome"), VideoChapter(time: 200, title: "  Sharing   it ")]
+        XCTAssertEqual(VideoChapters.list(chapters, start: 0, end: 300, cuts: []), "0:00 Intro\n0:10 Welcome\n1:15 Setting up\n3:20 Sharing it")
+        XCTAssertEqual(VideoChapters.list(chapters, start: 10, end: 300, cuts: [VideoCut(start: 30, end: 50)], speed: 2), "0:00 Welcome\n0:22 Setting up\n1:25 Sharing it")
+        XCTAssertEqual(VideoChapters.list([VideoChapter(time: 40, title: "Gone")], start: 0, end: 100, cuts: [VideoCut(start: 30, end: 50)]), "")
+        XCTAssertEqual(VideoChapters.list([VideoChapter(time: 3725, title: "Late")], start: 0, end: 4000, cuts: []), "0:00 Intro\n1:02:05 Late")
+    }
+
+    /// The same cases as the music ducking tests in Desktop/test/trim.test.js.
+    func testSpeechIsFoundJoinedAndPadded() {
+        let levels = Array(repeating: -70.0, count: 5) + Array(repeating: -20.0, count: 10) + Array(repeating: -70.0, count: 2) + Array(repeating: -20.0, count: 5) + Array(repeating: -70.0, count: 20) + Array(repeating: -20.0, count: 5)
+        let r = AudioPauses.speech(levels: levels, step: 0.1)
+        XCTAssertEqual(r.count, 2)
+        XCTAssertEqual(r[0].start, 0.3, accuracy: 1e-9); XCTAssertEqual(r[0].end, 2.4, accuracy: 1e-9)
+        XCTAssertEqual(r[1].start, 4, accuracy: 1e-9); XCTAssertEqual(r[1].end, 4.9, accuracy: 1e-9)
+    }
+
+    func testMusicDipsWhileSomeoneSpeaks() {
+        let r = [VideoCut(start: 2, end: 4)]
+        XCTAssertEqual(AudioPauses.duck(1, ranges: r), 1)
+        XCTAssertEqual(AudioPauses.duck(3, ranges: r), 0.3)
+        XCTAssertEqual(AudioPauses.duck(1.925, ranges: r), 0.65, accuracy: 1e-9)
+        XCTAssertEqual(AudioPauses.duck(4.075, ranges: r), 0.65, accuracy: 1e-9)
+    }
+
+    /// The same cases as Desktop/test/callouts.test.js.
+    func testCalloutsStartInTheMiddleAndFade() {
+        let a = VideoCallout.new("arrow", at: 1, start: 0, end: 10)
+        XCTAssertEqual([a.start, a.end, a.x, a.y, a.x2!, a.y2!], [1, 4, 0.5, 0.5, 0.38, 0.36])
+        let b = VideoCallout.new("box", at: 9, start: 0, end: 10)
+        XCTAssertEqual([b.end, b.x, b.w!], [10, 0.35, 0.3])
+        let c = VideoCallout(kind: "box", start: 1, end: 3, color: "FF453A", x: 0, y: 0)
+        XCTAssertNil(c.alpha(at: 0.5)); XCTAssertEqual(c.alpha(at: 1.1)!, 0.5, accuracy: 1e-9); XCTAssertEqual(c.alpha(at: 2), 1)
+    }
+
+    func testAnArrowPointsAtEachClick() {
+        let clicks = [ClickSample(time: 2, x: 0.6, y: 0.5), ClickSample(time: 2.5, x: 0.6, y: 0.5), ClickSample(time: 5, x: 0.1, y: 0.1), ClickSample(time: 30, x: 0.5, y: 0.5)]
+        let arrows = VideoCallout.fromClicks(clicks, start: 0, end: 10)
+        XCTAssertEqual(arrows.count, 2)
+        XCTAssertEqual([arrows[0].start, arrows[0].end, arrows[0].x2!, arrows[0].y2!], [1.6, 3.2, 0.48, 0.38])
+        XCTAssertEqual(arrows[1].x2!, 0.22, accuracy: 1e-9); XCTAssertEqual(arrows[1].y2!, 0.22, accuracy: 1e-9)
+    }
 }

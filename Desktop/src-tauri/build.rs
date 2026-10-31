@@ -13,6 +13,6 @@ fn main() {
         "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_prepared", "recording_started",
         "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save",
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",
-        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data", "qr_svg", "library_combine", "library_star", "countdown_cancel", "library_qr", "drive_get", "drive_connect", "drive_disconnect", "scroll_stop", "scroll_auto",
+        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data", "qr_svg", "library_combine", "library_star", "video_music_choose", "countdown_cancel", "library_qr", "drive_get", "drive_connect", "drive_disconnect", "scroll_stop", "scroll_auto",
     ]))).expect("failed to run tauri-build");
 }

@@ -142,6 +142,35 @@ public enum AudioPauses {
         return VideoTimeline.normalized(found, start: start, end: end)
     }
 
+    /// Where someone is speaking: stretches above the speaking threshold, joined across gaps shorter than `gap` and
+    /// padded by `pad` each side. Windows and Linux use the same rule (shared/trim.js `speech`).
+    public static func speech(levels: [Double], step: Double, gap: Double = 0.4, pad: Double = 0.2) -> [VideoCut] {
+        let loud = levels.filter(\.isFinite).sorted()
+        guard !loud.isEmpty else { return [] }
+        let threshold = min(-30, max(-60, loud[Int(Double(loud.count) * 0.9)] - 25))
+        var out: [VideoCut] = [], begin: Int?
+        for (index, level) in levels.enumerated() {
+            let talking = level > threshold
+            if talking, begin == nil { begin = index }
+            if (!talking || index == levels.count - 1), let from = begin {
+                let start = max(0, Double(from) * step - pad), end = Double(talking ? index + 1 : index) * step + pad
+                if let last = out.last, start - last.end < gap { out[out.count-1].end = end } else { out.append(VideoCut(start: start, end: end)) }
+                begin = nil
+            }
+        }
+        return out
+    }
+    /// The music's share of its volume at `time`: `low` while someone speaks, easing over `ramp` seconds either side.
+    public static func duck(_ time: Double, ranges: [VideoCut], low: Double = 0.3, ramp: Double = 0.15) -> Double {
+        var level = 1.0
+        for r in ranges {
+            let into = min(time - (r.start - ramp), (r.end + ramp) - time)
+            guard into > 0 else { continue }
+            level = min(level, into >= ramp ? low : 1 - (1 - low) * (into / ramp))
+        }
+        return level
+    }
+
     /// Loudness in decibels for each `step` seconds of mono samples.
     public static func levels(_ samples: [Float], rate: Double, step: Double = 0.05) -> [Double] {
         let size = max(1, Int((rate * step).rounded()))
@@ -176,5 +205,91 @@ public struct VideoBlur: Codable, Equatable, Hashable, Identifiable {
     /// A box in the video's pixels (from the top left), as shares, with a little room around it.
     public static func fromPixels(_ box: CGRect, width: Double, height: Double, at time: Double, start: Double, end: Double, pad: Double = 4) -> VideoBlur {
         VideoBlur(start: max(start, time), end: min(end, time+3), x: (box.minX-pad)/width, y: (box.minY-pad)/height, w: (box.width+pad*2)/width, h: (box.height+pad*2)/height)
+    }
+}
+
+/// A named marker on a recording, at a moment of its own time.
+public struct VideoChapter: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var time: Double
+    public var title: String
+    public init(time: Double, title: String) { self.time = time; self.title = title }
+}
+
+/// Chapters and the list they make for a video's description ("0:00 Intro", "1:23 Setting up"), timed to the finished
+/// video after trimming, cuts and export speed, and starting at 0:00 as video sites expect. Windows and Linux follow
+/// the same rules (shared/chapters.js) and share the test cases.
+public enum VideoChapters {
+    public static func stamp(_ seconds: Double) -> String {
+        let s = max(0, Int((seconds + 1e-6).rounded(.down))), h = s/3600, m = s/60 % 60, r = s % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, r) : String(format: "%d:%02d", m, r)
+    }
+    public static func list(_ chapters: [VideoChapter], start: Double, end: Double, cuts: [VideoCut], speed: Double = 1) -> String {
+        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts)
+        var rows: [(at: Int, title: String)] = []
+        for chapter in chapters.sorted(by: { $0.time < $1.time }) {
+            guard chapter.time >= start, chapter.time <= end, !cuts.contains(where: { chapter.time >= $0.start && chapter.time < $0.end }) else { continue }
+            let at = Int((VideoTimeline.outputTime(at: chapter.time, kept: kept) / max(1, speed) + 1e-6).rounded(.down))
+            let words = chapter.title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let title = words.isEmpty ? "Chapter" : words
+            if let last = rows.last, last.at == at { rows[rows.count-1].title = title } else { rows.append((at, title)) }
+        }
+        guard !rows.isEmpty else { return "" }
+        if rows[0].at > 0 { rows.insert((0, "Intro"), at: 0) }
+        return rows.map { "\(stamp(Double($0.at))) \($0.title)" }.joined(separator: "\n")
+    }
+}
+
+/// Background music for a recording: a file copied in beside it, its volume (0 to 1), whether it dips while someone
+/// speaks, and where the speech is (in the recording's own time, found once when the music is added).
+public struct VideoMusic: Codable, Equatable, Hashable {
+    public var filename: String
+    public var name: String
+    public var volume: Double
+    public var duck: Bool
+    public var speech: [VideoCut]
+    public init(filename: String, name: String, volume: Double = 0.3, duck: Bool = true, speech: [VideoCut] = []) {
+        self.filename = filename; self.name = name; self.volume = volume; self.duck = duck; self.speech = speech
+    }
+}
+
+/// An arrow, a box or a spotlight shown over a video for a stretch of the recording (in its own time). Places are
+/// shares of the video (0 to 1, from the top left); an arrow's tip is (x, y) and its tail (x2, y2). Windows and Linux
+/// follow the same rules (shared/callouts.js) and share the test cases.
+public struct VideoCallout: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var kind: String
+    public var start: Double
+    public var end: Double
+    public var color: String
+    public var x: Double, y: Double
+    public var x2: Double?, y2: Double?
+    public var w: Double?, h: Double?
+    public static let kinds = ["arrow", "box", "spotlight"]
+    public static let colors = ["FF453A", "FFD60A", "32D74B", "0A84FF", "FFFFFF"]
+
+    /// A new callout at `time`, three seconds long, in the middle until it's placed somewhere else.
+    public static func new(_ kind: String, at time: Double, start: Double, end: Double) -> VideoCallout {
+        kind == "arrow"
+            ? VideoCallout(kind: kind, start: max(start, time), end: min(end, time + 3), color: colors[0], x: 0.5, y: 0.5, x2: 0.38, y2: 0.36)
+            : VideoCallout(kind: kind, start: max(start, time), end: min(end, time + 3), color: colors[0], x: 0.35, y: 0.35, w: 0.3, h: 0.3)
+    }
+    /// How opaque it is at `time` (0 to 1), or nil when it isn't showing; it fades in and out over 0.2 s.
+    public func alpha(at time: Double) -> Double? {
+        guard time >= start, time <= end else { return nil }
+        let ramp = min(0.2, (end - start) / 3)
+        return ramp > 0 ? min(1, (time - start) / ramp, (end - time) / ramp) : 1
+    }
+    /// An arrow for each recorded click inside the clip: from 0.4 s before it to 1.2 s after, its tail up and to the
+    /// left (or wherever there's room). Clicks within a second of the last are skipped.
+    public static func fromClicks(_ clicks: [ClickSample], start: Double, end: Double) -> [VideoCallout] {
+        var out: [VideoCallout] = [], last = -Double.infinity
+        let clamp = { (v: Double) in min(1, max(0, v)) }
+        for click in clicks where click.time >= start && click.time <= end && click.time - last >= 1 {
+            last = click.time
+            let dx = click.x > 0.2 ? -0.12 : 0.12, dy = click.y > 0.2 ? -0.12 : 0.12
+            out.append(VideoCallout(kind: "arrow", start: max(start, click.time - 0.4), end: min(end, click.time + 1.2), color: colors[0], x: clamp(click.x), y: clamp(click.y), x2: clamp(click.x + dx), y2: clamp(click.y + dy)))
+        }
+        return out
     }
 }
