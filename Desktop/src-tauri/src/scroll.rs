@@ -215,6 +215,42 @@ impl Stitcher {
     pub fn into_image(self) -> RgbaImage { self.combined }
 }
 
+/// A scrolling capture that works out for itself which way the page moves. Sideways is stitched as a turned
+/// frame, so the same matching does both. Until something new appears each frame is tried both ways; the first
+/// way that grows the picture decides, and the other is dropped.
+pub struct Scroller { down: Option<Stitcher>, across: Option<Stitcher> }
+
+impl Scroller {
+    pub fn new(first: RgbaImage) -> Self { Scroller { across: Some(Stitcher::new(image::imageops::rotate90(&first))), down: Some(Stitcher::new(first)) } }
+
+    pub fn append(&mut self, next: RgbaImage) -> Result<(), StitchError> {
+        if self.across.is_none() { return self.down.as_mut().map_or(Ok(()), |down| down.append(next)); }
+        let turned = image::imageops::rotate90(&next);
+        if self.down.is_none() { return self.across.as_mut().map_or(Ok(()), |across| across.append(turned)); }
+        let down = self.down.as_mut().map(|d| (d.append(next), d.frames > 1)).unwrap_or((Ok(()), false));
+        if down.1 { self.across = None; return down.0; }
+        let across = self.across.as_mut().map(|a| (a.append(turned), a.frames > 1)).unwrap_or((Ok(()), false));
+        if across.1 { self.down = None; return across.0; }
+        // Neither way has found anything new yet: it's only a problem if both say so.
+        if down.0.is_ok() || across.0.is_ok() { Ok(()) } else { down.0 }
+    }
+
+    fn active(&self) -> &Stitcher { self.down.as_ref().or(self.across.as_ref()).expect("one way is always kept") }
+    pub fn frames(&self) -> u32 { self.active().frames }
+    /// The picture's size as it will be saved.
+    pub fn dimensions(&self) -> (u32, u32) {
+        let (w, h) = self.active().combined.dimensions();
+        if self.down.is_some() { (w, h) } else { (h, w) }
+    }
+    pub fn into_image(self) -> RgbaImage {
+        match (self.down, self.across) {
+            (Some(down), _) => down.into_image(),
+            (None, Some(across)) => image::imageops::rotate270(&across.into_image()),
+            (None, None) => unreachable!("one way is always kept"),
+        }
+    }
+}
+
 // ---- Placing the controls -----------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -238,7 +274,7 @@ pub fn place_controls(area: Rect, bounds: Rect, size: (f64, f64), gap: f64) -> (
 
 const TICK: Duration = Duration::from_millis(600);
 const CONTROLS: (f64, f64) = (536.0, 68.0);
-const SCROLLING: &str = "Scroll slowly inside the area, then click Done.";
+const SCROLLING: &str = "Scroll slowly inside the area, down or sideways, then click Done.";
 const RUNNING: u8 = 0;
 const DONE: u8 = 1;
 const CANCELLED: u8 = 2;
@@ -306,7 +342,7 @@ pub fn start(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64) {
 }
 
 fn run(app: AppHandle, control: Arc<Control>, display: u32, area: Rect, first: RgbaImage, icons: Option<desktop::Hidden>) {
-    let mut stitcher = Stitcher::new(first);
+    let mut stitcher = Scroller::new(first);
     let save = loop {
         let state = control.wait(TICK);
         if state == CANCELLED { break false; }
@@ -321,9 +357,9 @@ fn run(app: AppHandle, control: Arc<Control>, display: u32, area: Rect, first: R
     if save { complete_image(&app, stitcher.into_image(), false); }
 }
 
-fn report(app: &AppHandle, stitcher: &Stitcher, message: &str) {
-    let (w, h) = stitcher.combined.dimensions();
-    let _ = app.emit_to("scroll", "scroll:status", json!({ "frames": stitcher.frames, "width": w, "height": h, "message": message }));
+fn report(app: &AppHandle, stitcher: &Scroller, message: &str) {
+    let (w, h) = stitcher.dimensions();
+    let _ = app.emit_to("scroll", "scroll:status", json!({ "frames": stitcher.frames(), "width": w, "height": h, "message": message }));
 }
 
 fn finish(app: &AppHandle) {
@@ -392,6 +428,23 @@ mod tests {
         assert_eq!(stitcher.append(frame(&source, 540, 620)), Err(StitchError::NoOverlap));
         stitcher.append(frame(&source, 300, 620)).unwrap();
         assert!(stitcher.into_image() == frame(&source, 0, 920));
+    }
+    #[test]
+    fn scrolling_sideways_rebuilds_the_page() {
+        let source = image::imageops::rotate270(&page(160, 500)); // 500 wide, 160 tall.
+        let across = |left: u32| image::imageops::crop_imm(&source, left, 0, 200, 160).to_image();
+        let mut scroller = Scroller::new(across(0));
+        for left in [70, 150, 230, 300] { scroller.append(across(left)).unwrap(); }
+        assert_eq!(scroller.dimensions(), (500, 160));
+        assert!(scroller.into_image() == source);
+    }
+    #[test]
+    fn scrolling_down_is_still_down_when_either_way_is_possible() {
+        let source = page(160, 500);
+        let mut scroller = Scroller::new(frame(&source, 0, 200));
+        for top in [70, 150, 230, 300] { scroller.append(frame(&source, top, 200)).unwrap(); }
+        assert_eq!(scroller.frames(), 5);
+        assert!(scroller.into_image() == source);
     }
     #[test]
     fn scrolling_down_rebuilds_the_page() {
