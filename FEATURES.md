@@ -18,7 +18,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Scroll wheel zooms the magnifier (2× to 16×, remembered) | ☑️ | ☑️ |
 | Hold Space to capture a window | ✅ | ✅ Windows · ☑️ Linux (X11 only) |
 | Whole-screen capture, per display | ✅ | ✅ |
-| Capture Bar (modes, exact size, aspect lock, timer) | ✅ | ✅ |
+| Capture Bar (modes, exact size, aspect lock, timer with an on-screen countdown; drag the Still mark to move it, and each capture puts it back) | ✅ | ✅ |
 | Open menus and Spotlight stay in the capture | ✅ | ☑️ |
 | Timed capture (3, 5, 10 s) | ☑️ | ☑️ |
 | Arrow-key nudging and resizing of the selection | ☑️ | ☑️ |

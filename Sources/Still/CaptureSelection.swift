@@ -462,7 +462,9 @@ struct CaptureBar: View {
     private static let accent = Studio.accent
     var body: some View {
         HStack(spacing: 4) {
+            // The Still mark is the bar's handle: drag it to move the bar out of the way. A new capture puts it back.
             Image(nsImage: Studio.menuBarIcon()).renderingMode(.template).foregroundStyle(Self.accent).padding(.leading, 6).padding(.trailing, 4)
+                .overlay(BarHandle()).help("Drag to move the Capture Bar").accessibilityLabel("Move the Capture Bar")
             mode("Area", "rectangle.dashed", selected: selection.purpose == .screenshot && !selection.windowMode) { selection.setWindowMode(false); selection.purpose = .screenshot }
             mode("Window", "macwindow", selected: selection.windowMode) { selection.toggleWindowMode() }
             mode("Screen", "display") { selection.fullscreen() }
@@ -492,4 +494,14 @@ struct CaptureBar: View {
     }
 }
 
-
+/// An invisible patch over the Capture Bar's Still mark that drags the bar's window when pressed.
+private struct BarHandle: NSViewRepresentable {
+    final class HandleView: NSView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { true }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+        override func mouseDown(with event: NSEvent) { NSCursor.closedHand.push(); window?.performDrag(with: event); NSCursor.pop() }
+    }
+    func makeNSView(context: Context) -> HandleView { HandleView() }
+    func updateNSView(_ view: HandleView, context: Context) {}
+}

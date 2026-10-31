@@ -166,6 +166,20 @@ function drawWindowMode() {
 // ---- Interaction ---------------------------------------------------------------------------
 
 const point = (e) => ({ x: e.clientX, y: e.clientY });
+// The Still mark on the bar is its handle: drag it to move the bar out of the way. It stays on screen, and every new
+// capture opens a fresh overlay with the bar back in its usual place.
+$('#barHandle').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  const bar = $('#bar'), box = bar.getBoundingClientRect(), dx = e.clientX - box.left, dy = e.clientY - box.top;
+  const handle = e.currentTarget; handle.setPointerCapture(e.pointerId); document.body.classList.add('moving-bar');
+  const move = (m) => {
+    const x = Math.max(0, Math.min(innerWidth - box.width, m.clientX - dx)), y = Math.max(0, Math.min(innerHeight - box.height, m.clientY - dy));
+    Object.assign(bar.style, { left: `${x}px`, top: `${y}px`, bottom: 'auto', transform: 'none' });
+  };
+  const end = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', end); handle.removeEventListener('pointercancel', end); document.body.classList.remove('moving-bar'); };
+  handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
+});
 const onBar = (e) => $('#bar').contains(e.target) || e.target.closest('.menu');
 
 addEventListener('mousemove', (e) => {
