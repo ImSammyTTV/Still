@@ -69,6 +69,10 @@
   /* The page is see-through on Windows glass, so floating cards bring their own blur. */
   .error, .card { backdrop-filter: blur(28px) saturate(1.4); }
   .sheet { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(0, 0, 0, .35); }
+  .export-options { min-width: 320px; }
+  .export-options label { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
+  .export-options select { min-width: 180px; }
+  .export-actions { display: flex; gap: 8px; justify-content: flex-end; width: 100%; margin-top: 6px; }
   .card { width: 340px; display: grid; gap: 12px; padding: 22px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow); text-align: center; justify-items: center; }
   .progress { width: 100%; height: 6px; border-radius: 999px; background: var(--surface-strong); overflow: hidden; }
   .progress div { height: 100%; width: 0; border-radius: 999px; background: var(--accent); }
@@ -156,6 +160,18 @@
   <span id="errorText"></span>
   <button class="btn" id="errorPlayer" hidden>Open in Default Player</button>
   <button class="btn icon plain" id="errorClose" title="Dismiss"><i data-lucide="x"></i></button>
+</div>
+<div class="sheet" id="exportSheet" hidden>
+  <div class="card export-options" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+    <b id="exportTitle">Export Video</b>
+    <label>Size <select class="field" id="exportSize">
+      <option value="0">Original</option><option value="2160">4K (2160p)</option><option value="1440">1440p</option>
+      <option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option>
+    </select></label>
+    <label>Quality <select class="field" id="exportQuality"></select></label>
+    <span class="clock dim" id="exportSummary" aria-live="polite"></span>
+    <div class="export-actions"><button class="btn" id="exportCancel">Cancel</button><button class="btn primary" id="exportGo"><i data-lucide="download"></i>Export…</button></div>
+  </div>
 </div>
 <div class="sheet" id="sheet" hidden>
   <div class="card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">

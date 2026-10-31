@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// A stretch cut out of the middle of a recording, in the recording's own time.
 public struct VideoCut: Codable, Equatable, Hashable {
@@ -51,5 +52,16 @@ public enum VideoTimeline {
             before += segment.end - segment.start
         }
         return before
+    }
+}
+
+/// An exported video's size: the shorter side brought down to `limit` (1080 for "1080p"), never up, and both sides
+/// even, as video encoders need. A limit of 0 keeps the size. Windows and Linux use the same rule (geometry.js).
+public enum VideoExportSize {
+    public static let limits = [0, 2160, 1440, 1080, 720, 480]
+    public static func title(_ limit: Int) -> String { limit == 0 ? "Original" : limit == 2160 ? "4K (2160p)" : "\(limit)p" }
+    public static func size(width: Double, height: Double, limit: Int) -> CGSize {
+        let k = limit > 0 ? min(1, Double(limit) / max(1, min(width, height))) : 1
+        return CGSize(width: max(2, floor(width * k / 2) * 2), height: max(2, floor(height * k / 2) * 2))
     }
 }

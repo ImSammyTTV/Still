@@ -89,6 +89,16 @@
     return Math.round(Math.min(100_000_000, Math.max(400_000, width * height * Math.max(1, fps) * factor)));
   };
 
+  // An exported video's size: the shorter side brought down to `limit` (1080 for "1080p"), never up, and both
+  // sides even, as video encoders need. A limit of 0 keeps the size as it is. The Mac app's export uses the same rule.
+  const exportSize = (width, height, limit) => {
+    const k = limit > 0 ? Math.min(1, limit / Math.max(1, Math.min(width, height))) : 1;
+    return { width: Math.max(2, Math.floor(width * k / 2) * 2), height: Math.max(2, Math.floor(height * k / 2) * 2) };
+  };
+  // Roughly how big a video comes out, in bytes, from its bitrate and length, with a little for the sound.
+  const estimateBytes = (bitrate, seconds) => Math.round((bitrate + 128_000) * Math.max(0, seconds) / 8);
+  const sizeLabel = (bytes) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : bytes >= 1e6 ? `${Math.max(1, Math.round(bytes / 1e6))} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+
   // A colour as #RRGGBB, and the recent colours list it joins: newest first, no repeats, at most `max`.
   const hexColor = (r, g, b) => '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
   const rememberColor = (list, color, max = 10) => [color, ...(Array.isArray(list) ? list : []).filter((c) => typeof c === 'string' && c.toUpperCase() !== color.toUpperCase())].slice(0, max);
@@ -110,5 +120,5 @@
     return name.replace(/^[-. ]+|[-. ]+$/g, '') ? name : clean(fill(DEFAULT_NAME));
   };
 
-  return { DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
+  return { DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
 });

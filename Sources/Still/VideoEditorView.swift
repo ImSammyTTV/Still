@@ -115,11 +115,25 @@ import StillCore
         }
         settings.zooms = segments
     }
+    /// Export Video asks for a size and a quality first; both are remembered for next time.
+    @Published var showExportOptions = false
+    @Published var exportLimit = UserDefaults.standard.integer(forKey: "videoExportSize") { didSet { UserDefaults.standard.set(exportLimit, forKey: "videoExportSize") } }
+    /// The finished video's size and roughly how big the file comes out, for the export options.
+    var exportSummary: String {
+        guard let frame = prepared?.size else { return "" }
+        let size = VideoExportSize.size(width: frame.width, height: frame.height, limit: exportLimit)
+        let quality = VideoQuality(rawValue: settings.quality ?? "high") ?? .high
+        let bitrate = BitratePreset.bitrate(tag: settings.quality) ?? (quality == .original ? Int(Double(VideoQuality.high.bitrate(size: size, fps: settings.fps))*1.5) : quality.bitrate(size: size, fps: settings.fps))
+        let bytes = Double(bitrate + 128_000) * VideoTimeline.length(settings.kept) / 8
+        let label = bytes >= 1e9 ? String(format: "%.1f GB", bytes/1e9) : bytes >= 1e6 ? "\(max(1, Int((bytes/1e6).rounded()))) MB" : "\(max(1, Int((bytes/1e3).rounded()))) KB"
+        return "\(Int(size.width)) × \(Int(size.height))  ·  \(String(format: "%.1f", Double(bitrate)/1e6)) Mbps  ·  about \(label)"
+    }
     func export(gif: Bool) {
         let panel = NSSavePanel(); panel.allowedContentTypes = gif ? [.gif] : [.mpeg4Movie]; panel.nameFieldStringValue = "\(item.title)-edited.\(gif ? "gif" : "mp4")"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         player.pause(); exporting = true; exportProgress = 0
-        let settings = self.settings, metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
+        var settings = self.settings; if !gif { settings.exportHeight = exportLimit > 0 ? exportLimit : nil }
+        let metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
         // Export to a temporary file and only then replace the destination, so a failed or cancelled
         // export never destroys a file you chose to replace.
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("Still-export-\(UUID()).\(gif ? "gif" : "mp4")")
@@ -148,7 +162,7 @@ struct VideoEditorView: View {
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.export(gif: false) }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
+            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -159,6 +173,15 @@ struct VideoEditorView: View {
             timeline
         }.font(.system(size: 12)).background(Studio.paper)
         .onChange(of: model.settings) { _, _ in model.schedulePreview() }
+        .sheet(isPresented: $model.showExportOptions) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Export Video").font(.headline)
+                Picker("Size", selection: $model.exportLimit) { ForEach(VideoExportSize.limits, id: \.self) { Text(VideoExportSize.title($0)).tag($0) } }
+                Picker("Quality", selection: Binding(get: { model.settings.quality ?? "high" }, set: { model.settings.quality = $0 })) { ForEach(Preferences.shared.qualityOptions(including: model.settings.quality), id: \.tag) { Text($0.title).tag($0.tag) } }
+                Text(model.exportSummary).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                HStack { Spacer(); Button("Cancel") { model.showExportOptions = false }.keyboardShortcut(.cancelAction); Button("Export…") { model.showExportOptions = false; DispatchQueue.main.async { model.export(gif: false) } }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent) }
+            }.padding(24).frame(width: 380)
+        }
         .sheet(isPresented: $model.exporting) { VStack(spacing: 18) { Text("Exporting…").font(.headline); ProgressView(value: model.exportProgress).frame(width: 300); Text("\(Int(model.exportProgress*100))%").monospacedDigit().foregroundStyle(.secondary); Button("Cancel") { model.cancelExport() } }.padding(30).interactiveDismissDisabled() }
         .alert("Video Editor", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
     }

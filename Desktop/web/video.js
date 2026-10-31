@@ -12,7 +12,6 @@
 // rings are drawn into every exported frame, so any of them means re-encoding.
 const id = params.get('id');
 const video = $('#video');
-const BITRATE = 12_000_000; // Matches the recording HUD.
 const THUMBNAILS = 9;
 let item, source, duration = 0, trim = { start: 0, end: 0 }, job = null, project = {}, saveTimer = 0;
 const NO_BG = { style: 'none', padding: 8, radius: 2, shadow: true };
@@ -411,11 +410,15 @@ const save = (bytes) => { setProgress(1); $('#cancel').disabled = true; return s
 // Where the frames come from. Chromium (WebView2) can record a media element directly, audio included.
 // WebKitGTK can't, so there the picture goes through a canvas, as in the HUD, and the sound through Web Audio.
 // A background always goes through the canvas, which draws it into each frame.
-function captureSource(player) {
-  if (player.captureStream && !needsCanvas()) return { stream: player.captureStream(), stop() {} };
+// The frames to record, at `size` (the export's chosen size): straight from the player when nothing is drawn on
+// them and the size is unchanged, otherwise through a canvas.
+function captureSource(player, size) {
   const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg);
-  const canvas = el('canvas', { width: F.w, height: F.h }), ctx = canvas.getContext('2d', { alpha: false });
-  const draw = () => drawFrame(ctx, player, F);
+  const out = size || { width: F.w, height: F.h }, scaled = out.width < F.w - 1 || out.height < F.h - 1;
+  if (player.captureStream && !needsCanvas() && !scaled) return { stream: player.captureStream(), stop() {} };
+  const canvas = el('canvas', { width: out.width, height: out.height }), ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingQuality = 'high';
+  const draw = () => { ctx.setTransform(out.width / F.w, 0, 0, out.height / F.h, 0, 0); drawFrame(ctx, player, F); };
   draw();
   const timer = setInterval(draw, 1000 / 30);
   let audio = null, sound;
@@ -430,12 +433,12 @@ function captureSource(player) {
   return { stream: new MediaStream(tracks), stop() { clearInterval(timer); if (audio) audio.close(); } };
 }
 
-async function recordClip(run, type) {
+async function recordClip(run, type, plan) {
   const clip = { ...trim }, clipCuts = cuts.map((c) => ({ ...c })), segments = StillTrim.kept(clip, clipCuts), total = StillTrim.keptLength(clip, clipCuts), player = await unseenPlayer();
   await seek(player, clip.start);
   if (run.cancelled) return null;
-  const capture = captureSource(player), chunks = [];
-  const recorder = new MediaRecorder(capture.stream, { mimeType: type, videoBitsPerSecond: BITRATE });
+  const capture = captureSource(player, plan.size), chunks = [];
+  const recorder = new MediaRecorder(capture.stream, { mimeType: type, videoBitsPerSecond: plan.bitrate });
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   let watcher;
   const finish = () => { clearInterval(watcher); if (recorder.state !== 'inactive') recorder.stop(); };
@@ -479,9 +482,46 @@ async function recordClip(run, type) {
   return new Uint8Array(await new Blob(chunks, { type }).arrayBuffer());
 }
 
-$('#exportVideo').onclick = () => {
+// Export options, asked each time Export Video is chosen and remembered for next time: a size (the shorter side
+// brought down to 2160, 1440, 1080, 720 or 480 pixels, never up) and a quality (Maximum, the Mac's High,
+// Balanced and Smaller File, or a bitrate preset from Settings → Recording).
+let prefs = {};
+const exportChoice = (() => { try { return JSON.parse(localStorage.getItem('stillVideoExport')) || {}; } catch { return {}; } })();
+const sourceFrame = () => StillBackdrop.videoFrame(video.videoWidth, video.videoHeight, bg);
+function exportPlan() {
+  const F = sourceFrame(), limit = Number($('#exportSize').value) || 0, quality = $('#exportQuality').value || 'original';
+  const size = StillGeometry.exportSize(F.w, F.h, limit), scaled = size.width < F.w - 1 || size.height < F.h - 1;
+  const bitrate = quality === 'original' ? Math.min(100_000_000, StillGeometry.videoBitrate(size.width, size.height, 30, 'high') * 1.5) : StillGeometry.videoBitrate(size.width, size.height, 30, quality);
+  const copy = isWhole() && !needsCanvas() && !scaled && quality === 'original';
+  return { limit, quality, size, scaled, bitrate, copy, seconds: StillTrim.keptLength(trim, cuts) };
+}
+function renderExportSummary() {
+  const plan = exportPlan();
+  $('#exportSummary').textContent = plan.copy ? `${plan.size.width} × ${plan.size.height} · an exact copy of the recording`
+    : `${plan.size.width} × ${plan.size.height} · ${(plan.bitrate / 1e6).toFixed(1)} Mbps · about ${StillGeometry.sizeLabel(StillGeometry.estimateBytes(plan.bitrate, plan.seconds))}`;
+}
+function openExportOptions() {
+  const presets = (Array.isArray(prefs.recording?.bitratePresets) ? prefs.recording.bitratePresets : []).filter((p) => p && String(p.name || '').trim() && Number(p.megabits) > 0);
+  const options = [['original', 'Maximum'], ['high', 'High'], ['balanced', 'Balanced'], ['compact', 'Smaller File'],
+    ...presets.map((p) => [`bitrate:${Math.round(Math.min(100, Math.max(1, Number(p.megabits))) * 1e6)}`, `${p.name} (${Math.min(100, Math.max(1, Number(p.megabits)))} Mbps)`])];
+  $('#exportQuality').replaceChildren(...options.map(([value, text]) => el('option', { value }, text)));
+  $('#exportQuality').value = options.some(([v]) => v === exportChoice.quality) ? exportChoice.quality : 'original';
+  $('#exportSize').value = String(exportChoice.size || 0);
+  if (!$('#exportSize').value) $('#exportSize').value = '0';
+  renderExportSummary();
+  $('#exportSheet').hidden = false; $('#exportGo').focus();
+}
+$('#exportSize').onchange = $('#exportQuality').onchange = renderExportSummary;
+$('#exportCancel').onclick = () => { $('#exportSheet').hidden = true; };
+$('#exportSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); $('#exportSheet').hidden = true; } });
+$('#exportVideo').onclick = openExportOptions;
+$('#exportGo').onclick = () => {
+  const plan = exportPlan();
+  exportChoice.size = plan.limit; exportChoice.quality = plan.quality;
+  try { localStorage.setItem('stillVideoExport', JSON.stringify(exportChoice)); } catch { /* remembered for this window only */ }
+  $('#exportSheet').hidden = true;
   const ext = item.path.split('.').pop().toLowerCase();
-  if (isWhole() && !needsCanvas()) {
+  if (plan.copy) {
     return runExport('Exporting…', async () => {
       const target = await still.invoke('video:target', ext);
       return target && still.invoke('video:copy');
@@ -489,10 +529,10 @@ $('#exportVideo').onclick = () => {
   }
   const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && MediaRecorder.isTypeSupported(type));
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
-  runExport(needsCanvas() ? 'Exporting…' : 'Trimming…', async (run) => {
+  runExport(needsCanvas() || plan.scaled ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);
     if (!target || run.cancelled) return null;
-    const bytes = await recordClip(run, format.type);
+    const bytes = await recordClip(run, format.type, plan);
     return bytes && save(bytes);
   });
 };
@@ -574,7 +614,7 @@ async function open() {
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.
 }
 
-applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); return open(); })
+applyTheme().then((loaded) => { prefs = loaded || {}; if (prefs.platform !== 'darwin') addWindowControls(); return open(); })
   .catch((error) => { $('#status').hidden = true; showError(`Couldn’t open this recording: ${message(error)}`, true); });
 refreshIcons();
 still.on('library:changed', async () => { if (!(await still.invoke('library:get', id))) still.send('window:close'); });

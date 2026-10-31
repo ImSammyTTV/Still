@@ -65,6 +65,7 @@ public enum VideoEngine {
         var width = oriented.width+padding*2, height = oriented.height+padding*2
         if settings.aspect > 0 { if width/height < settings.aspect { width = height*settings.aspect } else { height = width/settings.aspect } }
         let limit = min(1, 4096/max(width, height)); width = max(2, floor(width*limit/2)*2); height = max(2, floor(height*limit/2)*2)
+        if let chosen = settings.exportHeight, chosen > 0 { let reduced = VideoExportSize.size(width: width, height: height, limit: chosen); width = reduced.width; height = reduced.height }
         let size = CGSize(width: width, height: height)
         let composition = AVMutableVideoComposition()
         composition.customVideoCompositorClass = CaptureVideoCompositor.self

@@ -25,4 +25,13 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoTimeline.outputTime(at: 5, kept: kept), 3)
         XCTAssertEqual(VideoTimeline.outputTime(at: 8, kept: kept), 4)
     }
+
+    /// The same cases as the export size test in Desktop/test/geometry.test.js.
+    func testExportSizesBringTheShorterSideDownNeverUpAndStayEven() {
+        XCTAssertEqual(VideoExportSize.size(width: 2880, height: 1800, limit: 1080), CGSize(width: 1728, height: 1080))
+        XCTAssertEqual(VideoExportSize.size(width: 1920, height: 1080, limit: 720), CGSize(width: 1280, height: 720))
+        XCTAssertEqual(VideoExportSize.size(width: 1080, height: 1920, limit: 720), CGSize(width: 720, height: 1280))
+        XCTAssertEqual(VideoExportSize.size(width: 1280, height: 720, limit: 1080), CGSize(width: 1280, height: 720))
+        XCTAssertEqual(VideoExportSize.size(width: 1001, height: 563, limit: 0), CGSize(width: 1000, height: 562))
+    }
 }

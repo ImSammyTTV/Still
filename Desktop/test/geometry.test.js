@@ -71,3 +71,13 @@ test('file names follow the pattern, the same way the app names files', () => {
   assert.equal(G.fileName(' ... ', { date }), 'Screenshot 2026-10-31 at 09.05.07');
   assert.equal([...G.fileName('x'.repeat(300), { date })].length, 180);
 });
+
+// The same cases are in the Mac app's VideoExportSizeTests.
+test('export sizes bring the shorter side down, never up, and stay even', () => {
+  assert.deepEqual(G.exportSize(2880, 1800, 1080), { width: 1728, height: 1080 });
+  assert.deepEqual(G.exportSize(1920, 1080, 720), { width: 1280, height: 720 });
+  assert.deepEqual(G.exportSize(1080, 1920, 720), { width: 720, height: 1280 });
+  assert.deepEqual(G.exportSize(1280, 720, 1080), { width: 1280, height: 720 }, 'no enlarging');
+  assert.deepEqual(G.exportSize(1001, 563, 0), { width: 1000, height: 562 }, 'original, made even');
+  assert.equal(G.sizeLabel(G.estimateBytes(8_000_000, 60)), '61 MB');
+});
