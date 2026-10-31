@@ -84,7 +84,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
 | Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
 | Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
-| Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM | ✅ 14 server tests | (same server) |
+| Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM, Trash with Empty Trash and Delete Forever | ✅ 15 server tests | (same server) |
 
 ## App
 
@@ -119,4 +119,4 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 - `still --self-test`: runs on real Windows and Linux machines in GitHub Actions and checks capture, the Floating Preview,
   copying, History, the editor, capturing the previous area, scrolling capture, hiding desktop icons, the camera bubble
   and click and keystroke overlays, text recognition and uploading to a Still Cloud server.
-- `python3 -m unittest discover -s Cloud/tests`: 14 sharing-server tests.
+- `python3 -m unittest discover -s Cloud/tests`: 15 sharing-server tests.
