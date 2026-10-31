@@ -9,22 +9,24 @@ const TOOLS = [
   ['select', 'mouse-pointer-2', 'Select', 'v'], ['arrow', 'move-up-right', 'Arrow', 'a'], ['rect', 'square', 'Rectangle', 'r'],
   ['filled', 'square-dashed-bottom', 'Filled Rectangle', 'f'], ['ellipse', 'circle', 'Ellipse', 'o'], ['line', 'slash', 'Line', 'l'],
   ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Counter', 'n'],
-  ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['measure', 'ruler', 'Measure', 'd'], ['crop', 'crop', 'Crop', 'c']
+  ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['measure', 'ruler', 'Measure', 'd'], ['stamp', 'smile-plus', 'Stamp', 'e'], ['crop', 'crop', 'Crop', 'c']
 ];
 const COLORS = ['#FF453A', '#FF9F0A', '#FFD60A', '#32D74B', '#64D2FF', '#0A84FF', '#BF5AF2', '#FF375F', '#FFFFFF', '#1D1D1F'];
 const STROKES = [2, 4, 6, 10, 16];
+// The Stamp tool's emoji; the style menu picks one, and a click drops it at a size that suits the picture.
+const STAMPS = ['✅', '❌', '⚠️', '👉', '👆', '⭐', '❤️', '👍', '👎', '🔥', '💡', '❓', '👀', '🎉', '🐛', '🚫'];
 const GRADIENTS = StillBackdrop.GRADIENTS;
 
 // `image` is what's being edited: the original capture, or doc.source once it has been resized, rotated or flipped.
 let image = new Image(), original = image, bgImage = null, prefs = {};
 let doc = { marks: [], crop: null, source: null, bg: { style: 'none', padding: 64, radius: 12, shadow: true, aspect: 0, balance: false, custom: null } };
 let tool = 'arrow', color = '#FF453A', stroke = 4, zoom = 0;
-const styles = { arrow: 'filled', text: 'shadow' };
+const styles = { arrow: 'filled', text: 'shadow', stamp: '✅' };
 // Images the document uses, by id: their data URLs, and decoded copies because drawing has to be synchronous.
 let assets = {};
 const decoded = new Map();
 let selected = null, drag = null, pendingCrop = null, history = [], future = [], dirty = false, saveTimer = null;
-const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'loupe', 'image'].includes(m.type);
+const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'loupe', 'stamp', 'image'].includes(m.type);
 // How much a Loupe enlarges what's under it.
 const LOUPE_ZOOM = 2;
 const isSegment = (m) => m.type === 'arrow' || m.type === 'line' || m.type === 'measure';
@@ -113,6 +115,13 @@ function drawMark(t, m) {
     case 'redact': t.fillStyle = '#000'; t.fillRect(r.x, r.y, r.w, r.h); break;
     case 'ellipse': t.beginPath(); t.ellipse(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, r.h / 2, 0, 0, Math.PI * 2); t.stroke(); break;
     case 'line': t.beginPath(); t.moveTo(m.x1, m.y1); t.lineTo(m.x2, m.y2); t.stroke(); break;
+    case 'stamp': {
+      // The emoji fills the box's shorter side, centred in it.
+      const size = Math.min(r.w, r.h);
+      t.font = `${Math.max(4, size * 0.86)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", ${fontFamily()}`;
+      t.textAlign = 'center'; t.textBaseline = 'middle'; t.fillText(m.text || '✅', r.x + r.w / 2, r.y + r.h / 2 + size * 0.04);
+      break;
+    }
     case 'measure': {
       // A line with a short bar across each end and its length in a pill at the middle.
       const angle = Math.atan2(m.y2 - m.y1, m.x2 - m.x1), bar = Math.max(8, m.stroke * 3);
@@ -282,6 +291,7 @@ stage.addEventListener('mousedown', (e) => {
   const mark = tool === 'pen' ? { type: 'pen', points: [p], color, stroke }
     : tool === 'arrow' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke, style: styles.arrow }
     : tool === 'line' || tool === 'measure' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke }
+    : tool === 'stamp' ? { type: tool, x: p.x, y: p.y, w: 0, h: 0, color, stroke, text: styles.stamp }
     : { type: tool, x: p.x, y: p.y, w: 0, h: 0, color, stroke };
   if (tool === 'highlight' && e.altKey === false) mark.smart = true;
   doc.marks.push(mark);
@@ -327,7 +337,8 @@ addEventListener('mouseup', () => {
   const d = drag; drag = null;
   if (d.kind === 'draw') {
     const b = bounds(d.mark);
-    if (d.mark.type !== 'pen' && b.w < 3 && b.h < 3) { doc.marks.pop(); render(); return; }
+    if (d.mark.type === 'stamp' && b.w < 8 && b.h < 8) { const size = Math.round(Math.max(48, Math.min(image.naturalWidth, image.naturalHeight) / 10)); Object.assign(d.mark, { x: d.start.x - size / 2, y: d.start.y - size / 2, w: size, h: size }); }
+    else if (d.mark.type !== 'pen' && b.w < 3 && b.h < 3) { doc.marks.pop(); render(); return; }
     if (d.mark.w !== undefined) Object.assign(d.mark, G.normalize(d.mark));
     commit();
   } else if (d.kind === 'move' || d.kind === 'handle') {
@@ -428,22 +439,24 @@ $('#color').onclick = (e) => {
 };
 $('#stroke').onclick = (e) => popupMenu(e.currentTarget, STROKES.map((s) => ({ label: `${s} px${s === stroke ? '  ✓' : ''}`, action: () => { stroke = s; if (selected && selected.stroke !== undefined) { selected.stroke = s; commit(); render(); } still.invoke('settings:set', { annotate: { stroke: s } }); } })));
 // The style menu follows what's being drawn or selected, and is greyed out for marks without styles.
-const styleKind = () => { const type = selected ? selected.type : tool; return type === 'arrow' || type === 'text' ? type : null; };
+const styleKind = () => { const type = selected ? selected.type : tool; return type === 'arrow' || type === 'text' || type === 'stamp' ? type : null; };
 let styleIcon = 'arrow';
 function syncStyleButton() {
   const kind = styleKind();
   $('#style').disabled = !kind;
-  if (kind && kind !== styleIcon) { styleIcon = kind; $('#style').innerHTML = icon(kind === 'arrow' ? 'move-up-right' : 'type'); refreshIcons(); }
+  if (kind && kind !== styleIcon) { styleIcon = kind; $('#style').innerHTML = icon(kind === 'arrow' ? 'move-up-right' : kind === 'stamp' ? 'smile-plus' : 'type'); refreshIcons(); }
 }
 function setStyle(kind, value) {
   styles[kind] = value;
-  if (selected) { selected.style = value; commit(); render(); }
+  if (selected && kind === 'stamp') { selected.text = value; commit(); render(); }
+  else if (selected) { selected.style = value; commit(); render(); }
   still.invoke('settings:set', { annotate: { [`${kind}Style`]: value } });
 }
 $('#style').onclick = (e) => {
   const anchor = e.currentTarget;
   finishTextEdit();
   const kind = styleKind(); if (!kind) return;
+  if (kind === 'stamp') { const current = selected ? selected.text : styles.stamp; return popupMenu(anchor, STAMPS.map((emoji) => ({ label: `${emoji}${emoji === current ? '  ✓' : ''}`, action: () => setStyle('stamp', emoji) }))); }
   const names = kind === 'arrow' ? M.ARROW_STYLES : M.TEXT_STYLES;
   const current = selected ? (kind === 'arrow' ? M.arrowStyle(selected) : M.textStyle(selected)) : styles[kind];
   popupMenu(anchor, names.map((name) => ({ label: `${name[0].toUpperCase()}${name.slice(1)}${name === current ? '  ✓' : ''}`, action: () => setStyle(kind, name) })));
@@ -744,6 +757,7 @@ function demoImage() {
   color = prefs.annotate?.color || color; stroke = prefs.annotate?.stroke || stroke;
   if (M.ARROW_STYLES.includes(prefs.annotate?.arrowStyle)) styles.arrow = prefs.annotate.arrowStyle;
   if (M.TEXT_STYLES.includes(prefs.annotate?.textStyle)) styles.text = prefs.annotate.textStyle;
+  if (STAMPS.includes(prefs.annotate?.stampStyle)) styles.stamp = prefs.annotate.stampStyle;
   $('#swatch').style.background = color;
   syncWatermark();
   if (prefs.platform !== 'darwin') addWindowControls();

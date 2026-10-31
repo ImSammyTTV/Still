@@ -98,6 +98,7 @@ final class MarkCanvas: NSView {
         }
         draft = Mark(tool: model.tool, points: [PixelPoint(start), PixelPoint(start)], color: model.color, width: model.lineWidth)
         draft?.style = model.markStyle
+        if model.tool == .stamp { draft?.text = model.stamp }
         needsDisplay = true
     }
     override func mouseDragged(with event: NSEvent) {
@@ -142,8 +143,11 @@ final class MarkCanvas: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         if movingMark != nil { movingMark = nil; resizing = false; movingControl = false; needsDisplay = true; return }
-        guard let mark = draft else { return }
+        guard var mark = draft else { return }
         draft = nil
+        if mark.tool == .stamp, mark.rect.width < 8, mark.rect.height < 8 {
+            let box = Mark.stampBox(at: start, pictureSize: CGSize(width: model.source.width, height: model.source.height)); mark.points = [box.0, box.1]
+        }
         if mark.tool == .crop { if mark.rect.width > 3, mark.rect.height > 3 { model.crop(mark.rect) } }
         else if mark.tool == .pen || (mark.rect.width > 2 || mark.rect.height > 2) { model.commit(mark) }
         needsDisplay = true

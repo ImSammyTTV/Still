@@ -9,7 +9,7 @@ public struct PixelPoint: Codable, Equatable {
 }
 
 public enum MarkTool: String, CaseIterable, Codable, Identifiable {
-    case select, arrow, rectangle, filledRectangle, ellipse, line, pen, highlight, text, number, redact, blur, pixelate, spotlight, loupe, measure, crop, image
+    case select, arrow, rectangle, filledRectangle, ellipse, line, pen, highlight, text, number, redact, blur, pixelate, spotlight, loupe, measure, stamp, crop, image
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -21,6 +21,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .spotlight: return "Spotlight"
         case .loupe: return "Loupe"
         case .measure: return "Measure"
+        case .stamp: return "Stamp"
         case .image: return "Add Image"
         case .arrow: return "Arrow"
         case .rectangle: return "Rectangle"
@@ -43,6 +44,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .spotlight: return "circle.lefthalf.filled"
         case .loupe: return "plus.magnifyingglass"
         case .measure: return "ruler"
+        case .stamp: return "face.smiling"
         case .image: return "photo.badge.plus"
         case .arrow: return "arrow.up.right"
         case .rectangle: return "rectangle"
@@ -65,6 +67,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .spotlight: return "s"
         case .loupe: return "m"
         case .measure: return "d"
+        case .stamp: return "e"
         case .image: return "i"
         case .arrow: return "a"
         case .rectangle: return "r"
@@ -100,6 +103,13 @@ public struct Mark: Codable, Equatable, Identifiable {
     }
     /// A Measure mark's label: the distance between its ends in the picture's pixels, with the width and height when
     /// it runs at a slant. Windows and Linux give the same text (marks.js measureLabel).
+    /// The Stamp tool's emoji; the style menu picks one, and a click drops it at a size that suits the picture.
+    public static let stamps = ["✅", "❌", "⚠️", "👉", "👆", "⭐", "❤️", "👍", "👎", "🔥", "💡", "❓", "👀", "🎉", "🐛", "🚫"]
+    /// The square a click drops a stamp in, centred on the click: a tenth of the picture's shorter side, at least 48 px.
+    public static func stampBox(at point: CGPoint, pictureSize: CGSize) -> (PixelPoint, PixelPoint) {
+        let size = max(48, (min(pictureSize.width, pictureSize.height) / 10).rounded())
+        return (PixelPoint(x: point.x - size/2, y: point.y - size/2), PixelPoint(x: point.x + size/2, y: point.y + size/2))
+    }
     public var measureLabel: String {
         guard let a = points.first, let b = points.last else { return "0 px" }
         let w = Int(abs(b.x - a.x).rounded()), h = Int(abs(b.y - a.y).rounded()), length = Int(hypot(b.x - a.x, b.y - a.y).rounded())

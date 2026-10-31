@@ -191,6 +191,16 @@ public enum ImageRenderer {
                     text.draw(at: point)
                 }
                 NSGraphicsContext.restoreGraphicsState()
+            case .stamp:
+                // The emoji fills the box's shorter side, centred in it.
+                let box = r(mark.rect), size = min(box.width, box.height)
+                guard size >= 4 else { break }
+                let text = NSAttributedString(string: mark.text.isEmpty ? "✅" : mark.text, attributes: [.font: NSFont.systemFont(ofSize: size*0.8)])
+                let s = text.size()
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+                text.draw(at: CGPoint(x: box.midX-s.width/2, y: box.midY-s.height/2))
+                NSGraphicsContext.restoreGraphicsState()
             case .measure:
                 // A line with a short bar across each end and its length in a pill at the middle.
                 let start = p(first), end = p(last), angle = atan2(end.y-start.y, end.x-start.x), bar = max(8, mark.width*3)

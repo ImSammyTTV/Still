@@ -5,7 +5,7 @@ struct EditorView: View {
     @ObservedObject var model: EditorModel
     @ObservedObject private var palette = ColorPalette.shared
     @FocusState private var textFocused: Bool
-    private let tools: [MarkTool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text, .pixelate, .spotlight, .loupe, .measure, .number, .pen, .highlight, .blur]
+    private let tools: [MarkTool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text, .pixelate, .spotlight, .loupe, .measure, .stamp, .number, .pen, .highlight, .blur]
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -89,13 +89,15 @@ struct EditorView: View {
             Menu {
                 if model.tool == .text || model.selectedMark?.tool == .text {
                     ForEach(["plain", "bold", "outline", "shadow", "label", "border", "bubble"], id: \.self) { style in Button(style.capitalized) { model.setStyle(style) } }
+                } else if model.tool == .stamp || model.selectedMark?.tool == .stamp {
+                    ForEach(Mark.stamps, id: \.self) { emoji in Button(emoji == model.stamp ? "\(emoji)  ✓" : emoji) { model.setStamp(emoji) } }
                 } else if model.tool == .blur || model.selectedMark?.tool == .blur {
                     Button("Strong Blur") { model.setStyle("strong") }; Button("Smooth Blur") { model.setStyle("smooth") }
                 } else {
                     ForEach(["plain", "filled", "double", "curved"], id: \.self) { style in Button(style.capitalized) { model.setStyle(style) } }
                     Divider(); Button("Solid Redaction") { model.tool = .redact }
                 }
-            } label: { Image(systemName: model.tool == .text ? "textformat" : "arrow.up.right").padding(5) }.menuStyle(.borderlessButton).fixedSize().help("Tool style")
+            } label: { Image(systemName: model.tool == .text ? "textformat" : model.tool == .stamp ? "face.smiling" : "arrow.up.right").padding(5) }.menuStyle(.borderlessButton).fixedSize().help("Tool style")
             Spacer(minLength: 0)
             Menu("Save as…") {
                 Button("Image…") { model.export() }.keyboardShortcut("e", modifiers: .command)

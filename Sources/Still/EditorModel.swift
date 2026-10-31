@@ -117,6 +117,12 @@ final class EditorModel: ObservableObject {
     }
     func setColor(_ value: String) { color = value; if var mark = selectedMark, tool == .select { snapshot(); mark.color = value; replace(mark) } }
     func setWidth(_ value: Double) { lineWidth = value; if var mark = selectedMark, tool == .select { snapshot(); mark.width = value; replace(mark) } }
+    /// The emoji the Stamp tool drops, remembered between pictures.
+    @Published var stamp = UserDefaults.standard.string(forKey: "stampEmoji").flatMap { Mark.stamps.contains($0) ? $0 : nil } ?? "✅"
+    func setStamp(_ emoji: String) {
+        stamp = emoji; UserDefaults.standard.set(emoji, forKey: "stampEmoji")
+        if var mark = selectedMark, mark.tool == .stamp { snapshot(); mark.text = emoji; replace(mark) }
+    }
     func setStyle(_ value: String) { markStyle = value; if var mark = selectedMark, tool == .select { snapshot(); mark.style = value; replace(mark) } }
     func undo() {
         guard let state = undoStack.popLast() else { return }
