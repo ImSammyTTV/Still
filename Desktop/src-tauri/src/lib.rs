@@ -1660,6 +1660,7 @@ fn self_test(app: AppHandle, dir: PathBuf) {
                                 log("nativeDuration", json!((f.duration * 10.0).round() / 10.0));
                                 log("nativeFrames", json!(f.frames));
                                 log("nativeHardwareEncoder", json!(f.hardware));
+                                log("nativeLitShare", json!((f.lit * 100.0).round() / 100.0));
                                 log("nativeBytes", json!(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)));
                             }
                             Err(e) => log("nativeRecorder", json!(format!("didn’t finish: {e}"))),

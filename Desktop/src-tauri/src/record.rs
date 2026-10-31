@@ -33,6 +33,16 @@ pub struct Finished {
     pub dropped: u64,
     /// Whether a hardware encoder did the work.
     pub hardware: bool,
+    /// Share of the last frame's pixels that aren't black: a capture that returned nothing reads 0.
+    pub lit: f64,
+}
+
+/// Share of BGRA pixels brighter than near-black. Tells a real capture from an empty one.
+pub fn lit_share(pixels: &[u8]) -> f64 {
+    let total = pixels.len() / 4;
+    if total == 0 { return 0.0; }
+    let lit = pixels.chunks_exact(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count();
+    lit as f64 / total as f64
 }
 
 /// Rounds a selection to the even pixel sizes H.264 requires, and to at least 2×2.
@@ -108,7 +118,7 @@ pub fn start(_: Options) -> Result<Handle, String> { Err("Still’s own recorder
 
 #[cfg(windows)]
 mod imp {
-    use super::{bitrate, Cmd, Finished, Handle, Options, Timeline};
+    use super::{bitrate, lit_share, Cmd, Finished, Handle, Options, Timeline};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
     use windows::core::{factory, Interface, HSTRING, PCWSTR};
@@ -397,7 +407,7 @@ mod imp {
                 Ok(Cmd::Stop(reply)) => {
                     let hardware = writer.as_ref().map(|w| w.hardware).unwrap_or(false);
                     let result = writer.take().map(Writer::finish).unwrap_or(Ok(()));
-                    let _ = reply.send(result.map(|_| Finished { path: options.path.clone(), duration: written_until as f64 / 10_000_000.0, frames, dropped, hardware }));
+                    let _ = reply.send(result.map(|_| Finished { path: options.path.clone(), duration: written_until as f64 / 10_000_000.0, frames, dropped, hardware, lit: lit_share(&pixels) }));
                     return Ok(());
                 }
                 Ok(Cmd::Cancel) | Err(mpsc::TryRecvError::Disconnected) => {
@@ -450,6 +460,13 @@ mod tests {
         assert_eq!(bitrate(1920, 1080, 30), 11_197_440);
         assert_eq!(bitrate(10, 10, 1), 400_000);
         assert_eq!(bitrate(7680, 4320, 60), 100_000_000);
+    }
+
+    #[test]
+    fn an_empty_capture_reads_as_unlit() {
+        assert_eq!(lit_share(&[]), 0.0);
+        assert_eq!(lit_share(&[0, 0, 0, 255, 3, 2, 1, 255]), 0.0);
+        assert_eq!(lit_share(&[0, 0, 0, 255, 200, 120, 40, 255]), 0.5);
     }
 
     #[test]
