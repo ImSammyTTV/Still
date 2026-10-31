@@ -69,6 +69,12 @@ import StillCore
     @AppStorage("rememberSelection") var rememberSelection = true
     @AppStorage("exportFormat") var exportFormat = "png"
     @AppStorage("filenamePattern") var filenamePattern = "Screenshot {date} at {time}"
+    @AppStorage("watermarkText") var watermarkText = ""
+    @AppStorage("watermarkPosition") var watermarkPosition = "bottomRight"
+    @AppStorage("watermarkSize") var watermarkSize = "medium"
+    @AppStorage("watermarkOpacity") var watermarkOpacity = 0.7
+    /// Your text over every picture the editor copies, saves or shares; nil when there's none.
+    var watermark: Watermark? { Watermark(text: watermarkText, position: watermarkPosition, size: watermarkSize, opacity: watermarkOpacity) }
     @AppStorage("retentionDays") var retentionDays = 0
     @AppStorage("ocrLanguage") var ocrLanguage = "auto"
     @AppStorage("ocrLineBreaks") var ocrLineBreaks = true

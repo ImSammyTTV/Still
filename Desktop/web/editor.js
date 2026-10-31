@@ -65,6 +65,8 @@ function render(target = ctx, { handles = true } = {}) {
   if (target === ctx && tool === 'crop') drawCropOverlay(target);
   if (handles && target === ctx && selected && tool === 'select') drawHandles(target, selected);
   target.restore();
+  // The watermark from Settings sits over the whole picture, background included; the toolbar can leave it off this one.
+  if (doc.watermark !== false) StillWatermark.draw(target, L.w, L.h, prefs.watermark, fontFamily());
   if (target === ctx) syncStyleButton();
 }
 
@@ -237,7 +239,7 @@ function forgetOldImages() {
 let lastState = snapshot();
 function undo() { if (!history.length) return; future.push(snapshot()); doc = JSON.parse(history.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
 function redo() { if (!future.length) return; history.push(snapshot()); doc = JSON.parse(future.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
-function afterDocChange() { syncSource(); dirty = true; scheduleSave(); syncPanel(); updateButtons(); loadBgImage().then(render); }
+function afterDocChange() { syncSource(); dirty = true; scheduleSave(); syncPanel(); updateButtons(); syncWatermark(); loadBgImage().then(render); }
 function syncSource() { image = decoded.get(doc.source) || original; }
 function updateButtons() { $('#undo').disabled = !history.length; $('#redo').disabled = !future.length; $('#undo').style.opacity = history.length ? 1 : 0.4; $('#redo').style.opacity = future.length ? 1 : 0.4; }
 
@@ -651,6 +653,13 @@ async function recognize() {
 }
 // Covers every email address, card number, key, IP address and phone number the text recognition finds with a
 // redact box, as one step that a single undo takes back.
+$('#watermark').onclick = () => { doc.watermark = doc.watermark === false; commit(); syncWatermark(); render(); toast(doc.watermark ? 'Watermark on' : 'Watermark off for this picture'); };
+function syncWatermark() {
+  const b = $('#watermark'), on = doc.watermark !== false;
+  b.hidden = !StillWatermark.normalize(prefs.watermark);
+  b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Watermark on: click to leave it off this picture' : 'Watermark off for this picture: click to add it';
+}
 $('#private').onclick = () => hidePrivate();
 async function hidePrivate() {
   finishTextEdit(); toast('Looking for private details…');
@@ -723,6 +732,7 @@ function demoImage() {
   if (M.ARROW_STYLES.includes(prefs.annotate?.arrowStyle)) styles.arrow = prefs.annotate.arrowStyle;
   if (M.TEXT_STYLES.includes(prefs.annotate?.textStyle)) styles.text = prefs.annotate.textStyle;
   $('#swatch').style.background = color;
+  syncWatermark();
   if (prefs.platform !== 'darwin') addWindowControls();
   let src;
   if (itemId) {

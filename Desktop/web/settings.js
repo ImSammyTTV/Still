@@ -33,8 +33,8 @@ const patchFor = (path, value) => path.split('.').reduceRight((acc, k) => ({ [k]
 // `off` is for a feature this desktop can't do: it shows as off whatever was saved. `disabled` only locks the switch.
 const toggle = (label, path, { disabled = false, off = false, redraw = false } = {}) => row(label, el('input', { type: 'checkbox', class: 'switch', 'aria-label': label, checked: !!get(path) && !off, disabled: disabled || off,
   onchange: async (e) => { await set(patchFor(path, e.target.checked)); if (redraw) render(); } }));
-const select = (label, path, options, number = false) => {
-  const s = el('select', { class: 'field', 'aria-label': label, onchange: (e) => set(patchFor(path, number ? Number(e.target.value) : e.target.value)) },
+const select = (label, path, options, number = false, { disabled = false } = {}) => {
+  const s = el('select', { class: 'field', 'aria-label': label, disabled, onchange: (e) => set(patchFor(path, number ? Number(e.target.value) : e.target.value)) },
     options.map(([value, text]) => el('option', { value, selected: String(get(path)) === String(value) }, text)));
   return row(label, s);
 };
@@ -50,6 +50,20 @@ const fileNameRow = () => {
     oninput: (e) => show(e.target.value), onchange: (e) => set({ fileName: e.target.value.trim() || StillGeometry.DEFAULT_NAME }) });
   show(input.value);
   return el('div', { class: 'row', style: 'flex-wrap:wrap' }, [el('span', {}, 'File name'), el('span', { style: 'display:grid;justify-items:end' }, [input, preview])]);
+};
+
+// Your own text over every picture the editor copies, saves or shares; empty for none.
+const watermarkGroup = () => {
+  const wm = get('watermark') || {};
+  const on = !!String(wm.text || '').trim();
+  const text = el('input', { type: 'text', class: 'field', value: wm.text || '', placeholder: 'e.g. © Your Name', 'aria-label': 'Watermark text', style: 'width:260px', maxlength: '120',
+    onchange: async (e) => { await set(patchFor('watermark.text', e.target.value.trim())); render(); } });
+  return group('Watermark', [
+    row('Text', text),
+    select('Position', 'watermark.position', [['bottomRight', 'Bottom right'], ['bottomLeft', 'Bottom left'], ['topRight', 'Top right'], ['topLeft', 'Top left'], ['center', 'Centre']], false, { disabled: !on }),
+    select('Size', 'watermark.size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], false, { disabled: !on }),
+    select('Opacity', 'watermark.opacity', [[1, '100%'], [0.7, '70%'], [0.5, '50%'], [0.3, '30%']], true, { disabled: !on })
+  ], on ? 'Added to pictures you copy, save or share from the editor. The stamp button in the editor leaves it off one picture.' : 'Type some text to add it to pictures you copy, save or share from the editor.');
 };
 
 // High, Balanced, Smaller File, a named preset, or a bitrate you choose. A bitrate is saved as the Mac's
@@ -153,6 +167,7 @@ const pages = {
       select('Format', 'imageFormat', [['png', 'PNG'], ['jpg', 'JPEG']]),
       select('JPEG quality', 'jpegQuality', [[100, 'Maximum'], [90, 'High'], [75, 'Medium'], [60, 'Low']], true)
     ]),
+    watermarkGroup(),
     group('Selection', [
       select('Crosshair', 'crosshair', [['partial', 'Partial'], ['full', 'Full screen'], ['disabled', 'Off']]),
       toggle('Show magnifier', 'magnifier'), toggle('Remember last selection', 'rememberSelection')

@@ -136,6 +136,7 @@ struct EditorView: View {
             EditorStatus(library: model.library).frame(maxWidth: 170)
             roundButton("text.viewfinder", model.isRecognizing ? "Recognizing text…" : "Recognize Text") { model.recognize() }.disabled(model.isRecognizing)
             roundButton("checkmark.shield", "Hide Private Info") { model.hidePrivate() }.disabled(model.isRecognizing)
+            if Preferences.shared.watermark != nil { roundButton(model.watermarkOn ? "seal.fill" : "seal", model.watermarkOn ? "Watermark On (click to leave it off this picture)" : "Watermark Off for This Picture") { model.watermarkOn.toggle() } }
             roundButton("square.and.arrow.up", "Share") { model.share() }
             roundButton("pin.fill", "Pin to Screen") { do { AppController.shared.pin(try model.flattened()) } catch { model.error = error.localizedDescription } }
             roundButton("doc.on.doc.fill", "Copy") { model.copy() }.keyboardShortcut("c", modifiers: [.command, .shift])

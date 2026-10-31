@@ -19,6 +19,7 @@ pub fn defaults() -> Value {
         "rememberSelection": false,
         "hideDesktopIcons": false,
         "fileName": "{type} {date} at {time}",
+        "watermark": { "text": "", "position": "bottomRight", "size": "medium", "opacity": 0.7 },
         "recording": { "engine": "auto", "quality": "high", "cursorEffects": false, "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3, "camera": false, "cameraSize": 180, "cameraShape": "circle",
             "clicks": false, "keys": false, "keysShortcutsOnly": true },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },

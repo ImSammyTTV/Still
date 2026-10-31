@@ -59,6 +59,7 @@
   .scroller { grid-column: 1; grid-row: 1; background-image: radial-gradient(var(--border) .7px, transparent .7px); background-size: 18px 18px; }
   .rail { grid-column: 2; grid-row: 1; }
   .panel { grid-column: 3; grid-row: 1; }
+  #watermark.on { color: var(--accent); }
 </style>
 </head>
 <body class="glass">
@@ -104,6 +105,7 @@
   <div class="spacer"></div>
   <div class="drag" id="dragMe" title="Drag the image into another app">Drag to share</div>
   <button class="btn icon" id="ocr" title="Copy text (OCR)"><i data-lucide="scan-text"></i></button>
+  <button class="btn icon toggle" id="watermark" hidden aria-pressed="true"><i data-lucide="stamp"></i></button>
   <button class="btn icon" id="private" title="Hide private info: emails, card numbers, keys, IP addresses and phone numbers"><i data-lucide="shield-check"></i></button>
   <button class="btn icon" id="pin" title="Pin to screen"><i data-lucide="pin"></i></button>
   <button class="btn icon" id="upload" title="Upload and copy link"><i data-lucide="cloud-upload"></i></button>
@@ -134,6 +136,7 @@
 <script src="shared/backdrop.js"></script>
 <script src="shared/marks.js"></script>
 <script src="shared/private.js"></script>
+<script src="shared/watermark.js"></script>
 <script src="common.js"></script>
 <script src="vendor/ocr/tesseract.min.js"></script>
 <script src="ocr.js"></script>

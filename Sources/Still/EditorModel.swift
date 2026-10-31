@@ -133,9 +133,20 @@ final class EditorModel: ObservableObject {
             snapshot(); source = cropped; marks = []; selectedID = nil; dirty = true
         } catch { self.error = error.localizedDescription }
     }
-    func flattened() throws -> CGImage { try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
+    /// The picture as it leaves the editor, with the watermark from Settings unless it's left off this one.
+    func flattened(watermarked: Bool = true) throws -> CGImage {
+        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
+        guard watermarked, watermarkOn, let watermark = Preferences.shared.watermark else { return image }
+        return watermark.apply(to: image)
+    }
+    /// Whether this picture gets the watermark; the stamp button in the toolbar turns it off for just this one.
+    @Published var watermarkOn = true
     /// The flattened picture at the size the Background sheet shows it, quick enough to follow a slider.
-    func flattenedPreview() throws -> CGImage { try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: previewCache) }
+    func flattenedPreview() throws -> CGImage {
+        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: previewCache)
+        guard watermarkOn, let watermark = Preferences.shared.watermark else { return image }
+        return watermark.apply(to: image)
+    }
     func document() throws -> ProjectDocument { try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
     var canvasLayout: (size: CGSize, origin: CGPoint) { ImageRenderer.canvasLayout(source: CGSize(width: source.width, height: source.height), framed: frame != .none || customBackground != nil, padding: Int(padding), aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY) }
     func autoBalance() {
@@ -248,7 +259,7 @@ final class EditorModel: ObservableObject {
         guard !isRecognizing else { return }
         isRecognizing = true
         let image: CGImage
-        do { image = try flattened() } catch { self.error = error.localizedDescription; isRecognizing = false; return }
+        do { image = try flattened(watermarked: false) } catch { self.error = error.localizedDescription; isRecognizing = false; return }
         Task {
             do {
                 let text = try await Task.detached(priority: .userInitiated) {
