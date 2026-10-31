@@ -22,6 +22,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Open menus and Spotlight stay in the capture | ✅ | ☑️ |
 | Timed capture (3, 5, 10 s) | ☑️ | ☑️ |
 | Arrow-key nudging and resizing of the selection | ☑️ | ☑️ |
+| Escape cancels and Enter confirms, even when another app had focus | ✅ keyboard policy tested | ☑️ Windows takes focus for the overlay; Escape works without it |
 | Capture the previous area again | ☑️ | ☑️ |
 | Scrolling capture | ☑️ | ☑️ vertical only, no auto-scroll · off on Wayland |
 | Hide desktop icons while capturing | ☑️ | ☑️ Windows · — Linux |
@@ -58,9 +59,11 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux, not yet confirmed on real WebKitGTK |
+| Record an area or the whole screen | ✅ | ☑️ Windows, tried on real hardware and fixed in 1.2.11, needs a re-test · ☑️ Linux, not yet confirmed on real WebKitGTK |
 | Microphone and computer audio | ☑️ | ☑️ Windows (computer audio) |
 | Stop from the menu bar or tray, with a timer | ✅ | ☑️ tray menu · click to stop on Windows |
+| Stop with the Start / Stop Recording shortcut, even behind a full-screen app | ☑️ | ☑️ shortcut shown on the Stop button |
+| Recording kept if something goes wrong: written to disk as it records, saved if the controls stop responding, a message instead of silence | (native recorder) | ☑️ MP4 falls back to WebM automatically |
 | Pause, resume, restart, cancel | ☑️ | ☑️ |
 | MP4 | ✅ export tested | ☑️ (MP4 or WebM, depending on the system) |
 | GIF export | ✅ export tested | ☑️ up to 60 s and 1280 px |
@@ -78,7 +81,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
 | Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
 | Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
-| Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM | ✅ 13 server tests | (same server) |
+| Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM | ✅ 14 server tests | (same server) |
 
 ## App
 
@@ -88,6 +91,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Menu with icons and shortcuts | ✅ | ✅ |
 | Configurable global shortcuts | ✅ | ☑️ |
 | Settings: appearance, sounds, export folder, after-capture actions, start at login | ☑️ | ☑️ |
+| Setup assistant for the first capture; leaves Settings once finished, reopens from General | ☑️ | ☑️ |
 | Automatic updates | ☑️ check, download, verify, relaunch | ☑️ signed updates, install card, About button |
 | `still://` actions (Mac) / `still --capture=…` (Windows & Linux) | ☑️ | ✅ |
 | Right-click Services for images: Open in Still, Copy Text from Image, Pin Image | ☑️ | — |
@@ -98,14 +102,20 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
   such as horizontal and auto-scrolling, and saved trim points. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
-- **Windows and Linux:** recording hasn't been checked on real hardware yet.
+- **Windows:** whole-screen recordings include the system's "sharing your screen" bar, which comes from the web
+  engine that records the screen and can't be turned off. Pressing its Hide button keeps most of it out. A native
+  Windows recorder would remove it.
+- **Windows and Linux:** recording needs a hands-on pass on real hardware after the 1.2.11 fixes.
 - **Everywhere:** the ☑️ items above need a hands-on pass.
 
 ## How it's checked
 
-- `swift test`: 39 Mac tests covering image processing, redaction, projects, backgrounds, text recognition,
+- `swift test`: 40 Mac tests covering image processing, redaction, projects, backgrounds, text recognition,
   scrolling stitching and real MP4/GIF exports.
-- `cd Desktop && npm test`: JavaScript and Rust tests for selection geometry, the library, settings and image encoding.
+- `cd Desktop && npm test`: JavaScript and Rust tests for selection geometry, the library, settings and image encoding,
+  plus a design check that fails when a page uses raw colours or text smaller than 10 px
+  ([design system](docs/DESIGN-SYSTEM.md)).
 - `still --self-test`: runs on real Windows and Linux machines in GitHub Actions and checks capture, the Floating Preview,
-  copying, History, the editor, text recognition and uploading to a Still Cloud server.
-- `python3 -m unittest discover -s Cloud/tests`: 13 sharing-server tests.
+  copying, History, the editor, capturing the previous area, scrolling capture, hiding desktop icons, the camera bubble
+  and click and keystroke overlays, text recognition and uploading to a Still Cloud server.
+- `python3 -m unittest discover -s Cloud/tests`: 14 sharing-server tests.
