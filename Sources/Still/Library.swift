@@ -131,7 +131,7 @@ final class Library: ObservableObject {
     func pruneHistory() {
         let days = Preferences.shared.retentionDays
         guard days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
-        for item in items where item.date < cutoff { delete(item) }
+        for item in items where item.date < cutoff && !item.isStarred { delete(item) }
     }
     func delete(_ item: CaptureItem) {
         do {
@@ -291,6 +291,9 @@ final class Library: ObservableObject {
     var lastLink: String? {
         get { UserDefaults.standard.string(forKey: "lastShareLink") }
         set { UserDefaults.standard.set(newValue, forKey: "lastShareLink") }
+    }
+    func setStarred(_ item: CaptureItem, _ starred: Bool) {
+        if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].starred = starred ? true : nil; do { try persist() } catch { toast(error.localizedDescription) } }
     }
     func setCloudURL(_ item: CaptureItem, url: URL) {
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].cloudURL = url.absoluteString; do { try persist() } catch { toast(error.localizedDescription) } }

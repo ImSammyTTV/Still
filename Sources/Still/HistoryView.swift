@@ -20,7 +20,7 @@ struct HistoryView: View {
     @State private var pendingDelete: CaptureItem?
     @State private var renaming: CaptureItem?
     @State private var title = ""
-    private var items: [CaptureItem] { library.items.filter { (filter == "All" || (filter == "Screenshots" && !$0.isVideo) || (filter == "Videos" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) } }
+    private var items: [CaptureItem] { library.items.filter { (filter == "All" || (filter == "Starred" && $0.isStarred) || (filter == "Screenshots" && !$0.isVideo) || (filter == "Videos" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) } }
     var body: some View {
         // Filtered once here: every grid cell asks for `current`, and a search looks through recognized text.
         let items = self.items, current = items.first(where: { $0.id == selected }) ?? items.first
@@ -29,11 +29,11 @@ struct HistoryView: View {
                 Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close capture history")
                 Text("The collection").font(Studio.heading)
                 Spacer()
-                ForEach(["All", "Screenshots", "Videos", "GIFs"], id: \.self) { title in Button { filter = title; selected = nil } label: { Text(title).font(.system(size: 16, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 7).background(filter == title ? Color.accentColor : Color.white.opacity(0.12), in: Capsule()) }.buttonStyle(.plain) }
+                ForEach(["All", "Screenshots", "Videos", "GIFs", "Starred"], id: \.self) { title in Button { filter = title; selected = nil } label: { Text(title).font(.system(size: 16, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 7).background(filter == title ? Color.accentColor : Color.white.opacity(0.12), in: Capsule()) }.buttonStyle(.plain) }
                 Spacer()
             }
             if items.isEmpty {
-                VStack(spacing: 15) { Image(systemName: "clock.arrow.circlepath").font(.system(size: 38, weight: .light)); Text(query.isEmpty ? "No captures yet" : "No matching captures").font(.system(size: 18)); Text("Take a screenshot to see it in your capture history.").foregroundStyle(.secondary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 15) { Image(systemName: "clock.arrow.circlepath").font(.system(size: 38, weight: .light)); Text(!query.isEmpty ? "No matching captures" : filter == "Starred" ? "No starred captures" : "No captures yet").font(.system(size: 18)); Text(filter == "Starred" ? "Right-click a capture and choose Star to find it here." : "Take a screenshot to see it in your capture history.").foregroundStyle(.secondary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
@@ -45,6 +45,10 @@ struct HistoryView: View {
                                             RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.07))
                                             if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).padding(3) }
                                             if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 35)).shadow(radius: 5) }
+                                            if item.isStarred {
+                                                Image(systemName: "star.fill").font(.system(size: 13)).foregroundStyle(.yellow).padding(6).background(.black.opacity(0.55), in: Circle())
+                                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(10).accessibilityLabel("Starred")
+                                            }
                                             if let n = picks.firstIndex(of: item.id) {
                                                 Text("\(n + 1)").font(.system(size: 12, weight: .bold)).foregroundStyle(.white).frame(minWidth: 24, minHeight: 24).background(Color.accentColor, in: Capsule())
                                                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(10).accessibilityLabel("Picked \(n + 1) to combine")
@@ -53,7 +57,7 @@ struct HistoryView: View {
                                         Text(item.title).lineLimit(1).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 245)
                                     }
                                 }.buttonStyle(.plain).id(item.id).simultaneousGesture(TapGesture(count: 2).onEnded { AppController.shared.openItem(item); dismiss() })
-                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; Button("Upload to Cloud") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
+                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button(item.isStarred ? "Unstar" : "Star") { library.setStarred(item, !item.isStarred) }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; Button("Upload to Cloud") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
                                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
                             }
                         }.padding(.horizontal, 10).padding(.vertical, 8)

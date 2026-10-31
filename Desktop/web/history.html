@@ -40,6 +40,12 @@
   .pickbar .btn { height: 30px; }
   .pickbar .btn svg { width: 14px; height: 14px; }
 
+  .star { position: absolute; right: 7px; bottom: 7px; width: 26px; height: 26px; border: 0; border-radius: 50%; display: none; place-items: center; background: var(--hud); color: var(--on-chrome); }
+  .star svg { width: 14px; height: 14px; }
+  .tile:hover .star, .star.on { display: grid; }
+  .star.on { color: var(--yellow); }
+  .star.on svg { fill: currentColor; }
+  #filter button svg { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
 </style>
 </head>
 <body class="glass">
@@ -49,6 +55,7 @@
     <button data-kind="all" class="active">All</button>
     <button data-kind="screenshot">Screenshots</button>
     <button data-kind="recording">Recordings</button>
+    <button data-kind="starred" title="Captures you starred"><i data-lucide="star"></i>Starred</button>
   </div>
   <input class="field search" id="search" aria-label="Search captures" placeholder="Search titles and text">
 </div>

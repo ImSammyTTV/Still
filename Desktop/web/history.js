@@ -14,6 +14,7 @@ function togglePick(item) {
   picks = picks.includes(item.id) ? picks.filter((id) => id !== item.id) : [...picks, item.id];
   showPicks();
 }
+function star(item, on) { still.invoke('library:star', item.id, on).then(() => toast(on ? 'Starred' : 'Star removed')).catch((error) => toast(String(error))); }
 async function combinePicks(vertical) {
   toast('Combining…');
   try { await still.invoke('library:combine', picks, vertical); picks = []; showPicks(); }
@@ -31,7 +32,7 @@ async function load() {
   const grid = $('#grid'); grid.replaceChildren(); images.clear(); tiles.clear();
   picks = picks.filter((id) => items.some((i) => i.id === id && i.kind !== 'recording'));
   if (!items.length) {
-    grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No captures match your search.' : 'Your captures will appear here.'}</div>` }));
+    grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No captures match your search.' : kind === 'starred' ? 'Star a capture to find it here.' : 'Your captures will appear here.'}</div>` }));
     return refreshIcons();
   }
   for (const item of items) {
@@ -49,7 +50,8 @@ async function load() {
       el('button', { title: 'Delete', html: icon('trash-2'), onclick: async (e) => { e.stopPropagation(); await still.invoke('library:delete', item.id); } })
     ]);
     const tile = el('div', { class: 'tile' }, [
-      el('div', { class: 'thumb' }, [media, el('span', { class: 'pick-number' }), el('span', { class: 'kind', html: `${icon(item.kind === 'recording' ? 'video' : 'image')}${item.kind === 'recording' ? 'Video' : 'Image'}` }), tools]),
+      el('div', { class: 'thumb' }, [media, el('span', { class: 'pick-number' }),
+        el('button', { class: `star${item.starred ? ' on' : ''}`, title: item.starred ? 'Unstar' : 'Star to find it again quickly', 'aria-label': item.starred ? 'Unstar' : 'Star', 'aria-pressed': String(!!item.starred), html: icon('star'), onclick: (e) => { e.stopPropagation(); star(item, !item.starred); } }), el('span', { class: 'kind', html: `${icon(item.kind === 'recording' ? 'video' : 'image')}${item.kind === 'recording' ? 'Video' : 'Image'}` }), tools]),
       el('div', { class: 'meta' }, [title, el('div', { class: 'sub' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}`)])
     ]);
     tiles.set(item.id, tile);
@@ -61,6 +63,7 @@ async function load() {
       popupMenu({ x: e.clientX, y: e.clientY }, [
         { label: item.kind === 'recording' ? 'Trim and Export…' : 'Annotate', icon: item.kind === 'recording' ? 'scissors' : 'pencil', action: () => still.invoke('library:open', item.id) },
         ...(item.kind === 'recording' ? [{ label: 'Open in Default Player', icon: 'play', action: () => still.invoke('library:play', item.id) }] : []),
+        { label: item.starred ? 'Unstar' : 'Star', icon: 'star', action: () => star(item, !item.starred) },
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },
         { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved'), (e) => toast(`Couldn’t save: ${e}`)) },
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${e}`)) },

@@ -1132,6 +1132,9 @@ async fn library_get(app: AppHandle, id: String) -> Value {
 }
 #[tauri::command]
 async fn library_rename(app: AppHandle, id: String, title: String) { st(&app).library.lock().unwrap().update(&id, |i| i.title = title); broadcast(&app, "library:changed", Value::Null); }
+/// Stars a capture in History, or takes the star off.
+#[tauri::command]
+async fn library_star(app: AppHandle, id: String, starred: bool) { st(&app).library.lock().unwrap().update(&id, |i| i.starred = starred); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
 async fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
@@ -1916,7 +1919,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

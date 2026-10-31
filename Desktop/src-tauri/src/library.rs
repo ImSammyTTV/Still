@@ -18,6 +18,8 @@ pub struct Item {
     #[serde(default)] pub height: u32,
     #[serde(default)] pub text: String,
     #[serde(default)] pub duration: f64,
+    /// Starred in History, to find it again quickly.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub starred: bool,
 }
 
 pub struct Library { dir: PathBuf, pub items: Vec<Item>, /** Settings → Screenshots → File names. */ pub name_pattern: String }
@@ -103,7 +105,7 @@ impl Library {
             id: uuid::Uuid::new_v4().to_string(), kind: kind.into(),
             title: title.unwrap_or_else(|| self.default_title(kind, width, height)),
             file_name: format!("capture.{ext}"), original_name: format!("original.{ext}"),
-            created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0,
+            created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0, starred: false,
         };
         let written = fs::create_dir_all(self.folder(&item)).and_then(|_| fs::write(self.file(&item), bytes))
             .and_then(|_| if kind != "recording" { fs::write(self.original(&item), bytes) } else { Ok(()) });
@@ -144,7 +146,7 @@ impl Library {
     }
     pub fn search(&self, query: &str, kind: &str) -> Vec<Item> {
         let q = query.trim().to_lowercase();
-        self.items.iter().filter(|i| (kind == "all" || i.kind == kind || (kind == "screenshot" && i.kind != "recording"))
+        self.items.iter().filter(|i| (kind == "all" || i.kind == kind || (kind == "screenshot" && i.kind != "recording") || (kind == "starred" && i.starred))
             && (q.is_empty() || i.title.to_lowercase().contains(&q) || i.text.to_lowercase().contains(&q))).cloned().collect()
     }
 }
@@ -164,7 +166,7 @@ fn rebuild(dir: &Path) -> Vec<Item> {
         let created = entry.metadata().ok().and_then(|m| m.created().or_else(|_| m.modified()).ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or_else(now_ms);
         Some(Item { id: entry.file_name().to_string_lossy().to_string(), kind: if ["mp4", "webm"].contains(&ext.as_str()) { "recording".into() } else { "screenshot".into() },
-            title: "Recovered capture".into(), file_name, original_name, created, modified: None, width: 0, height: 0, text: String::new(), duration: 0.0 })
+            title: "Recovered capture".into(), file_name, original_name, created, modified: None, width: 0, height: 0, text: String::new(), duration: 0.0, starred: false })
     }).collect();
     items.sort_by(|a, b| b.created.cmp(&a.created));
     items
@@ -185,6 +187,19 @@ mod tests {
     }
 
     use super::*;
+    #[test]
+    fn starred_captures_have_their_own_filter_and_survive_a_restart() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let a = lib.add(b"a", "screenshot", "png", Some("Keep".into()), 1, 1).unwrap();
+        lib.add(b"b", "screenshot", "png", Some("Other".into()), 1, 1).unwrap();
+        lib.update(&a.id, |i| i.starred = true);
+        assert_eq!(lib.search("", "starred").iter().map(|i| i.title.clone()).collect::<Vec<_>>(), vec!["Keep"]);
+        let lib = Library::open(dir.clone());
+        assert_eq!(lib.search("", "starred").len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn keeps_original_edits_and_project() {
         let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));

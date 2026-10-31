@@ -174,6 +174,9 @@ public struct CaptureItem: Codable, Identifiable, Equatable {
     public var cloudURL: String?
     public var metadataFilename: String?
     public var sourceVideoFilename: String?
+    /// Starred in History, to find it again quickly; starred captures outlast the history clean-up.
+    public var starred: Bool?
+    public var isStarred: Bool { starred == true }
     public init(filename: String, title: String, isVideo: Bool, width: Int = 0, height: Int = 0) {
         id = UUID(); self.filename = filename; self.title = title; date = Date()
         self.isVideo = isVideo; self.width = width; self.height = height
