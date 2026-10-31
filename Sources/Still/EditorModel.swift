@@ -261,6 +261,30 @@ final class EditorModel: ObservableObject {
             isRecognizing = false
         }
     }
+    /// Blurs every line of text found in the picture, as one step that a single undo takes back: the layout stays
+    /// readable while the words don't.
+    func blurAllText() {
+        guard !isRecognizing else { return }
+        isRecognizing = true
+        let image = source
+        Task {
+            do {
+                let lines = try await Task.detached(priority: .userInitiated) { try TextRecognition.lineBounds(image) }.value
+                if lines.isEmpty { library.toast("No text found") }
+                else {
+                    snapshot()
+                    for line in lines {
+                        let box = line.insetBy(dx: -3, dy: -3)
+                        var mark = Mark(tool: .blur, points: [PixelPoint(x: box.minX, y: box.minY), PixelPoint(x: box.maxX, y: box.maxY)], color: color, width: lineWidth)
+                        mark.style = "smooth"; marks.append(mark)
+                    }
+                    selectedID = nil; dirty = true
+                    library.toast("Blurred \(lines.count) line\(lines.count == 1 ? "" : "s") of text. Undo brings them back.")
+                }
+            } catch { self.error = "Couldn’t look for text: \(error.localizedDescription)" }
+            isRecognizing = false
+        }
+    }
     func recognize() {
         guard !isRecognizing else { return }
         isRecognizing = true

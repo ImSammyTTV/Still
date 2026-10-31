@@ -71,5 +71,14 @@
     return out;
   }
 
-  return { find, boxes, luhn };
+  // One padded box per recognised line, for blurring all the text in a picture.
+  function lineBoxes(lines, pad = 3) {
+    return (lines || []).filter((words) => words.length).map((words) => {
+      const x0 = Math.min(...words.map((w) => w.box.x0)), y0 = Math.min(...words.map((w) => w.box.y0));
+      const x1 = Math.max(...words.map((w) => w.box.x1)), y1 = Math.max(...words.map((w) => w.box.y1));
+      return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+    });
+  }
+
+  return { find, boxes, lineBoxes, luhn };
 });

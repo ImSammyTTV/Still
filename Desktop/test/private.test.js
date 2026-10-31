@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { find, boxes, luhn } = require('../web/shared/private.js');
+const { find, boxes, luhn, lineBoxes: StillPrivateLines } = require('../web/shared/private.js');
 
 const kinds = (text) => find(text).map((f) => [f.kind, text.slice(f.start, f.end)]);
 
@@ -31,4 +31,9 @@ test('joins the words of a detail into one padded box per line', () => {
   const w = (text, x0, x1) => ({ text, box: { x0, y0: 10, x1, y1: 30 } });
   const lines = [[w('Mail', 0, 40), w('me:', 45, 70), w('a@b.co', 75, 130)], [w('Card', 0, 40), w('4242', 50, 90), w('4242', 95, 135), w('4242', 140, 180), w('4242', 185, 225)]];
   assert.deepEqual(boxes(lines), [{ kind: 'email', x: 72, y: 7, w: 61, h: 26 }, { kind: 'card', x: 47, y: 7, w: 181, h: 26 }]);
+});
+
+test('one padded box per line, for blurring all text', () => {
+  const w = (text, x0, x1, y0 = 10, y1 = 30) => ({ text, box: { x0, y0, x1, y1 } });
+  assert.deepEqual(StillPrivateLines([[w('Hello', 0, 40), w('world', 45, 90, 8, 31)], []]), [{ x: -3, y: 5, w: 96, h: 29 }]);
 });

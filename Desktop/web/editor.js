@@ -686,7 +686,25 @@ function syncWatermark() {
   b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
   b.title = on ? 'Watermark on: click to leave it off this picture' : 'Watermark off for this picture: click to add it';
 }
-$('#private').onclick = () => hidePrivate();
+$('#private').onclick = (e) => popupMenu(e.currentTarget, [
+  { label: 'Hide Private Info', icon: 'shield-check', action: hidePrivate },
+  { label: 'Blur All Text', icon: 'droplet', action: blurAllText }
+]);
+// Blurs every line of text the recognition finds, as one step that a single undo takes back: the layout stays
+// readable while the words don't.
+async function blurAllText() {
+  finishTextEdit(); toast('Looking for text…');
+  try {
+    const c = document.createElement('canvas'); c.width = image.naturalWidth; c.height = image.naturalHeight;
+    c.getContext('2d').drawImage(image, 0, 0);
+    const lines = await still.invoke('editor:ocrLines', c.toDataURL('image/png'));
+    const boxes = StillPrivate.lineBoxes(lines);
+    if (!boxes.length) return toast('No text found');
+    for (const b of boxes) doc.marks.push({ type: 'blur', x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h), color, stroke });
+    selected = null; commit(); render();
+    toast(`Blurred ${boxes.length} line${boxes.length === 1 ? '' : 's'} of text. Undo brings them back.`);
+  } catch (error) { toast(`Couldn’t look for text: ${error.message || error}`); }
+}
 async function hidePrivate() {
   finishTextEdit(); toast('Looking for private details…');
   try {

@@ -52,6 +52,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 |---|---|---|
 | Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, loupe, measure (length in pixels), emoji stamp, crop | ✅ | ✅ |
 | Hide Private Info: finds email addresses, card numbers, keys, IP addresses and phone numbers in the picture and covers them, undoable in one step | ☑️ | ✅ checked on a sample picture |
+| Blur All Text: every recognised line blurred in one undoable step, so the layout shows and the words don't | ☑️ | ☑️ |
 | Watermark: your own text (position, size, opacity) on pictures copied, saved or shared from the editor, with a button to leave it off one picture | ☑️ | ☑️ checked in Chromium |
 | Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
 | Solid redaction that survives export | ✅ | ☑️ |
