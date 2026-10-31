@@ -73,7 +73,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
-| Video editor: cursor size, style and smoothing | ✅ export tested | — the cursor is part of the recorded picture |
+| Video editor: cursor size and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
 | Audio transcription | ☑️ | — |
 
 ## Sharing
@@ -101,7 +101,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** video editor cursor effects and audio transcription. Linux can't hide desktop icons.
+- **Windows and Linux:** audio transcription, and cursor styles other than the arrow. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
