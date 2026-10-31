@@ -118,21 +118,22 @@ import StillCore
     /// Export Video asks for a size and a quality first; both are remembered for next time.
     @Published var showExportOptions = false
     @Published var exportLimit = UserDefaults.standard.integer(forKey: "videoExportSize") { didSet { UserDefaults.standard.set(exportLimit, forKey: "videoExportSize") } }
+    @Published var exportSpeed: Double = { let v = UserDefaults.standard.double(forKey: "videoExportSpeed"); return [1.25, 1.5, 2, 3].contains(v) ? v : 1 }() { didSet { UserDefaults.standard.set(exportSpeed, forKey: "videoExportSpeed") } }
     /// The finished video's size and roughly how big the file comes out, for the export options.
     var exportSummary: String {
         guard let frame = prepared?.size else { return "" }
         let size = VideoExportSize.size(width: frame.width, height: frame.height, limit: exportLimit)
         let quality = VideoQuality(rawValue: settings.quality ?? "high") ?? .high
         let bitrate = BitratePreset.bitrate(tag: settings.quality) ?? (quality == .original ? Int(Double(VideoQuality.high.bitrate(size: size, fps: settings.fps))*1.5) : quality.bitrate(size: size, fps: settings.fps))
-        let bytes = Double(bitrate + 128_000) * VideoTimeline.length(settings.kept) / 8
+        let seconds = VideoTimeline.length(settings.kept) / exportSpeed, bytes = Double(bitrate + 128_000) * seconds / 8
         let label = bytes >= 1e9 ? String(format: "%.1f GB", bytes/1e9) : bytes >= 1e6 ? "\(max(1, Int((bytes/1e6).rounded()))) MB" : "\(max(1, Int((bytes/1e3).rounded()))) KB"
-        return "\(Int(size.width)) × \(Int(size.height))  ·  \(String(format: "%.1f", Double(bitrate)/1e6)) Mbps  ·  about \(label)"
+        return "\(Int(size.width)) × \(Int(size.height))  ·  \(String(format: "%.1f", Double(bitrate)/1e6)) Mbps  ·  \(String(format: "%d:%04.1f", Int(seconds)/60, seconds.truncatingRemainder(dividingBy: 60))) long  ·  about \(label)"
     }
     func export(gif: Bool) {
         let panel = NSSavePanel(); panel.allowedContentTypes = gif ? [.gif] : [.mpeg4Movie]; panel.nameFieldStringValue = "\(item.title)-edited.\(gif ? "gif" : "mp4")"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         player.pause(); exporting = true; exportProgress = 0
-        var settings = self.settings; if !gif { settings.exportHeight = exportLimit > 0 ? exportLimit : nil }
+        var settings = self.settings; if !gif { settings.exportHeight = exportLimit > 0 ? exportLimit : nil; settings.speed = exportSpeed > 1 ? exportSpeed : nil }
         let metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
         // Export to a temporary file and only then replace the destination, so a failed or cancelled
         // export never destroys a file you chose to replace.
@@ -178,6 +179,7 @@ struct VideoEditorView: View {
                 Text("Export Video").font(.headline)
                 Picker("Size", selection: $model.exportLimit) { ForEach(VideoExportSize.limits, id: \.self) { Text(VideoExportSize.title($0)).tag($0) } }
                 Picker("Quality", selection: Binding(get: { model.settings.quality ?? "high" }, set: { model.settings.quality = $0 })) { ForEach(Preferences.shared.qualityOptions(including: model.settings.quality), id: \.tag) { Text($0.title).tag($0.tag) } }
+                Picker("Speed", selection: $model.exportSpeed) { Text("1× (as recorded)").tag(1.0); Text("1.25×").tag(1.25); Text("1.5×").tag(1.5); Text("2×").tag(2.0); Text("3×").tag(3.0) }
                 Text(model.exportSummary).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
                 HStack { Spacer(); Button("Cancel") { model.showExportOptions = false }.keyboardShortcut(.cancelAction); Button("Export…") { model.showExportOptions = false; DispatchQueue.main.async { model.export(gif: false) } }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent) }
             }.padding(24).frame(width: 380)

@@ -61,6 +61,9 @@ public enum VideoEngine {
             }
         }
         mix.inputParameters = mixInputs
+        // A faster export squeezes every track into less time; each frame still maps back to the recording's moment.
+        let speed = min(4, max(1, settings.speed ?? 1))
+        if speed > 1.001 { asset.scaleTimeRange(CMTimeRange(start: .zero, duration: cm(total)), toDuration: cm(total/speed)); for input in mixInputs { input.audioTimePitchAlgorithm = .spectral } }
         let padding = settings.frame == "none" ? 0 : settings.padding
         var width = oriented.width+padding*2, height = oriented.height+padding*2
         if settings.aspect > 0 { if width/height < settings.aspect { width = height*settings.aspect } else { height = width/settings.aspect } }
@@ -70,14 +73,14 @@ public enum VideoEngine {
         let composition = AVMutableVideoComposition()
         composition.customVideoCompositorClass = CaptureVideoCompositor.self
         composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(max(1, min(60, settings.fps))))
-        let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: cm(total)), kept: kept, screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
+        let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: cm(total/speed)), kept: kept, speed: speed, screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
         composition.instructions = [instruction]
-        return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: total, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality))
+        return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: total/speed, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality))
     }
     public static func export(_ prepared: PreparedVideo, to url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
         if prepared.quality != .original || prepared.bitrate != nil { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, progress: progress); return }
         guard let exporter = AVAssetExportSession(asset: prepared.asset, presetName: AVAssetExportPresetHighestQuality) else { throw VideoError.export }
-        exporter.videoComposition = prepared.composition; exporter.audioMix = prepared.audioMix; exporter.shouldOptimizeForNetworkUse = true
+        exporter.videoComposition = prepared.composition; exporter.audioMix = prepared.audioMix; exporter.shouldOptimizeForNetworkUse = true; exporter.audioTimePitchAlgorithm = .spectral
         let observer = Task {
             for await state in exporter.states(updateInterval: 0.15) {
                 if case .exporting(let progressState) = state { progress(progressState.fractionCompleted) }
@@ -148,6 +151,8 @@ final class CaptureVideoInstruction: NSObject, AVVideoCompositionInstructionProt
     let timeRange: CMTimeRange
     /// The stretches of the recording laid end to end, to find the recording's time at each frame.
     let kept: [VideoCut]
+    /// How much faster than recorded the video plays.
+    let speed: Double
     let enablePostProcessing = false
     let containsTweening = true
     let requiredSourceTrackIDs: [NSValue]?
@@ -160,8 +165,8 @@ final class CaptureVideoInstruction: NSObject, AVVideoCompositionInstructionProt
     let transform: CGAffineTransform
     let sourceSize: CGSize
     let cameraTransform: CGAffineTransform
-    init(timeRange: CMTimeRange, kept: [VideoCut], screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, settings: VideoSettings, metadata: RecordingMetadata, size: CGSize, transform: CGAffineTransform, cameraTransform: CGAffineTransform, sourceSize: CGSize) {
-        self.timeRange = timeRange; self.kept = kept; self.screenID = screenID; self.cameraID = cameraID; self.settings = settings; self.metadata = metadata; self.size = size; self.transform = transform; self.sourceSize = sourceSize; self.cameraTransform = cameraTransform
+    init(timeRange: CMTimeRange, kept: [VideoCut], speed: Double, screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, settings: VideoSettings, metadata: RecordingMetadata, size: CGSize, transform: CGAffineTransform, cameraTransform: CGAffineTransform, sourceSize: CGSize) {
+        self.timeRange = timeRange; self.kept = kept; self.speed = speed; self.screenID = screenID; self.cameraID = cameraID; self.settings = settings; self.metadata = metadata; self.size = size; self.transform = transform; self.sourceSize = sourceSize; self.cameraTransform = cameraTransform
         requiredSourceTrackIDs = ([screenID]+(cameraID.map { [$0] } ?? [])).map { NSNumber(value: $0) }
     }
 }
@@ -187,7 +192,7 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             guard !self.cancelled else { request.finishCancelledRequest(); return }
             guard let instruction = request.videoCompositionInstruction as? CaptureVideoInstruction,
                   let source = request.sourceFrame(byTrackID: instruction.screenID), let output = self.renderContext?.newPixelBuffer() else { request.finish(with: VideoError.export); return }
-            let image = self.frame(source: source, camera: instruction.cameraID.flatMap { request.sourceFrame(byTrackID: $0) }, time: VideoTimeline.sourceTime(at: request.compositionTime.seconds, kept: instruction.kept), instruction: instruction)
+            let image = self.frame(source: source, camera: instruction.cameraID.flatMap { request.sourceFrame(byTrackID: $0) }, time: VideoTimeline.sourceTime(at: request.compositionTime.seconds*instruction.speed, kept: instruction.kept), instruction: instruction)
             self.ci.render(image, to: output, bounds: CGRect(origin: .zero, size: instruction.size), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
             request.finish(withComposedVideoFrame: output)
         }

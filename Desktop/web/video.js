@@ -467,6 +467,8 @@ async function recordClip(run, type, plan) {
   };
   document.addEventListener('visibilitychange', hidden);
   try {
+    // A faster export plays the recording faster as it records; the voice keeps its pitch.
+    player.playbackRate = plan.speed || 1; player.preservesPitch = true;
     // Playback starts first, so a slow start can't become a frozen opening frame.
     await player.play();
     if (run.cancelled) return null;
@@ -504,13 +506,14 @@ function exportPlan() {
   const F = sourceFrame(), limit = Number($('#exportSize').value) || 0, quality = $('#exportQuality').value || 'original';
   const size = StillGeometry.exportSize(F.w, F.h, limit), scaled = size.width < F.w - 1 || size.height < F.h - 1;
   const bitrate = quality === 'original' ? Math.min(100_000_000, StillGeometry.videoBitrate(size.width, size.height, 30, 'high') * 1.5) : StillGeometry.videoBitrate(size.width, size.height, 30, quality);
-  const copy = isWhole() && !needsCanvas() && !scaled && quality === 'original';
-  return { limit, quality, size, scaled, bitrate, copy, seconds: StillTrim.keptLength(trim, cuts) };
+  const speed = [1, 1.25, 1.5, 2, 3].includes(Number($('#exportSpeed').value)) ? Number($('#exportSpeed').value) : 1;
+  const copy = isWhole() && !needsCanvas() && !scaled && quality === 'original' && speed === 1;
+  return { limit, quality, size, scaled, bitrate, copy, speed, seconds: StillTrim.keptLength(trim, cuts) / speed };
 }
 function renderExportSummary() {
   const plan = exportPlan();
   $('#exportSummary').textContent = plan.copy ? `${plan.size.width} × ${plan.size.height} · an exact copy of the recording`
-    : `${plan.size.width} × ${plan.size.height} · ${(plan.bitrate / 1e6).toFixed(1)} Mbps · about ${StillGeometry.sizeLabel(StillGeometry.estimateBytes(plan.bitrate, plan.seconds))}`;
+    : `${plan.size.width} × ${plan.size.height} · ${(plan.bitrate / 1e6).toFixed(1)} Mbps · ${StillTrim.clock(plan.seconds)} long · about ${StillGeometry.sizeLabel(StillGeometry.estimateBytes(plan.bitrate, plan.seconds))}`;
 }
 function openExportOptions() {
   const presets = (Array.isArray(prefs.recording?.bitratePresets) ? prefs.recording.bitratePresets : []).filter((p) => p && String(p.name || '').trim() && Number(p.megabits) > 0);
@@ -520,16 +523,17 @@ function openExportOptions() {
   $('#exportQuality').value = options.some(([v]) => v === exportChoice.quality) ? exportChoice.quality : 'original';
   $('#exportSize').value = String(exportChoice.size || 0);
   if (!$('#exportSize').value) $('#exportSize').value = '0';
+  $('#exportSpeed').value = String(exportChoice.speed || 1); if (!$('#exportSpeed').value) $('#exportSpeed').value = '1';
   renderExportSummary();
   $('#exportSheet').hidden = false; $('#exportGo').focus();
 }
-$('#exportSize').onchange = $('#exportQuality').onchange = renderExportSummary;
+$('#exportSize').onchange = $('#exportQuality').onchange = $('#exportSpeed').onchange = renderExportSummary;
 $('#exportCancel').onclick = () => { $('#exportSheet').hidden = true; };
 $('#exportSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); $('#exportSheet').hidden = true; } });
 $('#exportVideo').onclick = openExportOptions;
 $('#exportGo').onclick = () => {
   const plan = exportPlan();
-  exportChoice.size = plan.limit; exportChoice.quality = plan.quality;
+  exportChoice.size = plan.limit; exportChoice.quality = plan.quality; exportChoice.speed = plan.speed;
   try { localStorage.setItem('stillVideoExport', JSON.stringify(exportChoice)); } catch { /* remembered for this window only */ }
   $('#exportSheet').hidden = true;
   const ext = item.path.split('.').pop().toLowerCase();
