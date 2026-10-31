@@ -11,13 +11,14 @@
   .status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #size { font-weight: 600; font-size: 12px; }
   #message { font-size: 11px; color: rgba(255,255,255,.66); }
-  #cancel { color: #fff; }
-  #cancel:hover { background: rgba(255,255,255,.12); }
+  #cancel, #auto { color: #fff; }
+  #cancel:hover, #auto:hover { background: rgba(255,255,255,.12); }
 </style>
 </head>
 <body>
 <div class="controls">
   <div class="status"><span id="size">Scrolling Capture</span><span id="message"></span></div>
+  <button class="btn plain" id="auto" title="Let Still scroll the page for you">Auto Scroll</button>
   <button class="btn plain" id="cancel">Cancel</button>
   <button class="btn primary" id="done">Done</button>
 </div>

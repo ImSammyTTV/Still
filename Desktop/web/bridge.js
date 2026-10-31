@@ -29,7 +29,7 @@
     'cloud:get': ['cloud_get'], 'cloud:connect': ['cloud_connect', 'endpoint', 'token'], 'cloud:disconnect': ['cloud_disconnect'],
     'drive:get': ['drive_get'], 'drive:connect': ['drive_connect'], 'drive:disconnect': ['drive_disconnect'],
     'cloud:upload': ['cloud_upload', 'id'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],
-    'scroll:stop': ['scroll_stop', 'save'],
+    'scroll:stop': ['scroll_stop', 'save'], 'scroll:auto': ['scroll_auto', 'on'],
     'update:status': ['update_status'], 'update:check': ['update_check'], 'update:install': ['update_install']
   };
 

@@ -6,6 +6,7 @@
     "scroll"
   ],
   "permissions": [
-    "allow-scroll-stop"
+    "allow-scroll-stop",
+    "allow-scroll-auto"
   ]
 }
