@@ -61,7 +61,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 |---|---|---|
 | Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux, not yet confirmed on real WebKitGTK |
 | Windows: Still's own recorder (H.264 MP4, no screen picker, no "sharing your screen" bar, controls kept out of the video) | — | ✅ recorded on a real PC · self-test records 3 s |
-| Microphone and computer audio | ☑️ | ☑️ Windows: Still's own recorder mixes both into one AAC track · Linux: web engine |
+| Microphone and computer audio | ☑️ | ✅ Windows: recorded on a real PC, Still's own recorder mixes both into one AAC track · ☑️ Linux: web engine |
 | Stop from the menu bar or tray, with a timer | ✅ | ☑️ tray menu · click to stop on Windows |
 | Stop with the Start / Stop Recording shortcut, even behind a full-screen app | ☑️ | ☑️ shortcut shown on the Stop button |
 | Recording kept if something goes wrong: written to disk as it records, saved if the controls stop responding, a message instead of silence | (native recorder) | ☑️ MP4 falls back to WebM automatically |
