@@ -140,6 +140,8 @@ const pages = {
       toggle('Save to export location', 'afterCapture.save'), toggle('Open Annotate', 'afterCapture.annotate')
     ]),
     group('After recording', [toggle('Show Floating Preview', 'afterRecording.quickAccess'), toggle('Save to export location', 'afterRecording.save')]),
+    group('Capture History', [select('Keep history', 'historyDays', [[0, 'Forever'], [1, '1 day'], [3, '3 days'], [7, '1 week'], [30, '1 month'], [90, '3 months']], true)],
+      'Older captures are deleted for good. Starred captures are always kept.'),
     el('div', { style: 'display:flex;gap:8px;margin-top:18px' }, [
       el('button', { class: 'btn', onclick: () => still.send('capture', 'allInOne') }, 'Capture Bar'),
       el('button', { class: 'btn', onclick: () => still.send('open:history') }, 'Capture History'),
@@ -233,8 +235,9 @@ const pages = {
       group('Uploads', [
         select('Links expire after', 'cloud.expiryDays', [[1, '1 day'], [7, '7 days'], [30, '30 days'], [0, 'Never']], true),
         select('Who can open links', 'cloud.visibility', [['link', 'Anyone with the link'], ['team', 'My team'], ['private', 'Only me']]),
-        toggle('Upload every screenshot automatically', 'cloud.autoUpload')
-      ], 'After an upload, the share link is copied to your clipboard.')
+        toggle('Upload every screenshot automatically', 'cloud.autoUpload'),
+        select('Copy link as', 'cloud.linkFormat', [['url', 'Link'], ['markdown', 'Markdown'], ['html', 'HTML']])
+      ], 'After an upload, the share link is copied to your clipboard. Markdown and HTML show pictures inline in docs, issues and chats.')
     ];
   },
   About: () => [el('div', { class: 'about' }, [

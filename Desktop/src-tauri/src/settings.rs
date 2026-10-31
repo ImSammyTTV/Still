@@ -19,11 +19,12 @@ pub fn defaults() -> Value {
         "rememberSelection": false,
         "hideDesktopIcons": false,
         "fileName": "{type} {date} at {time}",
+        "historyDays": 0,
         "watermark": { "text": "", "position": "bottomRight", "size": "medium", "opacity": 0.7 },
         "recording": { "engine": "auto", "quality": "high", "cursorEffects": false, "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3, "camera": false, "cameraSize": 180, "cameraShape": "circle",
             "clicks": false, "keys": false, "keysShortcutsOnly": true },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
-        "cloud": { "provider": "still", "endpoint": "", "expiryDays": 7, "visibility": "link", "autoUpload": false, "driveAccess": "link", "driveEmail": "", "driveFolder": "" },
+        "cloud": { "provider": "still", "endpoint": "", "expiryDays": 7, "visibility": "link", "autoUpload": false, "driveAccess": "link", "driveEmail": "", "driveFolder": "", "linkFormat": "url" },
         "shortcuts": {
             "area": "CommandOrControl+Shift+4",
             "allInOne": "CommandOrControl+Shift+5",

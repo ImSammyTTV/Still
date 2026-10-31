@@ -22,7 +22,7 @@ pub struct Item {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub starred: bool,
 }
 
-pub struct Library { dir: PathBuf, pub items: Vec<Item>, /** Settings → Screenshots → File names. */ pub name_pattern: String }
+pub struct Library { dir: PathBuf, pub items: Vec<Item>, /** Settings → Screenshots → File names. */ pub name_pattern: String, /** Settings → General → Keep history, in days; 0 keeps everything. */ pub keep_days: u32 }
 
 /// A thumbnail lives in its capture's folder, so deleting the capture removes it too.
 const THUMBS: [&str; 2] = ["thumb.jpg", "thumb.png"];
@@ -70,7 +70,7 @@ impl Library {
                 Err(_) => { let _ = fs::rename(&index, dir.join(format!("library-damaged-{}.json", now_ms()))); rebuild(&dir) }
             },
         };
-        let mut lib = Library { dir, items, name_pattern: DEFAULT_NAME.to_string() };
+        let mut lib = Library { dir, items, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0 };
         lib.items.retain(|i| lib_file(&lib.dir, i).exists());
         let _ = lib.save();
         lib
@@ -112,7 +112,18 @@ impl Library {
         if let Err(e) = written { let _ = fs::remove_dir_all(self.folder(&item)); return Err(e.to_string()); }
         self.items.insert(0, item.clone());
         if let Err(e) = self.save() { self.items.remove(0); let _ = fs::remove_dir_all(self.folder(&item)); return Err(e); }
+        self.prune(item.created);
         Ok(item)
+    }
+    /// Removes captures older than `keep_days` that aren't starred, and answers which went. Runs after every new
+    /// capture, so History never holds more than the setting asks for.
+    pub fn prune(&mut self, now: i64) -> Vec<String> {
+        if self.keep_days == 0 { return vec![]; }
+        let cutoff = now - self.keep_days as i64 * 86_400_000;
+        let old: Vec<String> = self.items.iter().filter(|i| i.created < cutoff && !i.starred).map(|i| i.id.clone()).collect();
+        for id in &old { if let Some(item) = self.get(id) { let _ = fs::remove_dir_all(self.folder(&item)); } }
+        if !old.is_empty() { self.items.retain(|i| !old.contains(&i.id)); let _ = self.save(); }
+        old
     }
     pub fn get(&self, id: &str) -> Option<Item> { self.items.iter().find(|i| i.id == id).cloned() }
     pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Item)) -> Option<Item> {
@@ -197,6 +208,24 @@ mod tests {
         assert_eq!(lib.search("", "starred").iter().map(|i| i.title.clone()).collect::<Vec<_>>(), vec!["Keep"]);
         let lib = Library::open(dir.clone());
         assert_eq!(lib.search("", "starred").len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn old_captures_go_unless_starred() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let old = lib.add(b"a", "screenshot", "png", Some("Old".into()), 1, 1).unwrap();
+        let kept = lib.add(b"b", "screenshot", "png", Some("Old but starred".into()), 1, 1).unwrap();
+        let day = 86_400_000;
+        lib.update(&old.id, |i| i.created -= 10 * day);
+        lib.update(&kept.id, |i| { i.created -= 10 * day; i.starred = true; });
+        assert!(lib.prune(now_ms()).is_empty(), "keeps everything by default");
+        lib.keep_days = 7;
+        let fresh = lib.add(b"c", "screenshot", "png", Some("New".into()), 1, 1).unwrap();
+        let titles: Vec<String> = lib.items.iter().map(|i| i.title.clone()).collect();
+        assert_eq!(titles, vec!["New", "Old but starred"]);
+        assert!(!dir.join(&old.id).exists() && dir.join(&fresh.id).exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 

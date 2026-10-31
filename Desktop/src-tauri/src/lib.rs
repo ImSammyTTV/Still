@@ -1022,8 +1022,16 @@ fn apply_name_pattern(app: &AppHandle) {
     let pattern = setting(app, "fileName").as_str().filter(|p| !p.trim().is_empty()).unwrap_or(library::DEFAULT_NAME).to_string();
     st(app).library.lock().unwrap().name_pattern = pattern;
 }
+/// Settings → General → Keep history: applied now, and again after every new capture.
+fn apply_history_days(app: &AppHandle) {
+    let days = setting(app, "historyDays").as_u64().unwrap_or(0).min(3650) as u32;
+    let removed = { let mut lib = st(app).library.lock().unwrap(); lib.keep_days = days; lib.prune(library::now_ms()) };
+    for id in &removed { close_preview(app, id); }
+    if !removed.is_empty() { broadcast(app, "library:changed", Value::Null); }
+}
 fn after_settings(app: &AppHandle, patch: &Value) {
     if patch.get("fileName").is_some() { apply_name_pattern(app); }
+    if patch.get("historyDays").is_some() { apply_history_days(app); }
     if patch.get("shortcuts").is_some() { register_shortcuts(app); }
     if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
     if patch.get("quickAccess").is_some() { layout_previews(app); }
@@ -1620,10 +1628,13 @@ async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> R
         return saved;
     }
     let result = if setting(app, "cloud.provider").as_str() == Some("drive") { drive_share(app, &file, &title).await }
-        else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) } };
+        else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title.clone(), text)).await, Err(e) => Err(e) } };
     match &result {
         Ok(link) => {
-            let _ = app.clipboard().write_text(link.clone()); notify(app, "Link copied", link);
+            let image = matches!(file.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp"));
+            let format = setting(app, "cloud.linkFormat").as_str().unwrap_or("url").to_string();
+            let copied = if link.starts_with("http") { cloud::link_text(link, &title, image, &format) } else { link.clone() };
+            let _ = app.clipboard().write_text(copied); notify(app, "Link copied", link);
             if link.starts_with("http") { st(app).session.lock().unwrap().last_link = Some(link.clone()); build_tray_menu(app); }
         }
         Err(e) => notify(app, "Upload failed", e),
@@ -1883,6 +1894,7 @@ pub fn run() {
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
             apply_name_pattern(&handle);
+            apply_history_days(&handle);
             let menu = tray_menu(&handle)?;
             TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))

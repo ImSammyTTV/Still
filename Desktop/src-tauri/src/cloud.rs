@@ -71,3 +71,36 @@ pub fn icloud_folder() -> Option<std::path::PathBuf> {
 fn friendly(error: reqwest::Error) -> String {
     if error.is_connect() || error.is_timeout() { "Couldn’t reach the cloud server. Check the address and your connection.".into() } else { error.to_string() }
 }
+
+/// What's copied after an upload: the link itself, a Markdown link (an image embed for pictures), or an HTML link
+/// (an <img> for pictures), as Settings → Cloud → Copy link as asks. The Mac app's ShareLink gives the same text.
+pub fn link_text(link: &str, title: &str, image: bool, format: &str) -> String {
+    match format {
+        "markdown" => {
+            let title: String = title.chars().map(|c| if matches!(c, '[' | ']') { ' ' } else { c }).collect();
+            let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+            let link = link.replace('(', "%28").replace(')', "%29");
+            if image { format!("![{title}]({link})") } else { format!("[{title}]({link})") }
+        }
+        "html" => {
+            let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+            if image { format!("<img src=\"{}\" alt=\"{}\">", esc(link), esc(title)) } else { format!("<a href=\"{}\">{}</a>", esc(link), esc(title)) }
+        }
+        _ => link.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+    #[test]
+    fn links_are_copied_in_the_chosen_format() {
+        // The same cases are in the Mac app's ShareLinkTests.
+        let url = "https://cloud.example/v/abc";
+        assert_eq!(link_text(url, "Bug [login]", true, "url"), url);
+        assert_eq!(link_text(url, "Bug [login]", true, "markdown"), "![Bug login](https://cloud.example/v/abc)");
+        assert_eq!(link_text("https://x.example/a(1)", "Demo", false, "markdown"), "[Demo](https://x.example/a%281%29)");
+        assert_eq!(link_text(url, "Tom & \"Jerry\" <3", true, "html"), "<img src=\"https://cloud.example/v/abc\" alt=\"Tom &amp; &quot;Jerry&quot; &lt;3\">");
+        assert_eq!(link_text(url, "Demo", false, "html"), "<a href=\"https://cloud.example/v/abc\">Demo</a>");
+    }
+}

@@ -42,6 +42,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Save to an export folder, Save As | ☑️ | ☑️ |
 | Pinned captures (move, resize, opacity, click-through) | ☑️ | ☑️ |
 | Capture History with search, rename, delete | ☑️ | ✅ opens and reopens captures |
+| Keep history for 1 day to 3 months, or forever; starred captures are always kept | ☑️ | ☑️ Rust test |
 | Star captures in History, with a Starred filter; starred captures outlast the history clean-up (Mac) | ☑️ | ☑️ checked in Chromium |
 | Combine screenshots: ⌘/Ctrl-click several in History, then join them side by side or top to bottom into a new capture | ☑️ | ☑️ |
 
@@ -90,6 +91,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
 | Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
 | Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
+| Copy the link as a plain link, Markdown or HTML (pictures embed as images) | ☑️ | ☑️ |
 | Show a share link as a QR code to open it on a phone (History, and the menu bar / tray for the last link) | ☑️ | ☑️ code checked by reading it back |
 | Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM, Trash with Empty Trash and Delete Forever | ✅ 15 server tests | (same server) |
 

@@ -246,7 +246,7 @@ struct MainView: View {
     }
     private var advanced: some View {
         Group {
-            section("Capture History") { choice("Keep history", selection: $prefs.retentionDays) { Text("Forever").tag(0); Text("1 day").tag(1); Text("3 days").tag(3); Text("1 week").tag(7); Text("1 month").tag(30) }; Button("Open Capture History") { AppController.shared.showHistory() }; Button("Open Storage Folder") { NSWorkspace.shared.open(library.root) } }
+            section("Capture History") { choice("Keep history", selection: $prefs.retentionDays) { Text("Forever").tag(0); Text("1 day").tag(1); Text("3 days").tag(3); Text("1 week").tag(7); Text("1 month").tag(30); Text("3 months").tag(90) }; Button("Open Capture History") { AppController.shared.showHistory() }; Button("Open Storage Folder") { NSWorkspace.shared.open(library.root) } }
             section("Text Recognition") {
                 choice("Language", selection: $prefs.ocrLanguage) { Text("Automatically Detect Language").tag("auto"); Text("English").tag("en-US"); Text("Chinese, Simplified").tag("zh-Hans"); Text("Chinese, Traditional").tag("zh-Hant"); Text("French").tag("fr-FR"); Text("German").tag("de-DE"); Text("Japanese").tag("ja-JP"); Text("Korean").tag("ko-KR"); Text("Spanish").tag("es-ES"); Text("Portuguese").tag("pt-BR") }
                 Toggle("Keep line breaks", isOn: $prefs.ocrLineBreaks)

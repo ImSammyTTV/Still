@@ -108,6 +108,8 @@ import StillCore
     @AppStorage("driveEmail") var driveEmail = ""
     @AppStorage("driveFolder") var driveFolder = ""
     @AppStorage("askUploadOptions") var askUploadOptions = false
+    /// How a link is copied after an upload: "url", "markdown" or "html".
+    @AppStorage("linkFormat") var linkFormat = "url"
     @AppStorage("autoUploadImages") var autoUploadImages = false
     @AppStorage("autoUploadVideos") var autoUploadVideos = false
     @AppStorage("appearance") var appearance = "system"
