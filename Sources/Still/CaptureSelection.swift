@@ -176,7 +176,8 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             finish(on: screen, rect: local.intersection(CGRect(origin: .zero, size: screen.frame.size))); return
         }
         close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window, windowID: window.id) } }
-    func timer() { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.area, delay: 5) } }
+    /// Starts again after a five-second countdown, keeping what was being captured (a screenshot, text or a recording).
+    func timer() { let purpose = purpose; close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.showAllInOne(purpose: purpose, delay: 5) } }
     func cancel() { close(); onCancel?() }
     private func installKeyboardMonitor() {
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }

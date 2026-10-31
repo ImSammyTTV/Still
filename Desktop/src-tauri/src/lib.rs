@@ -323,7 +323,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
     let app = app.clone();
     let purpose = purpose.to_string();
     std::thread::spawn(move || {
-        if delay > 0 { notify(&app, "Still", &format!("Capture starts in {delay} seconds")); std::thread::sleep(Duration::from_secs(delay)); }
+        if delay > 0 && !countdown(&app, delay) { end_selection(&app); return; }
         let floating = hide_floating(&app, true);
         // The overlay shows a frozen picture, so the icons only need to be gone for the grab itself.
         let _icons = desktop::hide(&app);
@@ -380,6 +380,41 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         s.grabs = grabs; s.overlays = labels;
     });
 }
+
+/// Set by a click on the countdown, which calls the timed capture off.
+static COUNTDOWN_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The countdown before a timed capture: a large number in the middle of the screen the pointer is on, so it's clear
+/// the capture is coming and when. Runs on the capture's own thread and answers whether it ran to the end. The window
+/// is gone before the screen is grabbed, so it is never in the picture.
+fn countdown(app: &AppHandle, seconds: u64) -> bool {
+    use std::sync::atomic::Ordering;
+    COUNTDOWN_CANCELLED.store(false, Ordering::SeqCst);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = a.get_webview_window("countdown") { let _ = w.destroy(); }
+        let Ok(win) = builder(&a, "countdown", "countdown.html", json!({ "seconds": seconds })).title("Capture Countdown").inner_size(180.0, 180.0)
+            .decorations(false).transparent(true).shadow(false).resizable(false).always_on_top(true).skip_taskbar(true).focused(false).visible_on_all_workspaces(true).build() else { return };
+        let monitor = a.cursor_position().ok().and_then(|p| a.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| a.primary_monitor().ok().flatten());
+        if let Some(m) = monitor {
+            let side = (180.0 * m.scale_factor()) as i32;
+            let _ = win.set_position(PhysicalPosition::new(m.position().x + (m.size().width as i32 - side) / 2, m.position().y + (m.size().height as i32 - side) / 2));
+        }
+        let _ = win.show();
+    });
+    for _ in 0..seconds * 10 {
+        if COUNTDOWN_CANCELLED.load(Ordering::SeqCst) { break; }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || { if let Some(w) = a.get_webview_window("countdown") { let _ = w.destroy(); } });
+    if COUNTDOWN_CANCELLED.load(Ordering::SeqCst) { return false; }
+    // A moment for the window to leave the screen before it's grabbed.
+    std::thread::sleep(Duration::from_millis(150));
+    true
+}
+#[tauri::command]
+async fn countdown_cancel() { COUNTDOWN_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst); }
 
 fn end_selection(app: &AppHandle) {
     let _ = app.global_shortcut().unregister("Escape");
@@ -1860,7 +1895,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
-            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
+            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,

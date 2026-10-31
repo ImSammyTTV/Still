@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "countdown",
+  "description": "The countdown before a timed capture",
+  "windows": [
+    "countdown"
+  ],
+  "permissions": [
+    "allow-countdown-cancel"
+  ]
+}

@@ -384,7 +384,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hideForCapture(); lastExternalApp?.activate()
         DesktopCover.shared.beginCapture()
         Task {
-            try? await Task.sleep(nanoseconds: UInt64(max(0, delay))*1_000_000_000 + 350_000_000)
+            guard await CaptureCountdown.run(seconds: delay) else { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays(); return }
+            try? await Task.sleep(nanoseconds: 350_000_000)
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("Still-\(UUID()).png")
             defer {
                 library.busy = false; captureProcess = nil; try? FileManager.default.removeItem(at: file)
@@ -701,8 +702,7 @@ extension AppController {
         // Don't activate anything before the screen is grabbed: that would close open menus and Spotlight.
         DesktopCover.shared.beginCapture()
         Task {
-            if delay > 0 { library.toast("Capture starts in \(delay) seconds") }
-            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay)*1_000_000_000) }
+            guard await CaptureCountdown.run(seconds: delay) else { library.busy = false; DesktopCover.shared.endCapture(); return }
             selection.begin(purpose)
         }
     }
