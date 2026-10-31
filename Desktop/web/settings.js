@@ -39,17 +39,35 @@ const select = (label, path, options, number = false) => {
   return row(label, s);
 };
 
-// High, Balanced, Smaller File, or a bitrate you choose. A chosen one is saved as the Mac's "bitrate:N" tag.
+// High, Balanced, Smaller File, a named preset, or a bitrate you choose. A bitrate is saved as the Mac's
+// "bitrate:N" tag, and presets as the Mac keeps them: a name and megabits, 1 to 100.
+const mbit = (value) => Math.min(100, Math.max(1, Number(value) || 12));
+const bitrateTag = (megabits) => `bitrate:${Math.round(mbit(megabits) * 1e6)}`;
+const presets = () => (Array.isArray(get('recording.bitratePresets')) ? get('recording.bitratePresets') : []).filter((p) => p && String(p.name || '').trim() && Number(p.megabits) > 0);
+const savePresets = async (list) => { await set(patchFor('recording.bitratePresets', list)); render(); };
 const qualityRow = () => {
-  const saved = String(get('recording.quality') || 'high'), custom = saved.startsWith('bitrate:');
-  const mbps = custom ? Number(saved.slice(8)) / 1e6 : 12;
-  const tag = (value) => `bitrate:${Math.round(Math.min(100, Math.max(1, Number(value) || 12)) * 1e6)}`;
-  const choice = el('select', { class: 'field', 'aria-label': 'Quality', onchange: async (e) => { await set(patchFor('recording.quality', e.target.value === 'custom' ? tag(mbps) : e.target.value)); render(); } },
-    [['high', 'High'], ['balanced', 'Balanced'], ['compact', 'Smaller File'], ['custom', 'Custom bitrate']].map(([value, text]) => el('option', { value, selected: (custom ? 'custom' : saved) === value }, text)));
-  const amount = custom ? [el('input', { type: 'number', class: 'field', min: 1, max: 100, step: 0.5, value: mbps, style: 'width:76px', 'aria-label': 'Custom bitrate in megabits per second',
-    onchange: (e) => set(patchFor('recording.quality', tag(e.target.value))) }), el('span', {}, 'Mbps')] : [];
-  return row('Quality', el('span', { style: 'display:inline-flex;align-items:center;gap:6px' }, [choice, ...amount]));
+  const saved = String(get('recording.quality') || 'high'), chosen = saved.startsWith('bitrate:');
+  const mbps = chosen ? Number(saved.slice(8)) / 1e6 : 12;
+  const preset = chosen ? presets().find((p) => bitrateTag(p.megabits) === saved) : null;
+  const current = !chosen ? saved : preset ? saved : 'custom';
+  const options = [['high', 'High'], ['balanced', 'Balanced'], ['compact', 'Smaller File'],
+    ...presets().map((p) => [bitrateTag(p.megabits), `${p.name} (${mbit(p.megabits)} Mbps)`]), ['custom', 'Custom bitrate']];
+  const choice = el('select', { class: 'field', 'aria-label': 'Quality', onchange: async (e) => { await set(patchFor('recording.quality', e.target.value === 'custom' ? bitrateTag(mbps) : e.target.value)); render(); } },
+    options.map(([value, text]) => el('option', { value, selected: current === value }, text)));
+  if (current !== 'custom') return row('Quality', choice);
+  const name = el('input', { type: 'text', class: 'field', placeholder: 'Preset name', style: 'width:120px', 'aria-label': 'Name for this bitrate preset' });
+  const amount = el('input', { type: 'number', class: 'field', min: 1, max: 100, step: 0.5, value: mbps, style: 'width:76px', 'aria-label': 'Custom bitrate in megabits per second',
+    onchange: (e) => set(patchFor('recording.quality', bitrateTag(e.target.value))) });
+  const keep = el('button', { class: 'btn', title: 'Keep this bitrate under Quality with a name', onclick: async () => {
+    const label = name.value.trim(); if (!label) { name.focus(); return; }
+    await savePresets([...presets(), { name: label, megabits: mbit(amount.value) }]);
+  } }, 'Save Preset');
+  return row('Quality', el('span', { style: 'display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, [choice, amount, el('span', {}, 'Mbps'), name, keep]));
 };
+// The saved presets, each with a way to remove it. Nothing to show until there's one.
+const presetsGroup = () => (presets().length ? group('Bitrate presets', presets().map((p, i) => row(`${p.name} · ${mbit(p.megabits)} Mbps`,
+  el('button', { class: 'btn plain', onclick: () => savePresets(presets().filter((_, k) => k !== i)) }, 'Remove'))),
+  'Presets appear under Quality. A recording made with one keeps its bitrate if the preset is removed later.') : null);
 
 function render() {
   filterNav();
@@ -137,6 +155,7 @@ const pages = {
       select('Frame rate', 'recording.fps', [[24, '24 fps'], [30, '30 fps'], [60, '60 fps']], true),
       select('Countdown', 'recording.countdown', [[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], true)
     ], prefs.shortcuts.record ? `Press ${StillGeometry.shortcutLabel(prefs.shortcuts.record, prefs.platform)} to stop a recording from anywhere, even when a full-screen app hides the recording controls. If MP4 can’t be encoded on this computer, Still records WebM instead.` : 'Set a Start / Stop Recording shortcut to stop a recording from anywhere, even when a full-screen app hides the recording controls.'),
+    presetsGroup(),
     group('Audio', [toggle('Record microphone', 'recording.microphone'), ...(prefs.platform === 'win32' ? [toggle('Record computer audio', 'recording.systemAudio')] : [])],
       prefs.platform === 'win32' ? null : 'Computer audio recording is available on Windows.'),
     group('Camera', [
