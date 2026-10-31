@@ -819,15 +819,40 @@ fn import_image(app: &AppHandle) {
     let app = app.clone();
     app.clone().dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).pick_file(move |file| {
         let Some(path) = file.and_then(|f| f.into_path().ok()) else { return };
-        let Some(image) = std::fs::read(&path).ok().and_then(|b| capture::decode(&b)) else { notify(&app, "Still", "That file could not be opened as an image."); return };
-        let (w, h) = image.dimensions();
-        let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
-        let item = match st(&app).library.lock().unwrap().add(&capture::png(&image), "screenshot", "png", title, w, h) {
-            Ok(item) => item, Err(e) => { notify(&app, "Couldn’t add the image", &e); return; }
-        };
-        open_editor(&app, Some(&item.id), false);
-        broadcast(&app, "library:changed", Value::Null);
+        open_image_file(&app, &path, ImageUse::Edit);
     });
+}
+
+/// What to do with an image file from outside Still: the right-click menu on Windows, "Open With" on Linux,
+/// `still --open=… / --text=… / --pin=…`, or Open Image… in the menu.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ImageUse { Edit, Text, Pin }
+
+/// The image file and what to do with it, if the arguments name one: `--open=`, `--text=` or `--pin=` with a path,
+/// or a bare path to a PNG or JPEG, which is how "Open With" passes it. The first argument is the program itself.
+fn image_argument(args: &[String]) -> Option<(PathBuf, ImageUse)> {
+    for (flag, using) in [("--open=", ImageUse::Edit), ("--text=", ImageUse::Text), ("--pin=", ImageUse::Pin)] {
+        if let Some(path) = args.iter().find_map(|a| a.strip_prefix(flag)) { return Some((PathBuf::from(path), using)); }
+    }
+    let image = |a: &&String| !a.starts_with('-') && ["png", "jpg", "jpeg"].iter().any(|ext| a.to_lowercase().ends_with(&format!(".{ext}")));
+    args.iter().skip(1).find(image).map(|path| (PathBuf::from(path), ImageUse::Edit))
+}
+
+fn open_image_file(app: &AppHandle, path: &Path, using: ImageUse) {
+    let Some(image) = std::fs::read(path).ok().and_then(|b| capture::decode(&b)) else { notify(app, "Still", &format!("{} could not be opened as an image.", path.display())); return };
+    match using {
+        ImageUse::Text => recognize_file(app, &image),
+        ImageUse::Pin => pin_image(app, &image),
+        ImageUse::Edit => {
+            let (w, h) = image.dimensions();
+            let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
+            let item = match st(app).library.lock().unwrap().add(&capture::png(&image), "screenshot", "png", title, w, h) {
+                Ok(item) => item, Err(e) => { notify(app, "Couldn’t add the image", &e); return; }
+            };
+            open_editor(app, Some(&item.id), false);
+            broadcast(app, "library:changed", Value::Null);
+        }
+    }
 }
 
 fn apply_login_item(app: &AppHandle) {
@@ -1719,6 +1744,12 @@ fn self_test(app: AppHandle, dir: PathBuf) {
 // ---- Startup ------------------------------------------------------------------------------------
 
 fn run_args(app: &AppHandle, args: &[String]) -> bool {
+    if let Some((path, using)) = image_argument(args) {
+        // Windows and the file manager start Still for this, so it may be the first window it shows.
+        let app = app.clone();
+        let _ = app.clone().run_on_main_thread(move || open_image_file(&app, &path, using));
+        return true;
+    }
     let action = args.iter().find_map(|a| a.strip_prefix("--capture=").map(|s| s.to_string()))
         .or_else(|| if args.iter().any(|a| a == "--capture") { args.iter().find(|a| ACTIONS.iter().any(|(k, _)| k == a)).cloned() } else { None });
     match action { Some(a) if ACTIONS.iter().any(|(k, _)| *k == a) => { run_action(app, &a); true } _ => false }
@@ -1800,4 +1831,23 @@ pub fn run() {
             tauri::RunEvent::Exit => clear_private_temp(),
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> { std::iter::once("still").chain(list.iter().copied()).map(String::from).collect() }
+
+    #[test]
+    fn image_files_from_the_right_click_menu_and_open_with() {
+        assert_eq!(image_argument(&args(&["--open=C:\\Users\\Sam\\My shot.png"])), Some((PathBuf::from("C:\\Users\\Sam\\My shot.png"), ImageUse::Edit)));
+        assert_eq!(image_argument(&args(&["--text=/home/sam/scan.jpg"])), Some((PathBuf::from("/home/sam/scan.jpg"), ImageUse::Text)));
+        assert_eq!(image_argument(&args(&["--pin=/tmp/a.jpeg"])), Some((PathBuf::from("/tmp/a.jpeg"), ImageUse::Pin)));
+        assert_eq!(image_argument(&args(&["/home/sam/Photo.JPG"])), Some((PathBuf::from("/home/sam/Photo.JPG"), ImageUse::Edit)));
+        // Capture actions, flags and other files aren't images to open; nor is the program's own path.
+        assert_eq!(image_argument(&args(&["--capture=area"])), None);
+        assert_eq!(image_argument(&args(&["--hidden", "notes.txt"])), None);
+        assert_eq!(image_argument(&["C:\\Still\\shot.png".to_string()]), None);
+    }
 }
