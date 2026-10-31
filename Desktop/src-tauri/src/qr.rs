@@ -1,4 +1,5 @@
-//! QR codes for Capture Text: decoded here in Rust, then added to what the OCR page finds.
+//! QR codes: read for Capture Text, decoded here in Rust and added to what the OCR page finds; and made for a
+//! share link, so it can be opened on a phone by pointing its camera at the screen.
 
 use image::RgbaImage;
 
@@ -27,8 +28,44 @@ pub fn with_text(text: &str, codes: &[String]) -> String {
     if text.is_empty() { codes } else { format!("{text}\n{codes}") }
 }
 
+/// A share link as an SVG QR code, black on white with the standard four-module margin. Medium error correction
+/// keeps it readable off a glossy screen.
+pub fn svg(text: &str) -> Result<String, String> {
+    let code = qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M).map_err(|e| e.to_string())?;
+    let (width, colors) = (code.width(), code.to_colors());
+    let size = width + 8;
+    let mut path = String::new();
+    for (i, color) in colors.iter().enumerate() {
+        if *color == qrcode::Color::Dark { path.push_str(&format!("M{} {}h1v1h-1z", i % width + 4, i / width + 4)); }
+    }
+    Ok(format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\" shape-rendering=\"crispEdges\"><rect width=\"{size}\" height=\"{size}\" fill=\"#fff\"/><path fill=\"#000\" d=\"{path}\"/></svg>"))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_code_reads_back_as_the_link() {
+        // Draw the SVG's modules eight pixels each and read them with the same reader Capture Text uses.
+        let link = "https://cloud.example/v/Zq9x_T3st-Link";
+        let svg = super::svg(link).unwrap();
+        let size: u32 = svg.split("viewBox=\"0 0 ").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
+        let mut picture = image::RgbaImage::from_pixel(size * 8, size * 8, image::Rgba([255, 255, 255, 255]));
+        let path = svg.split(" d=\"").nth(1).unwrap().split('"').next().unwrap();
+        for module in path.split('M').filter(|m| !m.is_empty()) {
+            let xy: Vec<u32> = module.split('h').next().unwrap().split(' ').map(|v| v.parse().unwrap()).collect();
+            for dy in 0..8 { for dx in 0..8 { picture.put_pixel(xy[0] * 8 + dx, xy[1] * 8 + dy, image::Rgba([0, 0, 0, 255])); } }
+        }
+        assert_eq!(super::read(&picture), vec![link.to_string()]);
+    }
+    #[test]
+    fn a_link_makes_a_square_svg_with_a_quiet_margin() {
+        let svg = super::svg("https://cloud.example/v/abc123").unwrap();
+        // 30 characters at medium correction need a 29-module code (version 3), plus 4 modules either side.
+        assert!(svg.contains("viewBox=\"0 0 37 37\""), "{svg}");
+        assert!(svg.contains("M4 4h1v1h-1z")); // The top left finder pattern starts at the margin.
+        assert!(!svg.contains("M3 "));
+    }
+
     use super::*;
     use image::Rgba;
 

@@ -60,6 +60,8 @@ struct Session {
     listener: Option<marks::Listener>,
     /// The pointer's path and clicks for the video editor's zooms, kept with the recording when it's saved.
     trail: Option<marks::Trail>,
+    /// The last share link made, offered as a QR code from the tray.
+    last_link: Option<String>,
     /// Still's own recorder is leaving the pointer out, for the video editor to draw from the trail.
     cursor_separate: bool,
     failed_shortcuts: Vec<String>,
@@ -151,6 +153,22 @@ fn open_settings(app: &AppHandle, page: Option<&str>) {
     if let Some(w) = focus_or(app, "settings", || glass(builder(app, "settings", "settings.html", params)).title("Still Settings").inner_size(760.0, 600.0).min_inner_size(700.0, 540.0).decorations(false).build().ok()) {
         if let Some(p) = page { let _ = w.emit("settings:page", p); }
     }
+}
+/// A share link as a QR code, to open on a phone by pointing its camera at the screen.
+fn show_qr(app: &AppHandle, link: &str) {
+    if let Some(w) = app.get_webview_window("qr") { let _ = w.destroy(); }
+    let _ = glass(builder(app, "qr", "qr.html", json!({ "link": link }))).title("Open on Phone").inner_size(340.0, 440.0).resizable(false).decorations(false).always_on_top(true).build();
+}
+#[tauri::command]
+async fn qr_svg(link: String) -> Result<String, String> { qr::svg(&link) }
+/// History's "Upload and Show QR Code": the share link, and then its code.
+#[tauri::command]
+async fn library_qr(app: AppHandle, id: String) -> Result<(), String> {
+    let link = upload_item(&app, &id).await?;
+    if !link.starts_with("http") { return Err("This destination has no share link to show.".into()); }
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || show_qr(&a, &link));
+    Ok(())
 }
 fn open_history(app: &AppHandle) {
     focus_or(app, "history", || glass(builder(app, "history", "history.html", json!({}))).title("Capture History").inner_size(980.0, 660.0).min_inner_size(640.0, 420.0).decorations(false).build().ok());
@@ -762,6 +780,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         b.build(app)
     };
     let recording = st(app).session.lock().unwrap().recording.is_some();
+    let last_link = st(app).session.lock().unwrap().last_link.is_some();
     let scrolling = scroll::active(app);
     let update = st(app).session.lock().unwrap().update.clone();
     let mut timers = SubmenuBuilder::new(app, "Timed Capture");
@@ -791,6 +810,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     if !recording { menu = menu.item(&item("record", "Record Screen", "record", accel("record"), true)?); }
     menu.separator()
         .item(&item("open-image", "Open Image…", "open", None, true)?)
+        .item(&item("last-link-qr", "Show Last Link as QR Code", "open", None, last_link)?)
         .item(&item("history", "Capture History", "history", accel("history"), true)?)
         .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
         .item(&item("unlock-pins", "Unlock Pinned Screenshots", "unlock", None, true)?)
@@ -806,6 +826,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "settings" => open_settings(app, None),
         "quit" => app.exit(0),
         "open-image" => import_image(app),
+        "last-link-qr" => { let link = st(app).session.lock().unwrap().last_link.clone(); if let Some(link) = link { show_qr(app, &link); } }
         "unlock-pins" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") { let _ = w.set_ignore_cursor_events(false); } },
         "close-overlays" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") || l.starts_with("quick-") { let _ = w.close(); } },
         "update-check" => check_update(app, true),
@@ -1543,7 +1564,10 @@ async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> R
     let result = if setting(app, "cloud.provider").as_str() == Some("drive") { drive_share(app, &file, &title).await }
         else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) } };
     match &result {
-        Ok(link) => { let _ = app.clipboard().write_text(link.clone()); notify(app, "Link copied", link); }
+        Ok(link) => {
+            let _ = app.clipboard().write_text(link.clone()); notify(app, "Link copied", link);
+            if link.starts_with("http") { st(app).session.lock().unwrap().last_link = Some(link.clone()); build_tray_menu(app); }
+        }
         Err(e) => notify(app, "Upload failed", e),
     }
     result
@@ -1843,7 +1867,7 @@ pub fn run() {
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save,
             update_status, update_check, update_install,
-            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop, scroll::scroll_auto
+            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, qr_svg, library_qr, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop, scroll::scroll_auto
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")

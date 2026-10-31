@@ -287,6 +287,11 @@ final class Library: ObservableObject {
     func replaceVideo(_ item: CaptureItem, file: URL) throws {
         try Data(contentsOf: file).write(to: url(item), options: .atomic); forgetThumbnail(item.id); objectWillChange.send()
     }
+    /// The most recent link an upload produced, for showing it again as a QR code.
+    var lastLink: String? {
+        get { UserDefaults.standard.string(forKey: "lastShareLink") }
+        set { UserDefaults.standard.set(newValue, forKey: "lastShareLink") }
+    }
     func setCloudURL(_ item: CaptureItem, url: URL) {
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].cloudURL = url.absoluteString; do { try persist() } catch { toast(error.localizedDescription) } }
     }
