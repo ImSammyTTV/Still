@@ -48,6 +48,12 @@
   .handle { position: absolute; top: 3px; width: 14px; height: 58px; margin-left: -7px; border-radius: 5px; background: var(--accent); cursor: ew-resize; display: grid; place-items: center; touch-action: none; }
   .handle::after { content: ""; width: 2px; height: 20px; border-radius: 2px; background: var(--accent-text); opacity: .75; }
   /* Zooms sit in a lane under the film strip; the selected one is outlined. */
+  /* Stretches cut out of the middle: struck through, and a click on one puts it back. */
+  .cuts { position: absolute; inset: 0; pointer-events: none; }
+  .cuts .cut { position: absolute; top: 0; bottom: 0; pointer-events: auto; cursor: pointer; border: 0; padding: 0; border-radius: 4px;
+    background: repeating-linear-gradient(135deg, var(--hud) 0 6px, transparent 6px 12px); box-shadow: inset 0 0 0 2px var(--red); }
+  .cuts .cut:hover { background: repeating-linear-gradient(135deg, var(--red) 0 6px, transparent 6px 12px); }
+  .cuts .pending { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); }
   .lane { position: relative; height: 16px; margin-top: -4px; }
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane button.selected { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
@@ -108,6 +114,7 @@
     <span class="grow"></span>
     <button class="btn" id="setIn" title="Start the video at the playhead (I)" disabled><i data-lucide="arrow-right-to-line"></i>Set In</button>
     <button class="btn" id="setOut" title="End the video at the playhead (O)" disabled><i data-lucide="arrow-left-to-line"></i>Set Out</button>
+    <button class="btn" id="cut" title="Cut out a stretch: press at its start, then at its end (X)" disabled><i data-lucide="scissors"></i>Cut</button>
     <button class="btn plain" id="reset" disabled>Reset</button>
   </div>
   <div class="trim-head">
@@ -136,12 +143,13 @@
     <div class="shade" id="shadeIn"></div>
     <div class="shade" id="shadeOut"></div>
     <div class="kept" id="kept"></div>
+    <div class="cuts" id="cuts"></div>
     <div class="playhead" id="playhead"></div>
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
   <div class="lane" id="lane" aria-label="Zooms"></div>
-  <p class="note">Your original is never changed. A trimmed video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
+  <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
   <i class="mark" data-lucide="circle-alert"></i>

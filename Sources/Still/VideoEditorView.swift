@@ -38,7 +38,7 @@ import StillCore
         if let data = try? Data(contentsOf: library.root.appendingPathComponent("\(item.id).videoedit.json")), let saved = try? JSONDecoder().decode(VideoSettings.self, from: data) { settings = saved }
         else { settings = metadata.presentation ?? Preferences.shared.recordingPresentation; settings.cursorScale = metadata.defaultShowCursor ? 1 : 0; settings.showClicks = metadata.defaultShowClicks; settings.showKeystrokes = metadata.defaultShowKeystrokes; settings.fps = Preferences.shared.recordingFPS; settings.quality = Preferences.shared.recordingQuality }
         dirty = false; undoStack = []; redoStack = []
-        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in Task { @MainActor in guard let self else { return }; if time.seconds.isFinite { self.playhead = self.settings.start+time.seconds }; self.playing = self.player.rate > 0 } }
+        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in Task { @MainActor in guard let self else { return }; if time.seconds.isFinite { self.playhead = VideoTimeline.sourceTime(at: time.seconds, kept: self.settings.kept) }; self.playing = self.player.rate > 0 } }
         loadTask = Task { await load() }
     }
     private func load() async {
@@ -64,13 +64,23 @@ import StillCore
             prepared = result
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
             player.replaceCurrentItem(with: playerItem)
-            await player.seek(to: CMTime(seconds: max(0, min(result.duration, position-settings.start)), preferredTimescale: 600))
+            await player.seek(to: CMTime(seconds: max(0, min(result.duration, VideoTimeline.outputTime(at: position, kept: settings.kept))), preferredTimescale: 600))
             if wasPlaying { player.play() }
             loading = false
         } catch { self.error = error.localizedDescription; loading = false }
     }
     func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; player.play(); playing = true } }
-    func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, value-settings.start), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+    func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, VideoTimeline.outputTime(at: value, kept: settings.kept)), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+    /// Where a cut being marked began; Cut again at a later moment takes that stretch out.
+    @Published var cutStart: Double?
+    func cut() {
+        guard let from = cutStart else { cutStart = playhead; library.toast("Move to where the cut ends, then press Cut again"); return }
+        cutStart = nil
+        let cuts = VideoTimeline.adding(settings.cuts ?? [], from: from, to: playhead, start: settings.start, end: settings.end)
+        if cuts == (settings.cuts ?? []) { library.toast("Too short to cut"); return }
+        settings.cuts = cuts
+    }
+    func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
         catch { self.error = error.localizedDescription }
@@ -220,11 +230,12 @@ struct VideoEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Text("Trim").fontWeight(.semibold)
-                Text("\(time(model.settings.start)) — \(time(model.settings.end))  ·  \(time(model.settings.end-model.settings.start))").monospacedDigit().foregroundStyle(.secondary)
+                Text("\(time(model.settings.start)) — \(time(model.settings.end))  ·  \(time(VideoTimeline.length(model.settings.kept)))\((model.settings.cuts ?? []).isEmpty ? "" : "  ·  \(model.settings.cuts!.count) cut\(model.settings.cuts!.count == 1 ? "" : "s")")").monospacedDigit().foregroundStyle(.secondary)
                 Spacer()
                 Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
-                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01)
+                Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
+                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration; model.settings.cuts = nil; model.cutStart = nil }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01 && (model.settings.cuts ?? []).isEmpty)
                 Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10))
             }.buttonStyle(.borderless).controlSize(.small)
             GeometryReader { geometry in
@@ -241,6 +252,13 @@ struct VideoEditorView: View {
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, width-endX), height: 52).offset(x: endX).allowsHitTesting(false)
                     // Frame around the kept part.
                     RoundedRectangle(cornerRadius: 6).strokeBorder(Studio.accent, lineWidth: 3).frame(width: max(14, endX-startX), height: 58).offset(x: startX).allowsHitTesting(false)
+                    // Stretches cut out: struck through in red; a click puts one back.
+                    ForEach(model.settings.cuts ?? [], id: \.self) { cut in
+                        Rectangle().fill(.black.opacity(0.65)).overlay(Rectangle().strokeBorder(.red, lineWidth: 2)).overlay(Image(systemName: "scissors").foregroundStyle(.white))
+                            .frame(width: max(4, x(cut.end)-x(cut.start)), height: 52).offset(x: x(cut.start))
+                            .onTapGesture { model.removeCut(cut) }.help("Cut \(time(cut.start)) to \(time(cut.end)): click to put it back")
+                    }
+                    if let from = model.cutStart { Rectangle().fill(.red).frame(width: 2, height: 64).offset(x: x(from)-1).allowsHitTesting(false) }
                     Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(model.playhead)-1).allowsHitTesting(false)
                     // Handles move by how far you drag from where you grabbed them.
                     handle(edge: .leading).offset(x: startX-7)

@@ -77,5 +77,9 @@ public struct VideoSettings: Codable, Equatable {
     public var quality: String?
     public var fps = 30
     public var zooms: [ZoomSegment] = []
+    /// Stretches cut out of the middle; nil for none, so older saved edits load unchanged.
+    public var cuts: [VideoCut]?
+    /// The stretches of the recording that make the finished video.
+    public var kept: [VideoCut] { VideoTimeline.kept(start: start, end: end, cuts: cuts ?? []) }
     public init() {}
 }
