@@ -82,6 +82,9 @@
 
   // The Mac app's recording qualities in bits per pixel per frame, as Still's own recorder on Windows uses them.
   const videoBitrate = (width, height, fps, quality) => {
+    // A bitrate chosen in Settings, as the Mac stores it: "bitrate:12000000", 1 to 100 Mbit/s.
+    const chosen = /^bitrate:(\d+)$/.exec(String(quality || ''));
+    if (chosen && Number(chosen[1]) > 0) return Math.min(100_000_000, Math.max(1_000_000, Number(chosen[1])));
     const factor = quality === 'compact' ? 0.045 : quality === 'balanced' ? 0.09 : 0.18;
     return Math.round(Math.min(100_000_000, Math.max(400_000, width * height * Math.max(1, fps) * factor)));
   };

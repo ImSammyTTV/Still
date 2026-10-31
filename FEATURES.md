@@ -68,10 +68,10 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Pause, resume, restart, cancel | ☑️ | ☑️ |
 | MP4 | ✅ export tested | ☑️ (MP4 or WebM, depending on the system) |
 | GIF export | ✅ export tested | ☑️ up to 60 s and 1280 px |
-| Recording quality (High, Balanced, Smaller File) | ☑️ plus custom bitrate presets | ☑️ the three qualities, same bitrates as the Mac |
+| Recording quality (High, Balanced, Smaller File, or a bitrate you choose) | ☑️ plus named bitrate presets | ☑️ the three qualities and a custom bitrate (1 to 100 Mbit/s), stored as the Mac stores it |
 | Camera bubble, click and keystroke overlays | ☑️ | ☑️ Windows · ☑️ Linux on X11 (camera also on Wayland; clicks and keys are off there) |
 | Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
-| Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ video and GIF exports checked in Chromium · no own-image backgrounds yet |
+| Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
 | Video editor: cursor size, style and smoothing | ✅ export tested | — the cursor is part of the recorded picture |
 | Audio transcription | ☑️ | — |
@@ -101,8 +101,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** video editor cursor effects, own-image video backgrounds, custom bitrates, audio
-  transcription, and horizontal and auto-scrolling capture. Linux can't hide desktop icons.
+- **Windows and Linux:** video editor cursor effects, named bitrate presets, audio transcription, and horizontal and
+  auto-scrolling capture. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
