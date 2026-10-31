@@ -34,7 +34,10 @@ const separateCursor = () => project.cursor === 'separate';
 const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
 // Text shown over the video for a stretch of it, and the one being edited.
 let captions = [], selectedCaption = -1;
-const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text);
+// How the video opens and closes: 'none', 'fade' or 'rise'.
+let opening = 'none', closing = 'none';
+const ends = (t) => StillTransitions.at(t, trim, opening, closing);
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing);
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -143,7 +146,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -218,7 +221,11 @@ function renderView() {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return;
   const t = video.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(vw, vh, z);
-  video.style.transform = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
+  const e = ends(t);
+  const zoomed = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
+  $('#clip').style.opacity = e.level < 1 ? String(e.level) : ''; $('#clip').style.transform = e.scale < 1 ? `scale(${e.scale})` : '';
+  video.volume = Math.max(0, Math.min(1, e.level));
+  video.style.transform = zoomed;
   const fx = $('#fx'), ctx = fx.getContext('2d');
   ctx.clearRect(0, 0, fx.width, fx.height);
   drawOverlays(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
@@ -287,9 +294,14 @@ $('#background').onclick = () => {
 // One exported frame: the background, then the video's current picture inside it.
 function drawFrame(ctx, player, F) {
   const t = player.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(F.width, F.height, z);
+  const e = ends(t);
   ctx.save();
+  if (e.level < 1) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, F.w, F.h); }
   if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg, bgPicture);
   else { ctx.beginPath(); ctx.rect(F.x, F.y, F.width, F.height); ctx.clip(); }
+  // The opening and closing: the picture fades over the background (or black), and rises from slightly smaller.
+  if (e.scale < 1) { const cx = F.x + F.width / 2, cy = F.y + F.height / 2; ctx.translate(cx, cy); ctx.scale(e.scale, e.scale); ctx.translate(-cx, -cy); }
+  ctx.globalAlpha = e.level;
   ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
   drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
@@ -316,6 +328,8 @@ $('#addCaption').onclick = () => {
   selectedCaption = captions.findIndex((c) => c.start <= video.currentTime + 0.01 && c.end >= video.currentTime && c.text === 'Your text');
   renderCaptions(); $('#captionText').focus(); $('#captionText').select();
 };
+$('#opening').onchange = (e) => { opening = e.target.value; renderView(); saveProject(); };
+$('#closing').onchange = (e) => { closing = e.target.value; renderView(); saveProject(); };
 $('#captionText').addEventListener('input', (e) => changeCaption({ text: e.target.value }));
 $('#captionPlace').onchange = (e) => changeCaption({ position: e.target.value });
 $('#captionSize').onchange = (e) => changeCaption({ size: e.target.value });
@@ -467,16 +481,18 @@ function captureSource(player, size) {
   const draw = () => { ctx.setTransform(out.width / F.w, 0, 0, out.height / F.h, 0, 0); drawFrame(ctx, player, F); };
   draw();
   const timer = setInterval(draw, 1000 / 30);
-  let audio = null, sound;
-  if (player.captureStream) sound = player.captureStream().getAudioTracks();
+  let audio = null, sound, gain = null;
+  // The opening and closing fade the sound too, so it goes through a volume control.
+  if (player.captureStream && !StillTransitions.active(opening, closing)) sound = player.captureStream().getAudioTracks();
   else {
     player.muted = false;
     audio = new AudioContext(); const mix = audio.createMediaStreamDestination();
-    audio.createMediaElementSource(player).connect(mix);
+    gain = audio.createGain(); audio.createMediaElementSource(player).connect(gain).connect(mix);
     sound = mix.stream.getAudioTracks();
   }
+  const level = setInterval(() => { if (gain) gain.gain.value = ends(player.currentTime).level; }, 20);
   const tracks = [...canvas.captureStream(30).getVideoTracks(), ...sound];
-  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); if (audio) audio.close(); } };
+  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); clearInterval(level); if (audio) audio.close(); } };
 }
 
 async function recordClip(run, type, plan) {
@@ -656,11 +672,13 @@ async function open() {
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
   captions = (Array.isArray(project.captions) ? project.captions : []).filter((c) => c && c.end > c.start && typeof c.text === 'string');
+  opening = StillTransitions.STYLES.includes(project.opening) ? project.opening : 'none'; closing = StillTransitions.STYLES.includes(project.closing) ? project.closing : 'none';
+  $('#opening').value = opening; $('#closing').value = closing;
   renderCaptions();
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

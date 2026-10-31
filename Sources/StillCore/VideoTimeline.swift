@@ -97,3 +97,23 @@ public struct VideoCaption: Codable, Equatable, Hashable, Identifiable {
         ((max(12, min(width, height) * (Self.sizes[size] ?? 0.06))).rounded(), width / 2, height * (Self.places[position] ?? 0.88))
     }
 }
+
+/// How a video opens and closes: "fade" eases the picture and sound in from nothing and out again, and "rise" does
+/// the same while the picture grows gently out of its background (and settles back at the end). Times are the
+/// recording's own. Windows and Linux follow the same rules (shared/transitions.js) and share the test cases.
+public enum VideoTransition {
+    public static let styles = ["none", "fade", "rise"]
+    public static let duration = 0.6
+    public static let rise = 0.08
+    private static func ease(_ x: Double) -> Double { let v = min(1, max(0, x)); return v*v*(3-2*v) }
+    public static func length(start: Double, end: Double) -> Double { min(duration, max(0, end-start)/3) }
+
+    /// Level 0 to 1 for the picture's opacity and the sound's volume, and the picture's scale, at `time`.
+    public static func at(_ time: Double, start: Double, end: Double, opening: String, closing: String) -> (level: Double, scale: Double) {
+        let d = length(start: start, end: end)
+        let inside = opening != "none" && styles.contains(opening) && d > 0 ? ease((time-start)/d) : 1
+        let outside = closing != "none" && styles.contains(closing) && d > 0 ? ease((end-time)/d) : 1
+        let level = min(inside, outside), style = inside <= outside ? opening : closing
+        return (level, style == "rise" ? 1-rise*(1-level) : 1)
+    }
+}

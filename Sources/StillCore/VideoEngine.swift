@@ -63,6 +63,15 @@ public enum VideoEngine {
         mix.inputParameters = mixInputs
         // A faster export squeezes every track into less time; each frame still maps back to the recording's moment.
         let speed = min(4, max(1, settings.speed ?? 1))
+        // The opening and closing fade the sound with the picture.
+        let fade = VideoTransition.length(start: start, end: end)
+        for input in mixInputs where fade > 0 {
+            let full: Float = settings.muted ? 0 : 1
+            if (settings.opening ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: 0, toEndVolume: full, timeRange: CMTimeRange(start: .zero, duration: cm(fade/speed))) }
+            if (settings.closing ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: full, toEndVolume: 0, timeRange: CMTimeRange(start: cm(max(0, total-fade)/speed), duration: cm(fade/speed))) }
+        }
+        // The mix keeps copies of its inputs, so they go back in after the speed and fades are set.
+        mix.inputParameters = mixInputs
         if speed > 1.001 { asset.scaleTimeRange(CMTimeRange(start: .zero, duration: cm(total)), toDuration: cm(total/speed)); for input in mixInputs { input.audioTimePitchAlgorithm = .spectral } }
         let padding = settings.frame == "none" ? 0 : settings.padding
         var width = oriented.width+padding*2, height = oriented.height+padding*2
@@ -278,6 +287,17 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             image = image.transformed(by: CGAffineTransform(translationX: x-(image.extent.width-side)/2, y: y-(image.extent.height-side)/2))
             let rect = CGRect(x: x, y: y, width: side, height: side), mask = roundedMask(rect, radius: s.cameraShape == "circle" ? side/2 : side*0.12)
             result = image.cropped(to: rect).applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: result, kCIInputMaskImageKey: mask])
+        }
+        // The opening and closing: the picture fades over its background (or black) and rises from slightly smaller.
+        if let first = i.kept.first, let last = i.kept.last {
+            let ends = VideoTransition.at(time, start: first.start, end: last.end, opening: s.opening ?? "none", closing: s.closing ?? "none")
+            if ends.level < 0.999 || ends.scale < 0.999 {
+                let centre = CGPoint(x: contentRect.midX, y: contentRect.midY)
+                let layer = result.cropped(to: contentRect)
+                    .transformed(by: CGAffineTransform(translationX: -centre.x, y: -centre.y).concatenating(CGAffineTransform(scaleX: ends.scale, y: ends.scale)).concatenating(CGAffineTransform(translationX: centre.x, y: centre.y)))
+                    .applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: max(0, ends.level))])
+                result = layer.composited(over: background)
+            }
         }
         return result.cropped(to: bounds)
     }

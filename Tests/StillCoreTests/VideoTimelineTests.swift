@@ -55,4 +55,20 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(b.fontSize, 16); XCTAssertEqual(b.y, 36, accuracy: 0.001)
         XCTAssertEqual(VideoCaption(start: 0, end: 1, position: "middle", size: "large").layout(width: 100, height: 100).fontSize, 12)
     }
+
+    /// The same cases as Desktop/test/transitions.test.js.
+    func testFadeOpensAndClosesOverSixTenthsOfASecond() {
+        XCTAssertEqual(VideoTransition.at(1, start: 1, end: 11, opening: "fade", closing: "fade").level, 0)
+        XCTAssertEqual(VideoTransition.at(1.3, start: 1, end: 11, opening: "fade", closing: "fade").level, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(5, start: 1, end: 11, opening: "fade", closing: "fade").level, 1)
+        XCTAssertEqual(VideoTransition.at(10.7, start: 1, end: 11, opening: "fade", closing: "fade").level, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(1, start: 1, end: 11, opening: "none", closing: "fade").level, 1)
+    }
+
+    func testRiseGrowsThePictureOnlyOnItsOwnSide() {
+        XCTAssertEqual(VideoTransition.at(0, start: 0, end: 10, opening: "rise", closing: "fade").scale, 0.92, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(0.3, start: 0, end: 10, opening: "rise", closing: "fade").scale, 0.96, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(10, start: 0, end: 10, opening: "rise", closing: "fade").scale, 1)
+        XCTAssertEqual(VideoTransition.at(0.25, start: 0, end: 1.5, opening: "fade", closing: "none").level, 0.5, accuracy: 1e-9)
+    }
 }

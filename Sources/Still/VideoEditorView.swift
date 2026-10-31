@@ -291,6 +291,9 @@ struct VideoEditorView: View {
                 Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
                 Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
+                Menu { Picker("Opening", selection: Binding(get: { model.settings.opening ?? "none" }, set: { model.settings.opening = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade In").tag("fade"); Text("Rise").tag("rise") }
+                    Picker("Closing", selection: Binding(get: { model.settings.closing ?? "none" }, set: { model.settings.closing = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade Out").tag("fade"); Text("Rise").tag("rise") }
+                } label: { Label("Ends", systemImage: "circle.lefthalf.filled") }.fixedSize().help("How the video opens and closes: picture and sound ease in and out over 0.6 s; Rise grows the video out of its background")
                 Button("Reset") { model.settings.start = 0; model.settings.end = model.duration; model.settings.cuts = nil; model.cutStart = nil }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01 && (model.settings.cuts ?? []).isEmpty)
                 Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10))
             }.buttonStyle(.borderless).controlSize(.small)

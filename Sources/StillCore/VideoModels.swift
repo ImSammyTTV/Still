@@ -85,6 +85,9 @@ public struct VideoSettings: Codable, Equatable {
     public var speed: Double?
     /// Text shown over the video; nil for none, so older saved edits load unchanged.
     public var captions: [VideoCaption]?
+    /// How the video opens and closes: "fade" or "rise"; nil for neither.
+    public var opening: String?
+    public var closing: String?
     /// The stretches of the recording that make the finished video.
     public var kept: [VideoCut] { VideoTimeline.kept(start: start, end: end, cuts: cuts ?? []) }
     public init() {}

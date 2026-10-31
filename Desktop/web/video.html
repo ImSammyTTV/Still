@@ -138,6 +138,12 @@
     </span>
   </div>
   <div class="trim-head">
+    <b>Ends</b>
+    <label class="zoom-tools">Opening <select class="field" id="opening" disabled><option value="none">None</option><option value="fade">Fade in</option><option value="rise">Rise</option></select></label>
+    <label class="zoom-tools">Closing <select class="field" id="closing" disabled><option value="none">None</option><option value="fade">Fade out</option><option value="rise">Rise</option></select></label>
+    <span class="dim" id="endsHint">Picture and sound ease in and out over 0.6 s. Rise grows the video out of its background.</span>
+  </div>
+  <div class="trim-head">
     <b>Text</b>
     <button class="btn" id="addCaption" title="Show text over the video from the playhead (T)" disabled><i data-lucide="captions"></i>Add Text</button>
     <span class="grow"></span>
@@ -207,6 +213,7 @@
 <script src="shared/zoom.js"></script>
 <script src="shared/cursor.js"></script>
 <script src="shared/captions.js"></script>
+<script src="shared/transitions.js"></script>
 <script src="shared/gif.js"></script>
 <script src="common.js"></script>
 <script src="video.js"></script>
