@@ -492,8 +492,9 @@ fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<Pat
 fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64, selected_window: bool) {
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
+    let native = native_engine(&rec);
     let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
-        "stopShortcut": setting(app, "shortcuts")["record"], "native": native_engine(&rec) });
+        "stopShortcut": setting(app, "shortcuts")["record"], "native": native.is_ok(), "nativeWhy": native.err() });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     {
         let mut s = st(app).session.lock().unwrap();
@@ -540,10 +541,15 @@ fn window_gone(app: &AppHandle, label: &str) {
 }
 /// Whether Still records by itself rather than through the web engine: on Windows, when the computer supports it,
 /// the user hasn't chosen the web engine, and no audio is wanted (Still's recorder doesn't record sound yet).
-fn native_engine(rec: &Value) -> bool {
-    cfg!(windows) && rec["engine"].as_str() != Some("webview")
-        && !rec["microphone"].as_bool().unwrap_or(false) && !rec["systemAudio"].as_bool().unwrap_or(false)
-        && record::available().is_ok()
+/// Whether Still's own recorder makes this recording, and if not, why: the reason goes into any error the web
+/// engine reports, so a failed recording says which recorder failed.
+fn native_engine(rec: &Value) -> Result<(), String> {
+    if !cfg!(windows) { return Err("Still’s own recorder is Windows-only.".into()) }
+    if rec["engine"].as_str() == Some("webview") { return Err("Settings → Recording → Record with is set to the system recorder.".into()) }
+    if rec["microphone"].as_bool().unwrap_or(false) || rec["systemAudio"].as_bool().unwrap_or(false) {
+        return Err("Sound is on, and Still’s own recorder doesn’t record sound yet.".into())
+    }
+    record::available()
 }
 
 fn stop_recording_state(app: &AppHandle) {
