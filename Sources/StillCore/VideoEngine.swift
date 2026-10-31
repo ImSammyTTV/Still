@@ -19,7 +19,7 @@ public enum VideoError: LocalizedError {
     public var errorDescription: String? { switch self { case .noVideo: return "This file has no readable video track."; case .export: return "Video export failed. Try a smaller output size."; case .invalidRange: return "Choose a trim range with at least one frame."; case .cancelled: return "Export cancelled." } }
 }
 public enum VideoEngine {
-    public static func prepare(url: URL, settings: VideoSettings, metadata: RecordingMetadata = .init(), cameraURL: URL? = nil) async throws -> PreparedVideo {
+    public static func prepare(url: URL, settings: VideoSettings, metadata: RecordingMetadata = .init(), cameraURL: URL? = nil, musicURL: URL? = nil) async throws -> PreparedVideo {
         let source = AVURLAsset(url: url)
         guard let original = try await source.loadTracks(withMediaType: .video).first else { throw VideoError.noVideo }
         let duration = try await source.load(.duration).seconds
@@ -69,6 +69,34 @@ public enum VideoEngine {
             let full: Float = settings.muted ? 0 : 1
             if (settings.opening ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: 0, toEndVolume: full, timeRange: CMTimeRange(start: .zero, duration: cm(fade/speed))) }
             if (settings.closing ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: full, toEndVolume: 0, timeRange: CMTimeRange(start: cm(max(0, total-fade)/speed), duration: cm(fade/speed))) }
+        }
+        // Background music: looped to the finished length at its own speed, dipping while someone speaks.
+        if let music = settings.music, let musicURL, FileManager.default.fileExists(atPath: musicURL.path),
+           let musicTrack = try await AVURLAsset(url: musicURL).loadTracks(withMediaType: .audio).first,
+           let track = asset.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let length = try await musicTrack.load(.timeRange).duration.seconds, finished = total/speed
+            if length > 0.1 {
+                var at = 0.0
+                while at < finished - 0.01 {
+                    let piece = min(length, finished - at)
+                    try track.insertTimeRange(CMTimeRange(start: .zero, duration: cm(piece)), of: musicTrack, at: cm(at)); at += piece
+                }
+                let input = AVMutableAudioMixInputParameters(track: track), volume = Float(min(1, max(0, music.volume)))
+                input.setVolume(volume, at: .zero)
+                if music.duck {
+                    let low = volume * 0.3, ramp = 0.15
+                    var after = -1.0
+                    for range in music.speech {
+                        let a = VideoTimeline.outputTime(at: range.start, kept: kept)/speed, b = VideoTimeline.outputTime(at: range.end, kept: kept)/speed
+                        guard b - a > 0.05, a - ramp > after else { continue }
+                        input.setVolumeRamp(fromStartVolume: volume, toEndVolume: low, timeRange: CMTimeRange(start: cm(max(0, a - ramp)), duration: cm(ramp)))
+                        input.setVolumeRamp(fromStartVolume: low, toEndVolume: low, timeRange: CMTimeRange(start: cm(max(0, a)), duration: cm(max(0.01, b - a))))
+                        input.setVolumeRamp(fromStartVolume: low, toEndVolume: volume, timeRange: CMTimeRange(start: cm(b), duration: cm(ramp)))
+                        after = b + ramp
+                    }
+                }
+                mixInputs.append(input)
+            }
         }
         // The mix keeps copies of its inputs, so they go back in after the speed and fades are set.
         mix.inputParameters = mixInputs

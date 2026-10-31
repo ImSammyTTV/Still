@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-video-music-choose"
+description = "Enables the video_music_choose command without any pre-configured scope."
+commands.allow = ["video_music_choose"]
+
+[[permission]]
+identifier = "deny-video-music-choose"
+description = "Denies the video_music_choose command without any pre-configured scope."
+commands.deny = ["video_music_choose"]

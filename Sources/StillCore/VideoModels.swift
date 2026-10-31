@@ -90,6 +90,8 @@ public struct VideoSettings: Codable, Equatable {
     public var blurs: [VideoBlur]?
     /// Named markers for a chapter list; nil for none.
     public var chapters: [VideoChapter]?
+    /// Background music; nil for none.
+    public var music: VideoMusic?
     public var opening: String?
     public var closing: String?
     /// The stretches of the recording that make the finished video.

@@ -103,4 +103,21 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoChapters.list([VideoChapter(time: 40, title: "Gone")], start: 0, end: 100, cuts: [VideoCut(start: 30, end: 50)]), "")
         XCTAssertEqual(VideoChapters.list([VideoChapter(time: 3725, title: "Late")], start: 0, end: 4000, cuts: []), "0:00 Intro\n1:02:05 Late")
     }
+
+    /// The same cases as the music ducking tests in Desktop/test/trim.test.js.
+    func testSpeechIsFoundJoinedAndPadded() {
+        let levels = Array(repeating: -70.0, count: 5) + Array(repeating: -20.0, count: 10) + Array(repeating: -70.0, count: 2) + Array(repeating: -20.0, count: 5) + Array(repeating: -70.0, count: 20) + Array(repeating: -20.0, count: 5)
+        let r = AudioPauses.speech(levels: levels, step: 0.1)
+        XCTAssertEqual(r.count, 2)
+        XCTAssertEqual(r[0].start, 0.3, accuracy: 1e-9); XCTAssertEqual(r[0].end, 2.4, accuracy: 1e-9)
+        XCTAssertEqual(r[1].start, 4, accuracy: 1e-9); XCTAssertEqual(r[1].end, 4.9, accuracy: 1e-9)
+    }
+
+    func testMusicDipsWhileSomeoneSpeaks() {
+        let r = [VideoCut(start: 2, end: 4)]
+        XCTAssertEqual(AudioPauses.duck(1, ranges: r), 1)
+        XCTAssertEqual(AudioPauses.duck(3, ranges: r), 0.3)
+        XCTAssertEqual(AudioPauses.duck(1.925, ranges: r), 0.65, accuracy: 1e-9)
+        XCTAssertEqual(AudioPauses.duck(4.075, ranges: r), 0.65, accuracy: 1e-9)
+    }
 }

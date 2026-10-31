@@ -101,6 +101,37 @@
     });
     return normalizeCuts(found, clip);
   }
+  // ---- Music ducking: where someone is speaking, and how far the music dips there ----------------------
+  // Stretches of the recording above the speaking threshold (as `pauses` judges it), joined across gaps shorter
+  // than `gap` and padded by `pad` each side.
+  function speech(levels, step, { gap = 0.4, pad = 0.2 } = {}) {
+    const loud = [...levels].filter(Number.isFinite).sort((a, b) => a - b);
+    if (!loud.length) return [];
+    const threshold = Math.min(-30, Math.max(-60, loud[Math.floor(loud.length * 0.9)] - 25));
+    const out = []; let begin = null;
+    levels.forEach((level, i) => {
+      const talking = level > threshold;
+      if (talking && begin === null) begin = i;
+      if ((!talking || i === levels.length - 1) && begin !== null) {
+        const start = Math.max(0, begin * step - pad), end = (talking ? i + 1 : i) * step + pad;
+        const last = out[out.length - 1];
+        if (last && start - last.end < gap) last.end = end; else out.push({ start, end });
+        begin = null;
+      }
+    });
+    return out;
+  }
+  // The music's share of its volume at `time`: `low` while someone speaks, easing over `ramp` seconds either side.
+  function duck(time, ranges, { low = 0.3, ramp = 0.15 } = {}) {
+    let level = 1;
+    for (const r of ranges || []) {
+      const into = Math.min(time - (r.start - ramp), (r.end + ramp) - time);
+      if (into <= 0) continue;
+      level = Math.min(level, into >= ramp ? low : 1 - (1 - low) * (into / ramp));
+    }
+    return level;
+  }
+
   // Loudness in decibels for each `step` seconds of mono samples.
   function levelsOf(samples, rate, step = 0.05) {
     const size = Math.max(1, Math.round(rate * step)), out = [];
@@ -113,5 +144,5 @@
     return out;
   }
 
-  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf };
+  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf, speech, duck };
 });

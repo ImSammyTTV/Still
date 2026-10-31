@@ -142,6 +142,35 @@ public enum AudioPauses {
         return VideoTimeline.normalized(found, start: start, end: end)
     }
 
+    /// Where someone is speaking: stretches above the speaking threshold, joined across gaps shorter than `gap` and
+    /// padded by `pad` each side. Windows and Linux use the same rule (shared/trim.js `speech`).
+    public static func speech(levels: [Double], step: Double, gap: Double = 0.4, pad: Double = 0.2) -> [VideoCut] {
+        let loud = levels.filter(\.isFinite).sorted()
+        guard !loud.isEmpty else { return [] }
+        let threshold = min(-30, max(-60, loud[Int(Double(loud.count) * 0.9)] - 25))
+        var out: [VideoCut] = [], begin: Int?
+        for (index, level) in levels.enumerated() {
+            let talking = level > threshold
+            if talking, begin == nil { begin = index }
+            if (!talking || index == levels.count - 1), let from = begin {
+                let start = max(0, Double(from) * step - pad), end = Double(talking ? index + 1 : index) * step + pad
+                if let last = out.last, start - last.end < gap { out[out.count-1].end = end } else { out.append(VideoCut(start: start, end: end)) }
+                begin = nil
+            }
+        }
+        return out
+    }
+    /// The music's share of its volume at `time`: `low` while someone speaks, easing over `ramp` seconds either side.
+    public static func duck(_ time: Double, ranges: [VideoCut], low: Double = 0.3, ramp: Double = 0.15) -> Double {
+        var level = 1.0
+        for r in ranges {
+            let into = min(time - (r.start - ramp), (r.end + ramp) - time)
+            guard into > 0 else { continue }
+            level = min(level, into >= ramp ? low : 1 - (1 - low) * (into / ramp))
+        }
+        return level
+    }
+
     /// Loudness in decibels for each `step` seconds of mono samples.
     public static func levels(_ samples: [Float], rate: Double, step: Double = 0.05) -> [Double] {
         let size = max(1, Int((rate * step).rounded()))
@@ -208,5 +237,18 @@ public enum VideoChapters {
         guard !rows.isEmpty else { return "" }
         if rows[0].at > 0 { rows.insert((0, "Intro"), at: 0) }
         return rows.map { "\(stamp(Double($0.at))) \($0.title)" }.joined(separator: "\n")
+    }
+}
+
+/// Background music for a recording: a file copied in beside it, its volume (0 to 1), whether it dips while someone
+/// speaks, and where the speech is (in the recording's own time, found once when the music is added).
+public struct VideoMusic: Codable, Equatable, Hashable {
+    public var filename: String
+    public var name: String
+    public var volume: Double
+    public var duck: Bool
+    public var speech: [VideoCut]
+    public init(filename: String, name: String, volume: Double = 0.3, duck: Bool = true, speech: [VideoCut] = []) {
+        self.filename = filename; self.name = name; self.volume = volume; self.duck = duck; self.speech = speech
     }
 }

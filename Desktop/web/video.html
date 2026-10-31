@@ -146,6 +146,17 @@
     </span>
   </div>
   <div class="trim-head">
+    <b>Music</b>
+    <button class="btn" id="chooseMusic" title="Add background music; it dips whenever someone speaks" disabled><i data-lucide="music"></i>Choose Music…</button>
+    <span class="dim" id="musicName">None</span>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="musicTools" hidden>
+      <label>Volume <input type="range" id="musicVolume" min="0" max="100" step="1"></label>
+      <label><input type="checkbox" id="musicDuck"> Lower under speech</label>
+      <button class="btn plain" id="musicRemove" title="Remove the music"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
     <b>Chapters</b>
     <button class="btn" id="addChapter" title="Mark a chapter at the playhead (M)" disabled><i data-lucide="bookmark-plus"></i>Add Chapter</button>
     <button class="btn" id="copyChapters" title="Copy a chapter list for a video description, timed to the finished video" disabled><i data-lucide="list-ordered"></i>Copy Chapters</button>
