@@ -386,6 +386,14 @@ $('#color').onclick = (e) => {
   for (const c of COLORS) grid.append(el('button', { class: c === color ? 'active' : '', style: `background:${c}`, title: c, onclick: () => { menu.remove(); setColor(c); } }));
   const custom = el('input', { type: 'color', value: color, style: 'width:100%;height:28px;border:0;background:none', oninput: (ev) => setColor(ev.target.value.toUpperCase()) });
   menu.append(grid, custom); document.body.append(menu);
+  // Colours picked with C while capturing, newest first.
+  still.invoke('settings:get').then((current) => {
+    const recent = (current.recentColors || []).filter((c) => /^#[0-9A-F]{6}$/i.test(c));
+    if (!recent.length || !menu.isConnected) return;
+    const row = el('div', { class: 'palette' });
+    for (const c of recent) row.append(el('button', { class: c.toUpperCase() === color.toUpperCase() ? 'active' : '', style: `background:${c}`, title: c, onclick: () => { menu.remove(); setColor(c.toUpperCase()); } }));
+    menu.insertBefore(el('div', { class: 'menu-label' }, 'Recent'), custom); menu.insertBefore(row, custom);
+  }).catch(() => {});
   const r = e.currentTarget.getBoundingClientRect(); menu.style.left = `${r.left - 60}px`; menu.style.top = `${r.bottom + 6}px`;
   setTimeout(() => addEventListener('mousedown', function close(ev) { if (!menu.contains(ev.target)) { menu.remove(); removeEventListener('mousedown', close); } }), 0);
 };

@@ -253,6 +253,10 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     private let labelBack = CALayer()
     private let magnifier = CALayer()
     private let highlight = CALayer()
+    // The colour under the crosshair, under the magnifier; C copies it.
+    private let colourBack = CALayer(), colourSwatch = CALayer()
+    private let colourLabel = CATextLayer()
+    private var copiedColour: String?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     // Still isn't the active app while selecting (so menus and Spotlight stay open); take the first click anyway.
@@ -275,7 +279,11 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         magnifier.magnificationFilter = .nearest; magnifier.isHidden = true
         highlight.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.3).cgColor
         highlight.borderColor = NSColor.systemBlue.withAlphaComponent(0.85).cgColor; highlight.borderWidth = 1; highlight.isHidden = true
-        for layer in [frozen, shade, highlight, border, crossH, crossV, magnifier, labelBack, label] as [CALayer] { layer.actions = Self.noAnimations; root.addSublayer(layer) }
+        colourBack.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor; colourBack.cornerRadius = 5
+        colourSwatch.borderColor = NSColor.white.withAlphaComponent(0.7).cgColor; colourSwatch.borderWidth = 1
+        colourLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium); colourLabel.fontSize = 10
+        colourLabel.foregroundColor = NSColor.white.cgColor; colourLabel.contentsScale = scale
+        for layer in [frozen, shade, highlight, border, crossH, crossV, magnifier, colourBack, colourSwatch, colourLabel, labelBack, label] as [CALayer] { layer.actions = Self.noAnimations; root.addSublayer(layer) }
         if Preferences.shared.rememberSelection, let saved = UserDefaults.standard.dictionary(forKey: "lastSelection"), let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue, (saved["screen"] as? Double) == id, let x = saved["x"] as? Double, let y = saved["y"] as? Double, let w = saved["w"] as? Double, let h = saved["h"] as? Double {
             region = CGRect(x: x, y: y, width: w, height: h).intersection(CGRect(origin: .zero, size: screen.frame.size))
             coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height))
@@ -357,6 +365,31 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             magnifier.contentsRect = CGRect(x: (pointer.x*sx-patch/2)/w, y: (pointer.y*sy-patch/2)/h, width: patch/w, height: patch/h)
             magnifier.frame = CGRect(x: min(bounds.width-100, pointer.x+22), y: max(10, pointer.y-110), width: 88, height: 88)
         }
+        let hex = showMagnifier ? colourUnderPointer() : nil
+        for layer in [colourBack, colourSwatch, colourLabel] { layer.isHidden = hex == nil }
+        if let hex {
+            let text = copiedColour == hex ? "\(hex) copied" : "\(hex)  C"
+            let width = (text as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)]).width
+            let top = magnifier.frame.maxY + 6, left = magnifier.frame.minX
+            colourBack.frame = CGRect(x: left, y: top, width: width + 26, height: 18)
+            colourSwatch.frame = CGRect(x: left + 5, y: top + 4, width: 10, height: 10)
+            colourSwatch.backgroundColor = NSColor(hex: String(hex.dropFirst())).cgColor
+            colourLabel.string = text; colourLabel.frame = CGRect(x: left + 20, y: top + 3, width: width + 2, height: 13)
+        }
+    }
+
+    private func colourUnderPointer() -> String? {
+        guard let snapshot, bounds.width > 0, bounds.height > 0 else { return nil }
+        let x = Int(pointer.x * CGFloat(snapshot.width) / bounds.width), y = Int(pointer.y * CGFloat(snapshot.height) / bounds.height)
+        return ColorSample.hex(in: snapshot, x: x, y: y)
+    }
+    /// C copies the colour under the crosshair and keeps it with the recent colours the editor's palette shows. The
+    /// selection carries on, so a few can be picked before capturing or pressing Esc.
+    private func copyColour() {
+        guard let hex = colourUnderPointer() else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(hex, forType: .string)
+        UserDefaults.standard.set(ColorSample.remember(hex, in: UserDefaults.standard.stringArray(forKey: "recentColors") ?? []), forKey: "recentColors")
+        copiedColour = hex; refresh()
     }
 
     override func mouseMoved(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); updateHover(); refresh() }
@@ -413,6 +446,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         case "o": coordinator.setWindowMode(false); coordinator.purpose = .text
         case "v": coordinator.setWindowMode(false); coordinator.purpose = .recording
         case "t": coordinator.timer()
+        case "c": copyColour()
         default: super.keyDown(with: event)
         }
     }

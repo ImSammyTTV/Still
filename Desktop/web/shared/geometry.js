@@ -89,5 +89,11 @@
     return Math.round(Math.min(100_000_000, Math.max(400_000, width * height * Math.max(1, fps) * factor)));
   };
 
-  return { videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
+  // A colour as #RRGGBB, and the recent colours list it joins: newest first, no repeats, at most `max`.
+  const hexColor = (r, g, b) => '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+  const rememberColor = (list, color, max = 10) => [color, ...(Array.isArray(list) ? list : []).filter((c) => typeof c === 'string' && c.toUpperCase() !== color.toUpperCase())].slice(0, max);
+  // Black or white, whichever reads better on the colour.
+  const inkOn = (hex) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) > 150 ? '#000000' : '#FFFFFF'; };
+
+  return { hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
 });

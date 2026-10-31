@@ -1008,6 +1008,20 @@ async fn overlay_ready(app: AppHandle, window: tauri::Window) {
     let label = window.label().to_string();
     if s.handing.as_deref() == Some(label.as_str()) { s.handing = None; } else { s.warm.push(label); }
 }
+/// A colour picked in the capture overlay: copied as #RRGGBB and kept at the front of the recent colours that the
+/// editor offers.
+#[tauri::command]
+async fn overlay_color(app: AppHandle, hex: String) -> Result<(), String> {
+    let valid = hex.len() == 7 && hex.starts_with('#') && hex[1..].chars().all(|c| c.is_ascii_hexdigit());
+    if !valid { return Err("That isn’t a colour.".into()); }
+    let hex = hex.to_uppercase();
+    let _ = app.clipboard().write_text(hex.clone());
+    let recent: Vec<Value> = setting(&app, "recentColors").as_array().cloned().unwrap_or_default();
+    let mut list = vec![json!(hex)];
+    list.extend(recent.into_iter().filter(|c| c.as_str().map(|s| !s.eq_ignore_ascii_case(&hex)).unwrap_or(false)).take(9));
+    st(&app).settings.lock().unwrap().update(&json!({ "recentColors": list }));
+    Ok(())
+}
 #[tauri::command]
 async fn overlay_pointer(app: AppHandle, window: tauri::Window) {
     for l in st(&app).session.lock().unwrap().overlays.iter() { if l != window.label() { let _ = app.emit_to(l.as_str(), "overlay:clear", ()); } }
@@ -1815,7 +1829,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
-            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_ready,
+            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,

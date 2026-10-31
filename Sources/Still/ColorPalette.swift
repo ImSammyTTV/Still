@@ -22,7 +22,17 @@ struct PaletteEditor: View {
                     Button { model.setColor(hex) } label: { Circle().fill(Color(hex: hex)).frame(width: 30, height: 30).overlay(Circle().stroke(Color.primary.opacity(0.2))).overlay { if model.color == hex { Image(systemName: "checkmark").foregroundStyle(hex == "141414" ? .white : .black) } } }.buttonStyle(.plain).help("#\(hex)").accessibilityLabel("Choose color \(hex)").contextMenu { Button("Remove from Palette") { palette.remove(hex) } }
                 }
             }
-            Text("Right-click a color to remove it. Saved colors are available in every editor window.").font(.caption).foregroundStyle(.secondary)
+            // Colours copied with C while choosing an area, newest first.
+            let recent = (UserDefaults.standard.stringArray(forKey: "recentColors") ?? []).map { String($0.dropFirst()) }.filter { $0.range(of: "^[0-9A-F]{6}$", options: .regularExpression) != nil }
+            if !recent.isEmpty {
+                Text("Picked while capturing").font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    ForEach(recent, id: \.self) { hex in
+                        Button { model.setColor(hex) } label: { Circle().fill(Color(hex: hex)).frame(width: 24, height: 24).overlay(Circle().stroke(Color.primary.opacity(0.2))) }.buttonStyle(.plain).help("#\(hex)").accessibilityLabel("Choose color \(hex)").contextMenu { Button("Save to Palette") { palette.add(hex) } }
+                    }
+                }
+            }
+            Text("Right-click a color to remove it. Saved colors are available in every editor window. Press C while choosing an area to copy the colour under the crosshair.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 440)
     }
 }
