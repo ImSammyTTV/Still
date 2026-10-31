@@ -157,3 +157,10 @@ test('a project from an older version still opens', () => {
   assert.deepEqual(doc.bg, { style: 'midnight', padding: 64 });
   assert.deepEqual(M.openProject(null, defaults).doc, defaults);
 });
+
+// The same cases are in the Mac app's MeasureTests.
+test('a Measure mark is labelled with its length, and its sides when slanted', () => {
+  assert.equal(M.measureLabel({ x1: 10, y1: 20, x2: 250, y2: 20 }), '240 px');
+  assert.equal(M.measureLabel({ x1: 0, y1: 0, x2: 300, y2: 400 }), '500 px  (300 × 400)');
+  assert.equal(M.measureLabel({ x1: 5, y1: 5, x2: 5, y2: 5 }), '0 px');
+});

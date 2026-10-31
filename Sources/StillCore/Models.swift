@@ -9,7 +9,7 @@ public struct PixelPoint: Codable, Equatable {
 }
 
 public enum MarkTool: String, CaseIterable, Codable, Identifiable {
-    case select, arrow, rectangle, filledRectangle, ellipse, line, pen, highlight, text, number, redact, blur, pixelate, spotlight, loupe, crop, image
+    case select, arrow, rectangle, filledRectangle, ellipse, line, pen, highlight, text, number, redact, blur, pixelate, spotlight, loupe, measure, crop, image
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -20,6 +20,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .pixelate: return "Pixelate"
         case .spotlight: return "Spotlight"
         case .loupe: return "Loupe"
+        case .measure: return "Measure"
         case .image: return "Add Image"
         case .arrow: return "Arrow"
         case .rectangle: return "Rectangle"
@@ -41,6 +42,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .pixelate: return "square.grid.3x3.fill"
         case .spotlight: return "circle.lefthalf.filled"
         case .loupe: return "plus.magnifyingglass"
+        case .measure: return "ruler"
         case .image: return "photo.badge.plus"
         case .arrow: return "arrow.up.right"
         case .rectangle: return "rectangle"
@@ -62,6 +64,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .pixelate: return "x"
         case .spotlight: return "s"
         case .loupe: return "m"
+        case .measure: return "d"
         case .image: return "i"
         case .arrow: return "a"
         case .rectangle: return "r"
@@ -94,6 +97,13 @@ public struct Mark: Codable, Equatable, Identifiable {
     }
     public init(tool: MarkTool, points: [PixelPoint], color: String = "FF6148", width: Double = 5, text: String = "") {
         self.tool = tool; self.points = points; self.color = color; self.width = width; self.text = text
+    }
+    /// A Measure mark's label: the distance between its ends in the picture's pixels, with the width and height when
+    /// it runs at a slant. Windows and Linux give the same text (marks.js measureLabel).
+    public var measureLabel: String {
+        guard let a = points.first, let b = points.last else { return "0 px" }
+        let w = Int(abs(b.x - a.x).rounded()), h = Int(abs(b.y - a.y).rounded()), length = Int(hypot(b.x - a.x, b.y - a.y).rounded())
+        return w > 0 && h > 0 ? "\(length) px  (\(w) × \(h))" : "\(length) px"
     }
     public var rect: CGRect {
         guard let a = points.first, let b = points.last else { return .zero }

@@ -5,7 +5,7 @@ struct EditorView: View {
     @ObservedObject var model: EditorModel
     @ObservedObject private var palette = ColorPalette.shared
     @FocusState private var textFocused: Bool
-    private let tools: [MarkTool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text, .pixelate, .spotlight, .loupe, .number, .pen, .highlight, .blur]
+    private let tools: [MarkTool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text, .pixelate, .spotlight, .loupe, .measure, .number, .pen, .highlight, .blur]
     var body: some View {
         VStack(spacing: 0) {
             toolbar

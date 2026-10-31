@@ -177,9 +177,17 @@
     return { doc: { ...defaults, ...saved, bg: { ...defaults.bg, ...(saved.bg || {}) } }, assets: { ...(assets || {}) } };
   };
 
+  // A Measure mark's label: the distance between its ends in the picture's pixels, with the width and height
+  // when it runs at a slant. The Mac app's Mark.measureLabel gives the same text.
+  function measureLabel(m) {
+    const w = Math.round(Math.abs(m.x2 - m.x1)), h = Math.round(Math.abs(m.y2 - m.y1));
+    const length = Math.round(Math.hypot(m.x2 - m.x1, m.y2 - m.y1));
+    return w && h ? `${length} px  (${w} × ${h})` : `${length} px`;
+  }
+
   return {
     ARROW_STYLES, TEXT_STYLES, arrowStyle, textStyle, isCurved, curveControl, pathPoints, distanceToPath, pathBounds, arrowShape,
     textWeight, textFont, inkOn, textInk, textLayout, orient, linkedSide, resizeProblem, placeImage, droppedImages, dropPoint,
-    addAsset, usedAssets, unusedAssets, projectFile, openProject
+    addAsset, usedAssets, unusedAssets, projectFile, openProject, measureLabel
   };
 });

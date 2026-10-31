@@ -9,7 +9,7 @@ const TOOLS = [
   ['select', 'mouse-pointer-2', 'Select', 'v'], ['arrow', 'move-up-right', 'Arrow', 'a'], ['rect', 'square', 'Rectangle', 'r'],
   ['filled', 'square-dashed-bottom', 'Filled Rectangle', 'f'], ['ellipse', 'circle', 'Ellipse', 'o'], ['line', 'slash', 'Line', 'l'],
   ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Counter', 'n'],
-  ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['crop', 'crop', 'Crop', 'c']
+  ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['measure', 'ruler', 'Measure', 'd'], ['crop', 'crop', 'Crop', 'c']
 ];
 const COLORS = ['#FF453A', '#FF9F0A', '#FFD60A', '#32D74B', '#64D2FF', '#0A84FF', '#BF5AF2', '#FF375F', '#FFFFFF', '#1D1D1F'];
 const STROKES = [2, 4, 6, 10, 16];
@@ -27,7 +27,7 @@ let selected = null, drag = null, pendingCrop = null, history = [], future = [],
 const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'loupe', 'image'].includes(m.type);
 // How much a Loupe enlarges what's under it.
 const LOUPE_ZOOM = 2;
-const isSegment = (m) => m.type === 'arrow' || m.type === 'line';
+const isSegment = (m) => m.type === 'arrow' || m.type === 'line' || m.type === 'measure';
 
 // ---- Layout ---------------------------------------------------------------------------------
 
@@ -113,6 +113,19 @@ function drawMark(t, m) {
     case 'redact': t.fillStyle = '#000'; t.fillRect(r.x, r.y, r.w, r.h); break;
     case 'ellipse': t.beginPath(); t.ellipse(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, r.h / 2, 0, 0, Math.PI * 2); t.stroke(); break;
     case 'line': t.beginPath(); t.moveTo(m.x1, m.y1); t.lineTo(m.x2, m.y2); t.stroke(); break;
+    case 'measure': {
+      // A line with a short bar across each end and its length in a pill at the middle.
+      const angle = Math.atan2(m.y2 - m.y1, m.x2 - m.x1), bar = Math.max(8, m.stroke * 3);
+      const nx = -Math.sin(angle) * bar, ny = Math.cos(angle) * bar;
+      t.beginPath(); t.moveTo(m.x1, m.y1); t.lineTo(m.x2, m.y2);
+      t.moveTo(m.x1 - nx, m.y1 - ny); t.lineTo(m.x1 + nx, m.y1 + ny); t.moveTo(m.x2 - nx, m.y2 - ny); t.lineTo(m.x2 + nx, m.y2 + ny); t.stroke();
+      const label = M.measureLabel(m), size = Math.max(13, m.stroke * 3.5);
+      t.font = `600 ${size}px ${fontFamily()}`;
+      const w = t.measureText(label).width + size, h = size * 1.7, cx = (m.x1 + m.x2) / 2, cy = (m.y1 + m.y2) / 2;
+      t.fillStyle = 'rgba(0,0,0,.78)'; t.beginPath(); t.roundRect(cx - w / 2, cy - h / 2, w, h, h / 2); t.fill();
+      t.fillStyle = '#fff'; t.textAlign = 'center'; t.textBaseline = 'middle'; t.fillText(label, cx, cy + 1);
+      break;
+    }
     case 'arrow': {
       t.shadowColor = 'rgba(0,0,0,.25)'; t.shadowBlur = 4; t.shadowOffsetY = 1;
       drawArrow(t, m); break;
@@ -268,7 +281,7 @@ stage.addEventListener('mousedown', (e) => {
   }
   const mark = tool === 'pen' ? { type: 'pen', points: [p], color, stroke }
     : tool === 'arrow' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke, style: styles.arrow }
-    : tool === 'line' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke }
+    : tool === 'line' || tool === 'measure' ? { type: tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color, stroke }
     : { type: tool, x: p.x, y: p.y, w: 0, h: 0, color, stroke };
   if (tool === 'highlight' && e.altKey === false) mark.smart = true;
   doc.marks.push(mark);
