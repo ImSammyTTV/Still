@@ -79,8 +79,11 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Recording quality (High, Balanced, Smaller File, named bitrate presets, or a bitrate you choose) | ☑️ | ☑️ custom bitrates and presets from 1 to 100 Mbit/s, stored as the Mac stores them |
 | Camera bubble, click and keystroke overlays | ☑️ | ☑️ Windows · ☑️ Linux on X11 (camera also on Wayland; clicks and keys are off there) |
 | Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
+| Video editor: cut stretches out of the middle (Cut at the start and end, X), struck through on the trim bar and put back with a click; playback and exports skip them | ☑️ | ☑️ export checked frame by frame in Chromium |
+| Video editor: Export Video asks for a size (Original, 4K, 1440p, 1080p, 720p, 480p; never enlarged) a quality (Maximum, High, Balanced, Smaller File or a bitrate preset) and a speed (1× to 3×, voice at its normal pitch), with the length and file size it comes to | ☑️ | ☑️ downscaled export checked in Chromium |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
+| Video editor: pick several zooms on the trim bar (⌘/Ctrl- or Shift-click) and remove them together | ☑️ | ☑️ checked in Chromium |
 | Video editor: cursor size, style (Arrow or Dot) and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
 | Audio transcription | ☑️ | — |
 

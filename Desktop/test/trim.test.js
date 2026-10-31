@@ -56,3 +56,26 @@ test('saved trim points come back only when they still fit the recording', () =>
   assert.deepEqual(T.restore({ start: 'x', end: 4 }, 10), { start: 0, end: 10 });
   assert.deepEqual(T.restore({ start: 9.95, end: 12 }, 10), { start: 0, end: 10 }); // Too short to keep.
 });
+
+// The same cases are in the Mac app's VideoTimelineTests.
+test('cuts are kept sorted, inside the clip and merged where they touch', () => {
+  const clip = { start: 1, end: 10 };
+  let cuts = T.addCut([], 6, 4, clip);
+  assert.deepEqual(cuts, [{ start: 4, end: 6 }]);
+  cuts = T.addCut(cuts, 5.5, 7, clip);
+  assert.deepEqual(cuts, [{ start: 4, end: 7 }]);
+  cuts = T.addCut(cuts, 0, 2, clip);
+  assert.deepEqual(cuts, [{ start: 1, end: 2 }, { start: 4, end: 7 }]);
+  assert.deepEqual(T.addCut(cuts, 8, 8.05, clip), cuts, 'too short to count');
+  assert.deepEqual(T.removeCut(cuts, 0), [{ start: 4, end: 7 }]);
+});
+
+test('the kept stretches, their length, and times either side of a cut', () => {
+  const clip = { start: 1, end: 10 }, cuts = [{ start: 4, end: 7 }];
+  const kept = T.kept(clip, cuts);
+  assert.deepEqual(kept, [{ start: 1, end: 4 }, { start: 7, end: 10 }]);
+  assert.equal(T.keptLength(clip, cuts), 6);
+  assert.equal(T.skip(5, cuts), 7); assert.equal(T.skip(3, cuts), 3);
+  assert.equal(T.sourceAt(0, kept), 1); assert.equal(T.sourceAt(3, kept), 4); assert.equal(T.sourceAt(3.5, kept), 7.5); assert.equal(T.sourceAt(99, kept), 10);
+  assert.equal(T.outputAt(2, kept), 1); assert.equal(T.outputAt(5, kept), 3); assert.equal(T.outputAt(8, kept), 4);
+});

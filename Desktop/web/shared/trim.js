@@ -38,5 +38,45 @@
     return { type, ext: type.startsWith('video/mp4') ? 'mp4' : 'webm' };
   };
 
-  return { MIN_LENGTH, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType };
+  // ---- Cuts: stretches taken out of the middle -------------------------------------------------------
+  // A cut is { start, end } in the recording's own time. Cuts are kept sorted, inside the clip, at least
+  // MIN_CUT long, and merged where they touch. The Mac app's VideoTimeline follows the same rules.
+  const MIN_CUT = 0.1;
+  function addCut(cuts, a, b, clip) {
+    const start = clamp(Math.min(a, b), clip.start, clip.end), end = clamp(Math.max(a, b), clip.start, clip.end);
+    if (end - start < MIN_CUT) return normalizeCuts(cuts, clip);
+    return normalizeCuts([...(cuts || []), { start, end }], clip);
+  }
+  function normalizeCuts(cuts, clip) {
+    const sorted = (cuts || []).map((c) => ({ start: clamp(Number(c.start), clip.start, clip.end), end: clamp(Number(c.end), clip.start, clip.end) }))
+      .filter((c) => Number.isFinite(c.start) && Number.isFinite(c.end) && c.end - c.start >= MIN_CUT).sort((x, y) => x.start - y.start);
+    const out = [];
+    for (const c of sorted) { const last = out[out.length - 1]; if (last && c.start <= last.end) last.end = Math.max(last.end, c.end); else out.push({ ...c }); }
+    return out;
+  }
+  const removeCut = (cuts, index) => (cuts || []).filter((_, i) => i !== index);
+  // The stretches that stay, in order.
+  function kept(clip, cuts) {
+    const out = []; let at = clip.start;
+    for (const c of normalizeCuts(cuts, clip)) { if (c.start > at) out.push({ start: at, end: c.start }); at = Math.max(at, c.end); }
+    if (clip.end > at) out.push({ start: at, end: clip.end });
+    return out;
+  }
+  const keptLength = (clip, cuts) => kept(clip, cuts).reduce((sum, k) => sum + k.end - k.start, 0);
+  // Where playback goes from `time`: the end of the cut it's in, or `time` itself.
+  function skip(time, cuts) { for (const c of cuts || []) if (time >= c.start && time < c.end) return c.end; return time; }
+  // The recording's time at a moment of the finished video, and the other way round (a time inside a cut
+  // counts from where the cut ends).
+  function sourceAt(t, segments) {
+    let left = Math.max(0, t);
+    for (const k of segments) { const len = k.end - k.start; if (left <= len) return k.start + left; left -= len; }
+    return segments.length ? segments[segments.length - 1].end : 0;
+  }
+  function outputAt(time, segments) {
+    let before = 0;
+    for (const k of segments) { if (time < k.start) return before; if (time <= k.end) return before + time - k.start; before += k.end - k.start; }
+    return before;
+  }
+
+  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, kept, keptLength, skip, sourceAt, outputAt };
 });

@@ -12,13 +12,20 @@
 // rings are drawn into every exported frame, so any of them means re-encoding.
 const id = params.get('id');
 const video = $('#video');
-const BITRATE = 12_000_000; // Matches the recording HUD.
 const THUMBNAILS = 9;
 let item, source, duration = 0, trim = { start: 0, end: 0 }, job = null, project = {}, saveTimer = 0;
 const NO_BG = { style: 'none', padding: 8, radius: 2, shadow: true };
 let bg = { ...NO_BG };
 const hasBg = () => bg.style !== 'none';
 let zooms = [], selectedZoom = -1, showClicks = false, bgPicture = null;
+// The zooms picked on the lane: a click picks one, Ctrl- (⌘-) or Shift-click adds or drops one, so several can be
+// removed together. `selectedZoom` is the one being edited when exactly one is picked.
+let pickedZooms = new Set();
+function pickZoom(i, adding) {
+  if (!adding) pickedZooms = i >= 0 && !(pickedZooms.size === 1 && pickedZooms.has(i)) ? new Set([i]) : new Set();
+  else if (pickedZooms.has(i)) pickedZooms.delete(i); else pickedZooms.add(i);
+  selectedZoom = pickedZooms.size === 1 ? [...pickedZooms][0] : -1;
+}
 const clicks = () => (Array.isArray(project.clicks) ? project.clicks : []);
 const drawsClicks = () => showClicks && clicks().length > 0;
 // Recordings made with Cursor effects on leave the pointer out of the picture; it's drawn here from the path.
@@ -91,7 +98,30 @@ async function fillThumbnails() {
 
 // ---- Trim bar -----------------------------------------------------------------------------------
 
+// Stretches cut out of the middle, in the recording's own time, and where a cut being marked began.
+let cuts = [], cutStart = null;
+function renderCuts() {
+  const holder = $('#cuts'); holder.replaceChildren();
+  cuts.forEach((c, i) => {
+    const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
+    const b = el('button', { class: 'cut', style: `left:${left}%;width:${width}%`, title: `Cut ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}: click to put it back`, 'aria-label': `Put back ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}` });
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => { e.stopPropagation(); cuts = StillTrim.removeCut(cuts, i); render(); });
+    holder.append(b);
+  });
+  if (cutStart !== null) holder.append(el('div', { class: 'pending', style: `left:${StillTrim.position(cutStart, duration) * 100}%` }));
+  $('#cut').innerHTML = `${icon('scissors')}${cutStart === null ? 'Cut' : 'End Cut'}`; refreshIcons();
+}
+$('#cut').onclick = () => {
+  if (cutStart === null) { cutStart = video.currentTime; toast('Move to where the cut ends, then press Cut again'); }
+  else { const before = cuts.length; cuts = StillTrim.addCut(cuts, cutStart, video.currentTime, trim); cutStart = null; if (cuts.length === before && !cuts.some((c) => c.end - c.start > 0)) toast('Too short to cut'); }
+  render();
+};
+const isWhole = () => StillTrim.isFull(trim, duration) && !cuts.length;
+
 function render() {
+  cuts = StillTrim.normalizeCuts(cuts, trim);
+  renderCuts();
   const start = StillTrim.position(trim.start, duration) * 100, end = StillTrim.position(trim.end, duration) * 100;
   $('#shadeIn').style.width = `${start}%`; $('#shadeOut').style.width = `${100 - end}%`;
   $('#kept').style.left = `${start}%`; $('#kept').style.width = `${end - start}%`;
@@ -100,8 +130,8 @@ function render() {
     handle.setAttribute('aria-valuemin', '0'); handle.setAttribute('aria-valuemax', duration.toFixed(1));
     handle.setAttribute('aria-valuenow', value.toFixed(1)); handle.setAttribute('aria-valuetext', StillTrim.clock(value));
   }
-  $('#range').textContent = `${StillTrim.clock(trim.start)} — ${StillTrim.clock(trim.end)}  ·  ${StillTrim.clock(StillTrim.length(trim))}`;
-  $('#reset').disabled = StillTrim.isFull(trim, duration);
+  $('#range').textContent = `${StillTrim.clock(trim.start)} — ${StillTrim.clock(trim.end)}  ·  ${StillTrim.clock(StillTrim.keptLength(trim, cuts))}${cuts.length ? ` · ${cuts.length} cut${cuts.length === 1 ? '' : 's'}` : ''}`;
+  $('#reset').disabled = isWhole();
   renderGifHint();
   saveProject();
 }
@@ -111,7 +141,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -124,7 +154,7 @@ function renderPlayhead() {
 
 function gifPlan() {
   const F = StillBackdrop.videoFrame(video.videoWidth, video.videoHeight, bg);
-  return StillGIF.plan({ duration: StillTrim.length(trim), fps: Number($('#gifFps').value), width: Number($('#gifWidth').value), sourceWidth: F.w, sourceHeight: F.h });
+  return StillGIF.plan({ duration: StillTrim.keptLength(trim, cuts), fps: Number($('#gifFps').value), width: Number($('#gifWidth').value), sourceWidth: F.w, sourceHeight: F.h });
 }
 function renderGifHint() {
   const plan = gifPlan();
@@ -264,15 +294,19 @@ function drawFrame(ctx, player, F) {
 // ---- Zooms --------------------------------------------------------------------------------------
 
 function renderZooms() {
-  if (selectedZoom >= zooms.length) selectedZoom = -1;
+  pickedZooms = new Set([...pickedZooms].filter((i) => i < zooms.length));
+  selectedZoom = pickedZooms.size === 1 ? [...pickedZooms][0] : -1;
   const lane = $('#lane'); lane.replaceChildren();
   zooms.forEach((z, i) => {
     const left = StillTrim.position(z.start, duration) * 100, width = (StillTrim.position(z.end, duration) * 100) - left;
-    lane.append(el('button', { class: i === selectedZoom ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Zoom ${StillTrim.clock(z.start)} to ${StillTrim.clock(z.end)}, ${z.scale}×`,
-      'aria-pressed': String(i === selectedZoom), onclick: () => { selectedZoom = i === selectedZoom ? -1 : i; if (selectedZoom >= 0) jump(z.start + Math.min(0.5, (z.end - z.start) / 2)); renderZooms(); } }));
+    lane.append(el('button', { class: pickedZooms.has(i) ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Zoom ${StillTrim.clock(z.start)} to ${StillTrim.clock(z.end)}, ${z.scale}×. Ctrl-click to pick several.`,
+      'aria-pressed': String(pickedZooms.has(i)), onclick: (e) => { pickZoom(i, e.ctrlKey || e.metaKey || e.shiftKey); if (selectedZoom >= 0) jump(z.start + Math.min(0.5, (z.end - z.start) / 2)); renderZooms(); } }));
   });
-  const z = zooms[selectedZoom];
-  $('#zoomTools').hidden = !z;
+  const z = zooms[selectedZoom], several = pickedZooms.size > 1;
+  $('#zoomTools').hidden = !pickedZooms.size;
+  $$('#zoomTools .one-zoom, #zoomHint').forEach((part) => { part.hidden = several; });
+  $('#zoomRemove').innerHTML = `${icon('trash-2')}${several ? `Remove ${pickedZooms.size} Zooms` : 'Remove'}`; refreshIcons();
+  $('#zoomRemove').title = several ? 'Remove the picked zooms (Delete)' : 'Remove this zoom (Delete)';
   $('#clip').classList.toggle('aiming', !!z);
   if (z) $('#zoomScale').value = String(z.scale);
   $('#autoZoom').disabled = !duration || !clicks().length;
@@ -284,15 +318,15 @@ function renderZooms() {
   $$('#cursorSize, #cursorSmooth, #cursorStyle').forEach((input) => { input.disabled = !cursorFx.show; });
   renderView(); saveProject();
 }
-const changeZoom = (patch) => { zooms = zooms.map((z, i) => (i === selectedZoom ? { ...z, ...patch } : z)).sort((a, b) => a.start - b.start); renderZooms(); };
+const changeZoom = (patch) => { let changed = null; zooms = zooms.map((z, i) => (i === selectedZoom ? (changed = { ...z, ...patch }) : z)).sort((a, b) => a.start - b.start); if (changed) pickZoom(zooms.indexOf(changed), false); renderZooms(); };
 
 $('#addZoom').onclick = () => {
   const time = video.currentTime;
   zooms = StillZoom.add(zooms, time, trim, project.pointer);
-  selectedZoom = zooms.findIndex((z) => z.start <= time && z.end >= time); renderZooms();
+  pickZoom(zooms.findIndex((z) => z.start <= time && z.end >= time), false); renderZooms();
 };
-$('#autoZoom').onclick = () => { zooms = StillZoom.auto(clicks(), trim); selectedZoom = -1; renderZooms(); toast(zooms.length ? `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} added` : 'No clicks in the trimmed part'); };
-$('#zoomRemove').onclick = () => { zooms = zooms.filter((_, i) => i !== selectedZoom); selectedZoom = -1; renderZooms(); };
+$('#autoZoom').onclick = () => { zooms = StillZoom.auto(clicks(), trim); pickZoom(-1, false); renderZooms(); toast(zooms.length ? `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} added` : 'No clicks in the trimmed part'); };
+$('#zoomRemove').onclick = () => { const gone = pickedZooms.size; zooms = zooms.filter((_, i) => !pickedZooms.has(i)); pickZoom(-1, false); renderZooms(); if (gone > 1) toast(`${gone} zooms removed`); };
 $('#zoomScale').onchange = (e) => changeZoom({ scale: Number(e.target.value) });
 $('#zoomIn').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime < z.end - 0.2) changeZoom({ start: video.currentTime }); };
 $('#zoomOut').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime > z.start + 0.2) changeZoom({ end: video.currentTime }); };
@@ -327,6 +361,7 @@ function togglePlay() {
 function watchPlayback() {
   if (!duration) return; // Still measuring the file, which moves the playhead to the end and back.
   if (video.currentTime >= trim.end) { pause(); video.currentTime = trim.end; }
+  else if (!video.paused) { const next = StillTrim.skip(video.currentTime, cuts); if (next !== video.currentTime) video.currentTime = next; }
   renderPlayhead();
 }
 function animate() { if (video.paused) return; watchPlayback(); requestAnimationFrame(animate); }
@@ -343,7 +378,7 @@ $('#mute').onclick = () => {
 };
 $('#setIn').onclick = () => setStart(video.currentTime);
 $('#setOut').onclick = () => setEnd(video.currentTime);
-$('#reset').onclick = () => { trim = StillTrim.full(duration); render(); };
+$('#reset').onclick = () => { trim = StillTrim.full(duration); cuts = []; cutStart = null; render(); };
 $('#gifWidth').onchange = $('#gifFps').onchange = renderGifHint;
 $('#errorClose').onclick = () => { $('#error').hidden = true; };
 $('#errorPlayer').onclick = () => still.send('library:play', id);
@@ -355,7 +390,9 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'i' || e.key === 'I') $('#setIn').click();
   else if (e.key === 'o' || e.key === 'O') $('#setOut').click();
   else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedZoom >= 0) $('#zoomRemove').click();
+  else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
+  else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedZooms.size) $('#zoomRemove').click();
 });
 
 // ---- Export -------------------------------------------------------------------------------------
@@ -385,11 +422,15 @@ const save = (bytes) => { setProgress(1); $('#cancel').disabled = true; return s
 // Where the frames come from. Chromium (WebView2) can record a media element directly, audio included.
 // WebKitGTK can't, so there the picture goes through a canvas, as in the HUD, and the sound through Web Audio.
 // A background always goes through the canvas, which draws it into each frame.
-function captureSource(player) {
-  if (player.captureStream && !needsCanvas()) return { stream: player.captureStream(), stop() {} };
+// The frames to record, at `size` (the export's chosen size): straight from the player when nothing is drawn on
+// them and the size is unchanged, otherwise through a canvas.
+function captureSource(player, size) {
   const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg);
-  const canvas = el('canvas', { width: F.w, height: F.h }), ctx = canvas.getContext('2d', { alpha: false });
-  const draw = () => drawFrame(ctx, player, F);
+  const out = size || { width: F.w, height: F.h }, scaled = out.width < F.w - 1 || out.height < F.h - 1;
+  if (player.captureStream && !needsCanvas() && !scaled) return { stream: player.captureStream(), stop() {} };
+  const canvas = el('canvas', { width: out.width, height: out.height }), ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingQuality = 'high';
+  const draw = () => { ctx.setTransform(out.width / F.w, 0, 0, out.height / F.h, 0, 0); drawFrame(ctx, player, F); };
   draw();
   const timer = setInterval(draw, 1000 / 30);
   let audio = null, sound;
@@ -404,12 +445,12 @@ function captureSource(player) {
   return { stream: new MediaStream(tracks), stop() { clearInterval(timer); if (audio) audio.close(); } };
 }
 
-async function recordClip(run, type) {
-  const clip = { ...trim }, player = await unseenPlayer();
+async function recordClip(run, type, plan) {
+  const clip = { ...trim }, clipCuts = cuts.map((c) => ({ ...c })), segments = StillTrim.kept(clip, clipCuts), total = StillTrim.keptLength(clip, clipCuts), player = await unseenPlayer();
   await seek(player, clip.start);
   if (run.cancelled) return null;
-  const capture = captureSource(player), chunks = [];
-  const recorder = new MediaRecorder(capture.stream, { mimeType: type, videoBitsPerSecond: BITRATE });
+  const capture = captureSource(player, plan.size), chunks = [];
+  const recorder = new MediaRecorder(capture.stream, { mimeType: type, videoBitsPerSecond: plan.bitrate });
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   let watcher;
   const finish = () => { clearInterval(watcher); if (recorder.state !== 'inactive') recorder.stop(); };
@@ -426,13 +467,24 @@ async function recordClip(run, type) {
   };
   document.addEventListener('visibilitychange', hidden);
   try {
+    // A faster export plays the recording faster as it records; the voice keeps its pitch.
+    player.playbackRate = plan.speed || 1; player.preservesPitch = true;
     // Playback starts first, so a slow start can't become a frozen opening frame.
     await player.play();
     if (run.cancelled) return null;
     recorder.start(1000);
+    // A cut is skipped with the recorder paused, so the finished video runs straight across it.
+    let jumping = false;
     watcher = setInterval(() => {
-      setProgress((player.currentTime - clip.start) / StillTrim.length(clip) * 0.98);
-      if (player.ended || player.currentTime >= clip.end) finish();
+      if (jumping) return;
+      setProgress(StillTrim.outputAt(player.currentTime, segments) / total * 0.98);
+      if (player.ended || player.currentTime >= clip.end) return finish();
+      const next = StillTrim.skip(player.currentTime, clipCuts);
+      if (next !== player.currentTime && recorder.state === 'recording') {
+        jumping = true; recorder.pause(); player.pause();
+        player.addEventListener('seeked', () => { player.play().catch(() => {}); recorder.resume(); jumping = false; }, { once: true });
+        player.currentTime = next;
+      }
     }, 10);
     await stopped;
   } finally {
@@ -444,9 +496,48 @@ async function recordClip(run, type) {
   return new Uint8Array(await new Blob(chunks, { type }).arrayBuffer());
 }
 
-$('#exportVideo').onclick = () => {
+// Export options, asked each time Export Video is chosen and remembered for next time: a size (the shorter side
+// brought down to 2160, 1440, 1080, 720 or 480 pixels, never up) and a quality (Maximum, the Mac's High,
+// Balanced and Smaller File, or a bitrate preset from Settings → Recording).
+let prefs = {};
+const exportChoice = (() => { try { return JSON.parse(localStorage.getItem('stillVideoExport')) || {}; } catch { return {}; } })();
+const sourceFrame = () => StillBackdrop.videoFrame(video.videoWidth, video.videoHeight, bg);
+function exportPlan() {
+  const F = sourceFrame(), limit = Number($('#exportSize').value) || 0, quality = $('#exportQuality').value || 'original';
+  const size = StillGeometry.exportSize(F.w, F.h, limit), scaled = size.width < F.w - 1 || size.height < F.h - 1;
+  const bitrate = quality === 'original' ? Math.min(100_000_000, StillGeometry.videoBitrate(size.width, size.height, 30, 'high') * 1.5) : StillGeometry.videoBitrate(size.width, size.height, 30, quality);
+  const speed = [1, 1.25, 1.5, 2, 3].includes(Number($('#exportSpeed').value)) ? Number($('#exportSpeed').value) : 1;
+  const copy = isWhole() && !needsCanvas() && !scaled && quality === 'original' && speed === 1;
+  return { limit, quality, size, scaled, bitrate, copy, speed, seconds: StillTrim.keptLength(trim, cuts) / speed };
+}
+function renderExportSummary() {
+  const plan = exportPlan();
+  $('#exportSummary').textContent = plan.copy ? `${plan.size.width} × ${plan.size.height} · an exact copy of the recording`
+    : `${plan.size.width} × ${plan.size.height} · ${(plan.bitrate / 1e6).toFixed(1)} Mbps · ${StillTrim.clock(plan.seconds)} long · about ${StillGeometry.sizeLabel(StillGeometry.estimateBytes(plan.bitrate, plan.seconds))}`;
+}
+function openExportOptions() {
+  const presets = (Array.isArray(prefs.recording?.bitratePresets) ? prefs.recording.bitratePresets : []).filter((p) => p && String(p.name || '').trim() && Number(p.megabits) > 0);
+  const options = [['original', 'Maximum'], ['high', 'High'], ['balanced', 'Balanced'], ['compact', 'Smaller File'],
+    ...presets.map((p) => [`bitrate:${Math.round(Math.min(100, Math.max(1, Number(p.megabits))) * 1e6)}`, `${p.name} (${Math.min(100, Math.max(1, Number(p.megabits)))} Mbps)`])];
+  $('#exportQuality').replaceChildren(...options.map(([value, text]) => el('option', { value }, text)));
+  $('#exportQuality').value = options.some(([v]) => v === exportChoice.quality) ? exportChoice.quality : 'original';
+  $('#exportSize').value = String(exportChoice.size || 0);
+  if (!$('#exportSize').value) $('#exportSize').value = '0';
+  $('#exportSpeed').value = String(exportChoice.speed || 1); if (!$('#exportSpeed').value) $('#exportSpeed').value = '1';
+  renderExportSummary();
+  $('#exportSheet').hidden = false; $('#exportGo').focus();
+}
+$('#exportSize').onchange = $('#exportQuality').onchange = $('#exportSpeed').onchange = renderExportSummary;
+$('#exportCancel').onclick = () => { $('#exportSheet').hidden = true; };
+$('#exportSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); $('#exportSheet').hidden = true; } });
+$('#exportVideo').onclick = openExportOptions;
+$('#exportGo').onclick = () => {
+  const plan = exportPlan();
+  exportChoice.size = plan.limit; exportChoice.quality = plan.quality; exportChoice.speed = plan.speed;
+  try { localStorage.setItem('stillVideoExport', JSON.stringify(exportChoice)); } catch { /* remembered for this window only */ }
+  $('#exportSheet').hidden = true;
   const ext = item.path.split('.').pop().toLowerCase();
-  if (StillTrim.isFull(trim, duration) && !needsCanvas()) {
+  if (plan.copy) {
     return runExport('Exporting…', async () => {
       const target = await still.invoke('video:target', ext);
       return target && still.invoke('video:copy');
@@ -454,10 +545,10 @@ $('#exportVideo').onclick = () => {
   }
   const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && MediaRecorder.isTypeSupported(type));
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
-  runExport(needsCanvas() ? 'Exporting…' : 'Trimming…', async (run) => {
+  runExport(needsCanvas() || plan.scaled ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);
     if (!target || run.cancelled) return null;
-    const bytes = await recordClip(run, format.type);
+    const bytes = await recordClip(run, format.type, plan);
     return bytes && save(bytes);
   });
 };
@@ -490,14 +581,14 @@ $('#exportGif').onclick = () => {
     run.onAbort = () => { worker.terminate(); failWorker(new Error('Cancelled')); };
     try {
       await ask({ type: 'start', width: plan.width, height: plan.height });
-      const length = StillTrim.length(trim), samples = StillGIF.sampleTimes(trim.start, length);
+      const segments = StillTrim.kept(trim, cuts), length = StillTrim.keptLength(trim, cuts), samples = StillGIF.sampleTimes(0, length).map((t) => StillTrim.sourceAt(t, segments));
       for (const [i, time] of samples.entries()) {
         const rgba = await grab(time);
         await ask({ type: 'sample', rgba }, [rgba.buffer]);
         setProgress((i + 1) / samples.length * 0.1);
       }
       for (let i = 0; i < plan.frames; i++) {
-        const rgba = await grab(trim.start + i / plan.fps);
+        const rgba = await grab(StillTrim.sourceAt(i / plan.fps, segments));
         await ask({ type: 'frame', rgba, delay: StillGIF.delayFor(i, plan.fps) }, [rgba.buffer]);
         setProgress(0.1 + (i + 1) / plan.frames * 0.88);
       }
@@ -526,19 +617,20 @@ async function open() {
   if (!(duration > 0)) throw new Error('This video has no length.');
   project = item.project && typeof item.project === 'object' ? item.project : {};
   trim = StillTrim.restore(project.trim, duration);
+  cuts = StillTrim.normalizeCuts(Array.isArray(project.cuts) ? project.cuts : [], trim);
   if (project.bg && (StillBackdrop.GRADIENTS[project.bg.style] || (project.bg.style === 'custom' && project.bg.custom))) bg = { ...NO_BG, ...project.bg };
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #exportVideo, #exportGif, #background, #addZoom').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.
 }
 
-applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); return open(); })
+applyTheme().then((loaded) => { prefs = loaded || {}; if (prefs.platform !== 'darwin') addWindowControls(); return open(); })
   .catch((error) => { $('#status').hidden = true; showError(`Couldn’t open this recording: ${message(error)}`, true); });
 refreshIcons();
 still.on('library:changed', async () => { if (!(await still.invoke('library:get', id))) still.send('window:close'); });

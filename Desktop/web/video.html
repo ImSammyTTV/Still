@@ -48,6 +48,12 @@
   .handle { position: absolute; top: 3px; width: 14px; height: 58px; margin-left: -7px; border-radius: 5px; background: var(--accent); cursor: ew-resize; display: grid; place-items: center; touch-action: none; }
   .handle::after { content: ""; width: 2px; height: 20px; border-radius: 2px; background: var(--accent-text); opacity: .75; }
   /* Zooms sit in a lane under the film strip; the selected one is outlined. */
+  /* Stretches cut out of the middle: struck through, and a click on one puts it back. */
+  .cuts { position: absolute; inset: 0; pointer-events: none; }
+  .cuts .cut { position: absolute; top: 0; bottom: 0; pointer-events: auto; cursor: pointer; border: 0; padding: 0; border-radius: 4px;
+    background: repeating-linear-gradient(135deg, var(--hud) 0 6px, transparent 6px 12px); box-shadow: inset 0 0 0 2px var(--red); }
+  .cuts .cut:hover { background: repeating-linear-gradient(135deg, var(--red) 0 6px, transparent 6px 12px); }
+  .cuts .pending { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); }
   .lane { position: relative; height: 16px; margin-top: -4px; }
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane button.selected { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
@@ -63,6 +69,10 @@
   /* The page is see-through on Windows glass, so floating cards bring their own blur. */
   .error, .card { backdrop-filter: blur(28px) saturate(1.4); }
   .sheet { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(0, 0, 0, .35); }
+  .export-options { min-width: 320px; }
+  .export-options label { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
+  .export-options select { min-width: 180px; }
+  .export-actions { display: flex; gap: 8px; justify-content: flex-end; width: 100%; margin-top: 6px; }
   .card { width: 340px; display: grid; gap: 12px; padding: 22px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow); text-align: center; justify-items: center; }
   .progress { width: 100%; height: 6px; border-radius: 999px; background: var(--surface-strong); overflow: hidden; }
   .progress div { height: 100%; width: 0; border-radius: 999px; background: var(--accent); }
@@ -108,6 +118,7 @@
     <span class="grow"></span>
     <button class="btn" id="setIn" title="Start the video at the playhead (I)" disabled><i data-lucide="arrow-right-to-line"></i>Set In</button>
     <button class="btn" id="setOut" title="End the video at the playhead (O)" disabled><i data-lucide="arrow-left-to-line"></i>Set Out</button>
+    <button class="btn" id="cut" title="Cut out a stretch: press at its start, then at its end (X)" disabled><i data-lucide="scissors"></i>Cut</button>
     <button class="btn plain" id="reset" disabled>Reset</button>
   </div>
   <div class="trim-head">
@@ -117,10 +128,10 @@
     <label class="zoom-tools" id="clicksToggle" hidden><input type="checkbox" id="showClicks"> Show clicks</label>
     <span class="grow"></span>
     <span class="zoom-tools" id="zoomTools" hidden>
-      <label>Zoom <select class="field" id="zoomScale"><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.7">1.7×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select></label>
-      <button class="btn" id="zoomIn" title="Start this zoom at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
-      <button class="btn" id="zoomOut" title="End this zoom at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
-      <span id="zoomHint">Click the video to choose where it zooms.</span>
+      <label class="one-zoom">Zoom <select class="field" id="zoomScale"><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.7">1.7×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select></label>
+      <button class="btn one-zoom" id="zoomIn" title="Start this zoom at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn one-zoom" id="zoomOut" title="End this zoom at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <span id="zoomHint">Click the video to choose where it zooms. Ctrl-click zooms to pick several.</span>
       <button class="btn plain" id="zoomRemove" title="Remove this zoom (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
@@ -136,18 +147,32 @@
     <div class="shade" id="shadeIn"></div>
     <div class="shade" id="shadeOut"></div>
     <div class="kept" id="kept"></div>
+    <div class="cuts" id="cuts"></div>
     <div class="playhead" id="playhead"></div>
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
   <div class="lane" id="lane" aria-label="Zooms"></div>
-  <p class="note">Your original is never changed. A trimmed video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
+  <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
   <i class="mark" data-lucide="circle-alert"></i>
   <span id="errorText"></span>
   <button class="btn" id="errorPlayer" hidden>Open in Default Player</button>
   <button class="btn icon plain" id="errorClose" title="Dismiss"><i data-lucide="x"></i></button>
+</div>
+<div class="sheet" id="exportSheet" hidden>
+  <div class="card export-options" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+    <b id="exportTitle">Export Video</b>
+    <label>Size <select class="field" id="exportSize">
+      <option value="0">Original</option><option value="2160">4K (2160p)</option><option value="1440">1440p</option>
+      <option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option>
+    </select></label>
+    <label>Quality <select class="field" id="exportQuality"></select></label>
+    <label>Speed <select class="field" id="exportSpeed"><option value="1">1× (as recorded)</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select></label>
+    <span class="clock dim" id="exportSummary" aria-live="polite"></span>
+    <div class="export-actions"><button class="btn" id="exportCancel">Cancel</button><button class="btn primary" id="exportGo"><i data-lucide="download"></i>Export…</button></div>
+  </div>
 </div>
 <div class="sheet" id="sheet" hidden>
   <div class="card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">

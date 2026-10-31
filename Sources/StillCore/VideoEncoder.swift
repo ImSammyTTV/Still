@@ -51,7 +51,7 @@ public enum VideoEncoder {
         var audioOutput: AVAssetReaderAudioMixOutput?, audioInput: AVAssetWriterInput?
         if !audioTracks.isEmpty {
             let out = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsNonInterleaved: false])
-            out.audioMix = video.audioMix; out.alwaysCopiesSampleData = false
+            out.audioMix = video.audioMix; out.alwaysCopiesSampleData = false; out.audioTimePitchAlgorithm = .spectral
             let sink = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 192000])
             guard reader.canAdd(out), writer.canAdd(sink) else { throw VideoError.export }
             reader.add(out); writer.add(sink); audioOutput = out; audioInput = sink

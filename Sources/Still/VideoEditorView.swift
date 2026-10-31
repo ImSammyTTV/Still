@@ -38,7 +38,7 @@ import StillCore
         if let data = try? Data(contentsOf: library.root.appendingPathComponent("\(item.id).videoedit.json")), let saved = try? JSONDecoder().decode(VideoSettings.self, from: data) { settings = saved }
         else { settings = metadata.presentation ?? Preferences.shared.recordingPresentation; settings.cursorScale = metadata.defaultShowCursor ? 1 : 0; settings.showClicks = metadata.defaultShowClicks; settings.showKeystrokes = metadata.defaultShowKeystrokes; settings.fps = Preferences.shared.recordingFPS; settings.quality = Preferences.shared.recordingQuality }
         dirty = false; undoStack = []; redoStack = []
-        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in Task { @MainActor in guard let self else { return }; if time.seconds.isFinite { self.playhead = self.settings.start+time.seconds }; self.playing = self.player.rate > 0 } }
+        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in Task { @MainActor in guard let self else { return }; if time.seconds.isFinite { self.playhead = VideoTimeline.sourceTime(at: time.seconds, kept: self.settings.kept) }; self.playing = self.player.rate > 0 } }
         loadTask = Task { await load() }
     }
     private func load() async {
@@ -64,13 +64,23 @@ import StillCore
             prepared = result
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
             player.replaceCurrentItem(with: playerItem)
-            await player.seek(to: CMTime(seconds: max(0, min(result.duration, position-settings.start)), preferredTimescale: 600))
+            await player.seek(to: CMTime(seconds: max(0, min(result.duration, VideoTimeline.outputTime(at: position, kept: settings.kept))), preferredTimescale: 600))
             if wasPlaying { player.play() }
             loading = false
         } catch { self.error = error.localizedDescription; loading = false }
     }
     func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; player.play(); playing = true } }
-    func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, value-settings.start), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+    func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, VideoTimeline.outputTime(at: value, kept: settings.kept)), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+    /// Where a cut being marked began; Cut again at a later moment takes that stretch out.
+    @Published var cutStart: Double?
+    func cut() {
+        guard let from = cutStart else { cutStart = playhead; library.toast("Move to where the cut ends, then press Cut again"); return }
+        cutStart = nil
+        let cuts = VideoTimeline.adding(settings.cuts ?? [], from: from, to: playhead, start: settings.start, end: settings.end)
+        if cuts == (settings.cuts ?? []) { library.toast("Too short to cut"); return }
+        settings.cuts = cuts
+    }
+    func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
         catch { self.error = error.localizedDescription }
@@ -92,6 +102,19 @@ import StillCore
     func close() { loadTask?.cancel(); player.pause(); previewTask?.cancel(); cancelTranscription(); if let observer { player.removeTimeObserver(observer); self.observer = nil } }
     func undo() { guard let state = undoStack.popLast() else { return }; redoStack.append(settings); restoring = true; settings = state; restoring = false; dirty = true; schedulePreview() }
     func redo() { guard let state = redoStack.popLast() else { return }; undoStack.append(settings); restoring = true; settings = state; restoring = false; dirty = true; schedulePreview() }
+    /// Zooms picked on the trim bar: a click picks one, ⌘- or ⇧-click adds or drops one, so several can be removed together.
+    @Published var pickedZooms: Set<UUID> = []
+    func pickZoom(_ zoom: ZoomSegment, adding: Bool) {
+        if adding { if pickedZooms.contains(zoom.id) { pickedZooms.remove(zoom.id) } else { pickedZooms.insert(zoom.id) } }
+        else { pickedZooms = pickedZooms == [zoom.id] ? [] : [zoom.id]; if !pickedZooms.isEmpty { seek(zoom.start + min(0.5, (zoom.end - zoom.start)/2)) } }
+        panel = "Zoom"
+    }
+    func removePickedZooms() {
+        guard !pickedZooms.isEmpty else { return }
+        let count = pickedZooms.count
+        settings.zooms.removeAll { pickedZooms.contains($0.id) }; pickedZooms = []
+        if count > 1 { library.toast("\(count) zooms removed") }
+    }
     func addZoom() {
         let position = metadata.pointer.min(by: { abs($0.time-playhead) < abs($1.time-playhead) })
         settings.zooms.append(ZoomSegment(start: max(settings.start, playhead-0.2), end: min(settings.end, playhead+2), x: position?.x ?? 0.5, y: position?.y ?? 0.5))
@@ -105,11 +128,26 @@ import StillCore
         }
         settings.zooms = segments
     }
+    /// Export Video asks for a size and a quality first; both are remembered for next time.
+    @Published var showExportOptions = false
+    @Published var exportLimit = UserDefaults.standard.integer(forKey: "videoExportSize") { didSet { UserDefaults.standard.set(exportLimit, forKey: "videoExportSize") } }
+    @Published var exportSpeed: Double = { let v = UserDefaults.standard.double(forKey: "videoExportSpeed"); return [1.25, 1.5, 2, 3].contains(v) ? v : 1 }() { didSet { UserDefaults.standard.set(exportSpeed, forKey: "videoExportSpeed") } }
+    /// The finished video's size and roughly how big the file comes out, for the export options.
+    var exportSummary: String {
+        guard let frame = prepared?.size else { return "" }
+        let size = VideoExportSize.size(width: frame.width, height: frame.height, limit: exportLimit)
+        let quality = VideoQuality(rawValue: settings.quality ?? "high") ?? .high
+        let bitrate = BitratePreset.bitrate(tag: settings.quality) ?? (quality == .original ? Int(Double(VideoQuality.high.bitrate(size: size, fps: settings.fps))*1.5) : quality.bitrate(size: size, fps: settings.fps))
+        let seconds = VideoTimeline.length(settings.kept) / exportSpeed, bytes = Double(bitrate + 128_000) * seconds / 8
+        let label = bytes >= 1e9 ? String(format: "%.1f GB", bytes/1e9) : bytes >= 1e6 ? "\(max(1, Int((bytes/1e6).rounded()))) MB" : "\(max(1, Int((bytes/1e3).rounded()))) KB"
+        return "\(Int(size.width)) × \(Int(size.height))  ·  \(String(format: "%.1f", Double(bitrate)/1e6)) Mbps  ·  \(String(format: "%d:%04.1f", Int(seconds)/60, seconds.truncatingRemainder(dividingBy: 60))) long  ·  about \(label)"
+    }
     func export(gif: Bool) {
         let panel = NSSavePanel(); panel.allowedContentTypes = gif ? [.gif] : [.mpeg4Movie]; panel.nameFieldStringValue = "\(item.title)-edited.\(gif ? "gif" : "mp4")"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         player.pause(); exporting = true; exportProgress = 0
-        let settings = self.settings, metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
+        var settings = self.settings; if !gif { settings.exportHeight = exportLimit > 0 ? exportLimit : nil; settings.speed = exportSpeed > 1 ? exportSpeed : nil }
+        let metadata = self.metadata, source = library.videoSource(item), camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
         // Export to a temporary file and only then replace the destination, so a failed or cancelled
         // export never destroys a file you chose to replace.
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("Still-export-\(UUID()).\(gif ? "gif" : "mp4")")
@@ -138,7 +176,7 @@ struct VideoEditorView: View {
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.export(gif: false) }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
+            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -149,6 +187,16 @@ struct VideoEditorView: View {
             timeline
         }.font(.system(size: 12)).background(Studio.paper)
         .onChange(of: model.settings) { _, _ in model.schedulePreview() }
+        .sheet(isPresented: $model.showExportOptions) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Export Video").font(.headline)
+                Picker("Size", selection: $model.exportLimit) { ForEach(VideoExportSize.limits, id: \.self) { Text(VideoExportSize.title($0)).tag($0) } }
+                Picker("Quality", selection: Binding(get: { model.settings.quality ?? "high" }, set: { model.settings.quality = $0 })) { ForEach(Preferences.shared.qualityOptions(including: model.settings.quality), id: \.tag) { Text($0.title).tag($0.tag) } }
+                Picker("Speed", selection: $model.exportSpeed) { Text("1× (as recorded)").tag(1.0); Text("1.25×").tag(1.25); Text("1.5×").tag(1.5); Text("2×").tag(2.0); Text("3×").tag(3.0) }
+                Text(model.exportSummary).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                HStack { Spacer(); Button("Cancel") { model.showExportOptions = false }.keyboardShortcut(.cancelAction); Button("Export…") { model.showExportOptions = false; DispatchQueue.main.async { model.export(gif: false) } }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent) }
+            }.padding(24).frame(width: 380)
+        }
         .sheet(isPresented: $model.exporting) { VStack(spacing: 18) { Text("Exporting…").font(.headline); ProgressView(value: model.exportProgress).frame(width: 300); Text("\(Int(model.exportProgress*100))%").monospacedDigit().foregroundStyle(.secondary); Button("Cancel") { model.cancelExport() } }.padding(30).interactiveDismissDisabled() }
         .alert("Video Editor", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
     }
@@ -170,7 +218,11 @@ struct VideoEditorView: View {
             slider("Shadow", value: $model.settings.shadow, range: 0...80)
             slider("Motion Blur", value: $model.settings.motionBlur, range: 0...1)
         case "Zoom":
-            HStack { Button("Add Zoom") { model.addZoom() }; Button("Smart Zooms") { model.smartZooms() } }
+            HStack {
+                Button("Add Zoom") { model.addZoom() }; Button("Smart Zooms") { model.smartZooms() }
+                if !model.pickedZooms.isEmpty { Spacer(); Button(model.pickedZooms.count == 1 ? "Remove Zoom" : "Remove \(model.pickedZooms.count) Zooms", role: .destructive) { model.removePickedZooms() }.keyboardShortcut(.delete, modifiers: []) }
+            }
+            if !model.settings.zooms.isEmpty { Text("Click zooms on the trim bar to pick them; ⌘-click picks several.").font(.system(size: 10)).foregroundStyle(.secondary) }
             ForEach($model.settings.zooms) { $zoom in
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { Text("Zoom \(Int(zoom.scale*100))%").fontWeight(.medium); Spacer(); Button { model.settings.zooms.removeAll { $0.id == zoom.id } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove zoom") }
@@ -178,6 +230,7 @@ struct VideoEditorView: View {
                     Slider(value: $zoom.scale, in: 1.1...3)
                     HStack { Text("X"); Slider(value: $zoom.x, in: 0...1); Text("Y"); Slider(value: $zoom.y, in: 0...1) }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.accentColor, lineWidth: model.pickedZooms.contains(zoom.id) ? 2 : 0))
             }
             if model.settings.zooms.isEmpty { Text("Add a zoom at the playhead, or generate zooms from recorded clicks.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
@@ -220,11 +273,12 @@ struct VideoEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Text("Trim").fontWeight(.semibold)
-                Text("\(time(model.settings.start)) — \(time(model.settings.end))  ·  \(time(model.settings.end-model.settings.start))").monospacedDigit().foregroundStyle(.secondary)
+                Text("\(time(model.settings.start)) — \(time(model.settings.end))  ·  \(time(VideoTimeline.length(model.settings.kept)))\((model.settings.cuts ?? []).isEmpty ? "" : "  ·  \(model.settings.cuts!.count) cut\(model.settings.cuts!.count == 1 ? "" : "s")")").monospacedDigit().foregroundStyle(.secondary)
                 Spacer()
                 Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
-                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01)
+                Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
+                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration; model.settings.cuts = nil; model.cutStart = nil }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01 && (model.settings.cuts ?? []).isEmpty)
                 Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10))
             }.buttonStyle(.borderless).controlSize(.small)
             GeometryReader { geometry in
@@ -235,12 +289,26 @@ struct VideoEditorView: View {
                     HStack(spacing: 1) { ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, image in Image(nsImage: image).resizable().scaledToFill().frame(width: width/9, height: 52).clipped() } }
                         .frame(width: width, height: 52, alignment: .leading).clipShape(RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { model.seek(max(model.settings.start, min(model.settings.end, Double($0.location.x/width)*total))) })
-                    ForEach(model.settings.zooms) { zoom in Rectangle().fill(Color.accentColor.opacity(0.4)).frame(width: max(3, x(zoom.end-zoom.start)), height: 8).offset(x: x(zoom.start), y: 22).allowsHitTesting(false) }
+                    // Zooms: click to pick one, ⌘- or ⇧-click to pick several.
+                    ForEach(model.settings.zooms) { zoom in
+                        let picked = model.pickedZooms.contains(zoom.id)
+                        Capsule().fill(Color.accentColor.opacity(picked ? 1 : 0.45)).overlay(Capsule().strokeBorder(.white, lineWidth: picked ? 2 : 0))
+                            .frame(width: max(6, x(zoom.end-zoom.start)), height: 12).offset(x: x(zoom.start), y: 20)
+                            .onTapGesture { model.pickZoom(zoom, adding: !NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty) }
+                            .help("Zoom \(time(zoom.start)) to \(time(zoom.end)). ⌘-click to pick several.")
+                    }
                     // Dim what gets cut.
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, startX), height: 52).allowsHitTesting(false)
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, width-endX), height: 52).offset(x: endX).allowsHitTesting(false)
                     // Frame around the kept part.
                     RoundedRectangle(cornerRadius: 6).strokeBorder(Studio.accent, lineWidth: 3).frame(width: max(14, endX-startX), height: 58).offset(x: startX).allowsHitTesting(false)
+                    // Stretches cut out: struck through in red; a click puts one back.
+                    ForEach(model.settings.cuts ?? [], id: \.self) { cut in
+                        Rectangle().fill(.black.opacity(0.65)).overlay(Rectangle().strokeBorder(.red, lineWidth: 2)).overlay(Image(systemName: "scissors").foregroundStyle(.white))
+                            .frame(width: max(4, x(cut.end)-x(cut.start)), height: 52).offset(x: x(cut.start))
+                            .onTapGesture { model.removeCut(cut) }.help("Cut \(time(cut.start)) to \(time(cut.end)): click to put it back")
+                    }
+                    if let from = model.cutStart { Rectangle().fill(.red).frame(width: 2, height: 64).offset(x: x(from)-1).allowsHitTesting(false) }
                     Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(model.playhead)-1).allowsHitTesting(false)
                     // Handles move by how far you drag from where you grabbed them.
                     handle(edge: .leading).offset(x: startX-7)
