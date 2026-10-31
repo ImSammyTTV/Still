@@ -104,6 +104,8 @@ public enum ImageRenderer {
         let output = mark.tool == .blur ? blurInput.clampedToExtent().applyingFilter("CIGaussianBlur",parameters: [kCIInputRadiusKey: max(8,mark.width*3)]).cropped(to: input.extent) : pixelated
         return filterContext.createCGImage(output, from: input.extent)
     }
+    /// How much a Loupe enlarges what's under it.
+    public static let loupeZoom: CGFloat = 2
     private static func draw(marks: [Mark], in ctx: CGContext, source: CGImage, cache: PreviewCache? = nil) {
         let height = CGFloat(source.height)
         let p: (PixelPoint) -> CGPoint = { CGPoint(x: $0.x, y: height-$0.y) }
@@ -189,6 +191,22 @@ public enum ImageRenderer {
                     text.draw(at: point)
                 }
                 NSGraphicsContext.restoreGraphicsState()
+            case .loupe:
+                // A round lens over the box: what's at its centre, enlarged, with a rim in the mark's colour.
+                let box = r(mark.rect), radius = min(box.width, box.height)/2
+                guard radius >= 4 else { break }
+                let center = CGPoint(x: box.midX, y: box.midY), circle = CGRect(x: center.x-radius, y: center.y-radius, width: radius*2, height: radius*2)
+                let seen = radius/loupeZoom, flippedY = height-center.y
+                ctx.saveGState()
+                ctx.setShadow(offset: CGSize(width: 0, height: -max(2, radius/30)), blur: max(8, radius/5), color: NSColor.black.withAlphaComponent(0.35).cgColor)
+                ctx.setFillColor(NSColor.white.cgColor); ctx.fillEllipse(in: circle)
+                ctx.restoreGState()
+                if let patch = source.cropping(to: CGRect(x: center.x-seen, y: flippedY-seen, width: seen*2, height: seen*2).integral) {
+                    ctx.saveGState(); ctx.addEllipse(in: circle); ctx.clip()
+                    ctx.interpolationQuality = .high; ctx.draw(patch, in: circle)
+                    ctx.restoreGState()
+                }
+                ctx.setLineWidth(max(2, mark.width)); ctx.strokeEllipse(in: circle)
             case .crop, .select, .spotlight: break
             }
             ctx.restoreGState()

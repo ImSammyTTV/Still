@@ -9,7 +9,7 @@ const TOOLS = [
   ['select', 'mouse-pointer-2', 'Select', 'v'], ['arrow', 'move-up-right', 'Arrow', 'a'], ['rect', 'square', 'Rectangle', 'r'],
   ['filled', 'square-dashed-bottom', 'Filled Rectangle', 'f'], ['ellipse', 'circle', 'Ellipse', 'o'], ['line', 'slash', 'Line', 'l'],
   ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Counter', 'n'],
-  ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['crop', 'crop', 'Crop', 'c']
+  ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['crop', 'crop', 'Crop', 'c']
 ];
 const COLORS = ['#FF453A', '#FF9F0A', '#FFD60A', '#32D74B', '#64D2FF', '#0A84FF', '#BF5AF2', '#FF375F', '#FFFFFF', '#1D1D1F'];
 const STROKES = [2, 4, 6, 10, 16];
@@ -24,7 +24,9 @@ const styles = { arrow: 'filled', text: 'shadow' };
 let assets = {};
 const decoded = new Map();
 let selected = null, drag = null, pendingCrop = null, history = [], future = [], dirty = false, saveTimer = null;
-const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'image'].includes(m.type);
+const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'loupe', 'image'].includes(m.type);
+// How much a Loupe enlarges what's under it.
+const LOUPE_ZOOM = 2;
 const isSegment = (m) => m.type === 'arrow' || m.type === 'line';
 
 // ---- Layout ---------------------------------------------------------------------------------
@@ -149,6 +151,18 @@ function drawMark(t, m) {
     case 'spotlight': {
       t.fillStyle = 'rgba(0,0,0,.55)'; t.beginPath(); t.rect(0, 0, image.naturalWidth, image.naturalHeight);
       t.roundRect(r.x + r.w, r.y, -r.w, r.h, 10); t.fill('evenodd'); break;
+    }
+    case 'loupe': {
+      // A round lens over the box: what's at its centre, enlarged, with a rim in the mark's colour.
+      const radius = Math.min(r.w, r.h) / 2;
+      if (radius < 4) break;
+      const cx = r.x + r.w / 2, cy = r.y + r.h / 2, seen = radius / LOUPE_ZOOM;
+      t.save(); t.shadowColor = 'rgba(0,0,0,.35)'; t.shadowBlur = Math.max(8, radius / 5); t.shadowOffsetY = Math.max(2, radius / 30);
+      t.beginPath(); t.arc(cx, cy, radius, 0, Math.PI * 2); t.fillStyle = '#fff'; t.fill(); t.restore();
+      t.save(); t.beginPath(); t.arc(cx, cy, radius, 0, Math.PI * 2); t.clip();
+      t.imageSmoothingQuality = 'high'; t.drawImage(image, cx - seen, cy - seen, seen * 2, seen * 2, cx - radius, cy - radius, radius * 2, radius * 2);
+      t.restore();
+      t.lineWidth = Math.max(2, m.stroke); t.beginPath(); t.arc(cx, cy, radius, 0, Math.PI * 2); t.stroke(); break;
     }
   }
   t.restore();

@@ -65,6 +65,15 @@ final class ImageRendererTests: XCTestCase {
         let source = CGImageSourceCreateWithData(encoded as CFData, nil)!
         XCTAssertEqual(pixel(CGImageSourceCreateImageAtIndex(source, 0, nil)!, x: 20, y: 10), [32, 36, 33, 255])
     }
+    func testLoupeEnlargesWhatIsAtItsCentre() throws {
+        // The red band ends 20 rows down. A lens centred at row 26 doubles distances from its centre, so the edge
+        // shows at row 14 and row 17, red in the picture, shows white through the lens.
+        let mark = Mark(tool: .loupe, points: [.init(x: 30, y: 6), .init(x: 70, y: 46)])
+        let image = try ImageRenderer.render(fixture(), marks: [mark])
+        XCTAssertEqual(pixel(image, x: 50, y: 17), [255, 255, 255, 255])
+        XCTAssertEqual(pixel(image, x: 50, y: 11), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(image, x: 5, y: 17), [255, 0, 0, 255]) // Outside the lens, nothing changes.
+    }
     func testCropUsesTopLeftCoordinatesAndClipsToImageBounds() throws {
         let cropped = try ImageRenderer.crop(fixture(), to: CGRect(x: -5, y: 0, width: 35, height: 15))
         XCTAssertEqual(cropped.width, 30); XCTAssertEqual(cropped.height, 15)

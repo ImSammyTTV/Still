@@ -26,6 +26,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Capture the previous area again | ☑️ | ☑️ |
 | Scrolling capture | ☑️ | ☑️ down or sideways, worked out from how you scroll · Auto Scroll stops at the end of the page · off on Wayland |
 | Hide desktop icons while capturing | ☑️ | ☑️ Windows · — Linux |
+| Colour under the crosshair, copied with C and kept as recent colours in the editor | ☑️ | ☑️ |
 | Copy text from the screen (OCR) | ✅ | ✅ English |
 | QR code reading | ☑️ | ☑️ |
 
@@ -45,7 +46,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, crop | ✅ | ✅ |
+| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, loupe, crop | ✅ | ✅ |
 | Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
 | Solid redaction that survives export | ✅ | ☑️ |
 | Arrow styles (plain, filled, double, curved) and text styles | ☑️ | ☑️ |
