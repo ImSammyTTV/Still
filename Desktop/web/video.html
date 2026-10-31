@@ -15,7 +15,10 @@
   .stage { position: relative; min-height: 0; background: var(--canvas); display: grid; place-items: center; overflow: hidden; }
   /* The preview: the video inside its background, laid out by video.js to fit the stage. */
   .frame { position: absolute; }
-  .frame video { position: absolute; display: block; object-fit: fill; }
+  .clip { position: absolute; overflow: hidden; }
+  .clip video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: fill; transform-origin: 0 0; }
+  .clip canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .clip.aiming { cursor: crosshair; }
   .status { position: relative; color: var(--text-2); }
 
   .transport { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; flex-wrap: wrap; }
@@ -44,6 +47,12 @@
   .playhead { position: absolute; top: 0; height: 64px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 3px rgba(0, 0, 0, .7); pointer-events: none; }
   .handle { position: absolute; top: 3px; width: 14px; height: 58px; margin-left: -7px; border-radius: 5px; background: var(--accent); cursor: ew-resize; display: grid; place-items: center; touch-action: none; }
   .handle::after { content: ""; width: 2px; height: 20px; border-radius: 2px; background: var(--accent-text); opacity: .75; }
+  /* Zooms sit in a lane under the film strip; the selected one is outlined. */
+  .lane { position: relative; height: 16px; margin-top: -4px; }
+  .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
+  .lane button.selected { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
+  .zoom-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+  .zoom-tools select { height: 26px; }
   .handle:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 
   .error { position: fixed; left: 16px; right: 16px; top: 62px; z-index: 40; display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius); background: var(--bg-elevated); border: 1px solid var(--border); box-shadow: var(--shadow); }
@@ -69,7 +78,7 @@
   <button class="btn primary" id="exportVideo" disabled><i data-lucide="download"></i>Export Video…</button>
 </div>
 <div class="stage" id="stage">
-  <div class="frame" id="frame"><video id="video" playsinline preload="auto"></video></div>
+  <div class="frame" id="frame"><div class="clip" id="clip"><video id="video" playsinline preload="auto"></video><canvas id="fx"></canvas></div></div>
   <div class="status" id="status">Loading video…</div>
 </div>
 <div class="transport">
@@ -100,6 +109,20 @@
     <button class="btn" id="setOut" title="End the video at the playhead (O)" disabled><i data-lucide="arrow-left-to-line"></i>Set Out</button>
     <button class="btn plain" id="reset" disabled>Reset</button>
   </div>
+  <div class="trim-head">
+    <b>Zoom</b>
+    <button class="btn" id="addZoom" title="Zoom in at the playhead (Z)" disabled><i data-lucide="zoom-in"></i>Add Zoom</button>
+    <button class="btn" id="autoZoom" title="A zoom wherever you clicked while recording" disabled><i data-lucide="sparkles"></i>Auto Zoom</button>
+    <label class="zoom-tools" id="clicksToggle" hidden><input type="checkbox" id="showClicks"> Show clicks</label>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="zoomTools" hidden>
+      <label>Zoom <select class="field" id="zoomScale"><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.7">1.7×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select></label>
+      <button class="btn" id="zoomIn" title="Start this zoom at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="zoomOut" title="End this zoom at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <span id="zoomHint">Click the video to choose where it zooms.</span>
+      <button class="btn plain" id="zoomRemove" title="Remove this zoom (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
   <div class="bar" id="bar">
     <div class="strip" id="strip"></div>
     <div class="shade" id="shadeIn"></div>
@@ -109,7 +132,8 @@
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
-  <p class="note">Your original is never changed. A trimmed video, or one with a background, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
+  <div class="lane" id="lane" aria-label="Zooms"></div>
+  <p class="note">Your original is never changed. A trimmed video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
   <i class="mark" data-lucide="circle-alert"></i>
@@ -131,6 +155,7 @@
 <script src="shared/geometry.js"></script>
 <script src="shared/trim.js"></script>
 <script src="shared/backdrop.js"></script>
+<script src="shared/zoom.js"></script>
 <script src="shared/gif.js"></script>
 <script src="common.js"></script>
 <script src="video.js"></script>

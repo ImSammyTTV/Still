@@ -72,7 +72,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Camera bubble, click and keystroke overlays | ☑️ | ☑️ Windows · ☑️ Linux on X11 (camera also on Wayland; clicks and keys are off there) |
 | Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ video and GIF exports checked in Chromium · no own-image backgrounds yet |
-| Video editor: zoom and cursor effects | ✅ export tested | — |
+| Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
+| Video editor: cursor size, style and smoothing | ✅ export tested | — the cursor is part of the recorded picture |
 | Audio transcription | ☑️ | — |
 
 ## Sharing
@@ -100,7 +101,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** video editor zoom and cursor effects, own-image video backgrounds, custom bitrates, audio
+- **Windows and Linux:** video editor cursor effects, own-image video backgrounds, custom bitrates, audio
   transcription, and horizontal and auto-scrolling capture. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
