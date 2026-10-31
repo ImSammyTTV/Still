@@ -546,9 +546,6 @@ fn window_gone(app: &AppHandle, label: &str) {
 fn native_engine(rec: &Value) -> Result<(), String> {
     if !cfg!(windows) { return Err("Still’s own recorder is Windows-only.".into()) }
     if rec["engine"].as_str() == Some("webview") { return Err("Settings → Recording → Record with is set to the system recorder.".into()) }
-    if rec["microphone"].as_bool().unwrap_or(false) || rec["systemAudio"].as_bool().unwrap_or(false) {
-        return Err("Sound is on, and Still’s own recorder doesn’t record sound yet.".into())
-    }
     record::available()
 }
 
@@ -1246,9 +1243,12 @@ async fn recording_begin(app: AppHandle) -> Result<(), String> {
         monitor: (place.display.x as i32 + 1, place.display.y as i32 + 1), crop,
         fps: params["options"]["fps"].as_u64().unwrap_or(30) as u32,
         cursor: params["options"]["cursor"].as_bool().unwrap_or(true),
+        system_audio: params["options"]["systemAudio"].as_bool().unwrap_or(false),
+        microphone: params["options"]["microphone"].as_bool().unwrap_or(false),
         path: native_part(),
     };
     let handle = record::start(options)?;
+    if !handle.warnings.is_empty() { notify(&app, "Recording without some sound", &handle.warnings.join(" ")); }
     st(&app).session.lock().unwrap().recorder = Some(Arc::new(handle));
     Ok(())
 }
@@ -1655,10 +1655,11 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             Ok(()) => {
                 let origin = capture::grab_all().ok().and_then(|g| g.first().map(|g| (g.x + 1, g.y + 1))).unwrap_or((1, 1));
                 let path = dir.join("native-recording.mp4");
-                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, cursor: true, path: path.clone() };
+                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, cursor: true, system_audio: true, microphone: false, path: path.clone() };
                 match record::start(options) {
                     Err(e) => log("nativeRecorder", json!(format!("didn’t start: {e}"))),
                     Ok(recorder) => {
+                        log("nativeSoundWarnings", json!(recorder.warnings));
                         wait(3000);
                         match recorder.stop() {
                             Ok(f) => {
@@ -1667,6 +1668,7 @@ fn self_test(app: AppHandle, dir: PathBuf) {
                                 log("nativeFrames", json!(f.frames));
                                 log("nativeHardwareEncoder", json!(f.hardware));
                                 log("nativeLitShare", json!((f.lit * 100.0).round() / 100.0));
+                                log("nativeAudioTrack", json!(f.audio));
                                 log("nativeBytes", json!(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)));
                             }
                             Err(e) => log("nativeRecorder", json!(format!("didn’t finish: {e}"))),

@@ -60,8 +60,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Feature | Mac | Windows & Linux |
 |---|---|---|
 | Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux, not yet confirmed on real WebKitGTK |
-| Windows: Still's own recorder (H.264 MP4, no screen picker, no "sharing your screen" bar, controls kept out of the video) | — | ☑️ used when no sound is recorded; self-test records 3 s where the runner supports it |
-| Microphone and computer audio | ☑️ | ☑️ Windows (computer audio) |
+| Windows: Still's own recorder (H.264 MP4, no screen picker, no "sharing your screen" bar, controls kept out of the video) | — | ✅ recorded on a real PC · self-test records 3 s |
+| Microphone and computer audio | ☑️ | ☑️ Windows: Still's own recorder mixes both into one AAC track · Linux: web engine |
 | Stop from the menu bar or tray, with a timer | ✅ | ☑️ tray menu · click to stop on Windows |
 | Stop with the Start / Stop Recording shortcut, even behind a full-screen app | ☑️ | ☑️ shortcut shown on the Stop button |
 | Recording kept if something goes wrong: written to disk as it records, saved if the controls stop responding, a message instead of silence | (native recorder) | ☑️ MP4 falls back to WebM automatically |
@@ -103,9 +103,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
   such as horizontal and auto-scrolling, and saved trim points. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
-- **Windows:** Still's own recorder doesn't record sound yet. Recordings with the microphone or computer audio turned
-  on still use the system web engine, which asks for a screen and shows its "sharing your screen" bar (pressing Hide
-  keeps most of it out of the video). Windows "N" editions without the Media Feature Pack also use the web engine.
+- **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
+  system web engine, which asks for a screen and shows its "sharing your screen" bar.
 - **Windows and Linux:** recording needs a hands-on pass on real hardware after the 1.2.11 fixes.
 - **Everywhere:** the ☑️ items above need a hands-on pass.
 

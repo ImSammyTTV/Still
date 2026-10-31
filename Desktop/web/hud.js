@@ -53,7 +53,7 @@ function pickType(format) {
 }
 
 // Still's own recorder (Windows): Still captures and encodes by itself, so there is no system picker and no
-// "sharing your screen" bar, and this page is only the controls. If it can't start, the web engine records instead.
+// "sharing your screen" bar, and this page is only the controls. If it can't start, the HUD says why.
 let native = false, nativeLive = false;
 // On Windows, an error from the system recorder also says why Still's own recorder wasn't the one recording.
 const withWhy = (message) => (still.platform === 'win32' && opts.nativeWhy ? `${message} (Still’s own recorder wasn’t used: ${opts.nativeWhy})` : message);

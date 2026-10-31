@@ -118,7 +118,7 @@ const pages = {
   Recording: () => [
     prefs.platform === 'win32' ? group('Recorder', [
       select('Record with', 'recording.engine', [['auto', 'Still (recommended)'], ['webview', 'System web engine']])
-    ], 'Still records the screen itself, with no screen picker and no “sharing your screen” bar. Recordings with sound use the system web engine for now, as does this computer if Still’s recorder isn’t available on it.') : null,
+    ], 'Still records the screen, the computer’s sound and the microphone itself, with no screen picker and no “sharing your screen” bar. The system web engine records instead if Still’s recorder isn’t available on this computer.') : null,
     group('Video', [
       select('Format', 'recording.format', [['mp4', 'MP4'], ['webm', 'WebM']]),
       select('Frame rate', 'recording.fps', [[24, '24 fps'], [30, '30 fps'], [60, '60 fps']], true),
