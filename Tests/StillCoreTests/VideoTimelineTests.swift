@@ -34,4 +34,64 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoExportSize.size(width: 1280, height: 720, limit: 1080), CGSize(width: 1280, height: 720))
         XCTAssertEqual(VideoExportSize.size(width: 1001, height: 563, limit: 0), CGSize(width: 1000, height: 562))
     }
+
+    /// The same cases as Desktop/test/captions.test.js.
+    func testCaptionsStartThreeSecondsLongInsideTheClip() {
+        let c = VideoCaption.new(at: 2, start: 0, end: 10)
+        XCTAssertEqual([c.start, c.end], [2, 5]); XCTAssertEqual(c.text, "Your text"); XCTAssertEqual(c.position, "bottom")
+        XCTAssertEqual(VideoCaption.new(at: 9, start: 0, end: 10).end, 10)
+    }
+
+    func testCaptionsFadeInAndOut() {
+        let c = VideoCaption(start: 1, end: 4, text: "Hi")
+        XCTAssertNil(c.alpha(at: 0.5)); XCTAssertEqual(c.alpha(at: 1.125), 0.5); XCTAssertEqual(c.alpha(at: 2.5), 1)
+        XCTAssertNil(VideoCaption(start: 2, end: 3, text: "").alpha(at: 2.5))
+    }
+
+    func testCaptionSizeAndPlaceFollowTheVideoArea() {
+        let a = VideoCaption(start: 0, end: 1).layout(width: 1920, height: 1080)
+        XCTAssertEqual(a.fontSize, 65); XCTAssertEqual(a.x, 960); XCTAssertEqual(a.y, 950.4, accuracy: 0.001)
+        let b = VideoCaption(start: 0, end: 1, position: "top", size: "small").layout(width: 640, height: 360)
+        XCTAssertEqual(b.fontSize, 16); XCTAssertEqual(b.y, 36, accuracy: 0.001)
+        XCTAssertEqual(VideoCaption(start: 0, end: 1, position: "middle", size: "large").layout(width: 100, height: 100).fontSize, 12)
+    }
+
+    /// The same cases as Desktop/test/transitions.test.js.
+    func testFadeOpensAndClosesOverSixTenthsOfASecond() {
+        XCTAssertEqual(VideoTransition.at(1, start: 1, end: 11, opening: "fade", closing: "fade").level, 0)
+        XCTAssertEqual(VideoTransition.at(1.3, start: 1, end: 11, opening: "fade", closing: "fade").level, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(5, start: 1, end: 11, opening: "fade", closing: "fade").level, 1)
+        XCTAssertEqual(VideoTransition.at(10.7, start: 1, end: 11, opening: "fade", closing: "fade").level, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(1, start: 1, end: 11, opening: "none", closing: "fade").level, 1)
+    }
+
+    func testRiseGrowsThePictureOnlyOnItsOwnSide() {
+        XCTAssertEqual(VideoTransition.at(0, start: 0, end: 10, opening: "rise", closing: "fade").scale, 0.92, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(0.3, start: 0, end: 10, opening: "rise", closing: "fade").scale, 0.96, accuracy: 1e-9)
+        XCTAssertEqual(VideoTransition.at(10, start: 0, end: 10, opening: "rise", closing: "fade").scale, 1)
+        XCTAssertEqual(VideoTransition.at(0.25, start: 0, end: 1.5, opening: "fade", closing: "none").level, 0.5, accuracy: 1e-9)
+    }
+
+    /// The same cases as the Tighten Pauses tests in Desktop/test/trim.test.js.
+    func testLongSilencesBecomeCutsThatLeaveABeatEachSide() {
+        let levels = Array(repeating: -20.0, count: 10) + Array(repeating: -70.0, count: 20) + Array(repeating: -20.0, count: 10) + Array(repeating: -70.0, count: 5) + Array(repeating: -20.0, count: 10)
+        let cuts = AudioPauses.find(levels: levels, step: 0.1, start: 0, end: 5.5)
+        XCTAssertEqual(cuts.count, 1)
+        XCTAssertEqual(cuts[0].start, 1.3, accuracy: 1e-9); XCTAssertEqual(cuts[0].end, 2.7, accuracy: 1e-9)
+        XCTAssertEqual(AudioPauses.find(levels: Array(repeating: -20.0, count: 30), step: 0.1, start: 0, end: 3), [])
+    }
+
+    func testLoudnessLevelsFromSamples() {
+        XCTAssertEqual(AudioPauses.levels([1, -1, 1, -1, 0, 0, 0, 0], rate: 40, step: 0.1).map { $0.rounded() }, [0, -120])
+    }
+
+    /// The same cases as Desktop/test/blurs.test.js.
+    func testBlursStartInTheMiddleAndStayInsideThePicture() {
+        let b = VideoBlur.new(at: 2, start: 0, end: 4)
+        XCTAssertEqual([b.start, b.end, b.x, b.y, b.w, b.h], [2, 4, 0.35, 0.42, 0.3, 0.16])
+        let f = VideoBlur.fit(x: 0.9, y: 0.9, w: 0.5, h: 0.5); XCTAssertEqual([f.x, f.y, f.w, f.h], [0.5, 0.5, 0.5, 0.5])
+        let g = VideoBlur.fit(x: 0.2, y: 0.2, w: 0, h: 0.001); XCTAssertEqual([g.x, g.y, g.w, g.h], [0.2, 0.2, 0.01, 0.01])
+        let p = VideoBlur.fromPixels(CGRect(x: 104, y: 54, width: 192, height: 12), width: 400, height: 200, at: 0, start: 0, end: 5)
+        XCTAssertEqual(p.x, 0.25, accuracy: 1e-9); XCTAssertEqual(p.y, 0.25, accuracy: 1e-9); XCTAssertEqual(p.w, 0.5, accuracy: 1e-9); XCTAssertEqual(p.h, 0.1, accuracy: 1e-9)
+    }
 }

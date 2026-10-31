@@ -56,6 +56,11 @@
   .cuts .pending { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); }
   .lane { position: relative; height: 16px; margin-top: -4px; }
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
+  .lane.captions button { background: var(--text); opacity: .4; }
+  .lane.blurs button { background: var(--red); opacity: .45; }
+  .lane.blurs button.selected { opacity: .95; }
+  .clip.placing { cursor: crosshair; }
+  .lane.captions button.selected { opacity: .9; }
   .lane button.selected { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
   .zoom-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
   .zoom-tools select { height: 26px; }
@@ -119,6 +124,7 @@
     <button class="btn" id="setIn" title="Start the video at the playhead (I)" disabled><i data-lucide="arrow-right-to-line"></i>Set In</button>
     <button class="btn" id="setOut" title="End the video at the playhead (O)" disabled><i data-lucide="arrow-left-to-line"></i>Set Out</button>
     <button class="btn" id="cut" title="Cut out a stretch: press at its start, then at its end (X)" disabled><i data-lucide="scissors"></i>Cut</button>
+    <button class="btn" id="tighten" title="Find long silences and cut them down to a short beat" disabled><i data-lucide="audio-lines"></i>Tighten Pauses</button>
     <button class="btn plain" id="reset" disabled>Reset</button>
   </div>
   <div class="trim-head">
@@ -133,6 +139,37 @@
       <button class="btn one-zoom" id="zoomOut" title="End this zoom at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
       <span id="zoomHint">Click the video to choose where it zooms. Ctrl-click zooms to pick several.</span>
       <button class="btn plain" id="zoomRemove" title="Remove this zoom (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
+    <b>Blur</b>
+    <button class="btn" id="addBlur" title="Blur part of the video from the playhead (B)" disabled><i data-lucide="eye-off"></i>Add Blur</button>
+    <button class="btn" id="findPrivate" title="Read the frame on screen and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds" disabled><i data-lucide="shield-check"></i>Find Private Info</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="blurTools" hidden>
+      <span class="dim">Drag on the video to place it.</span>
+      <button class="btn" id="blurIn" title="Start this blur at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="blurOut" title="End this blur at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="blurRemove" title="Remove this blur (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
+    <b>Ends</b>
+    <label class="zoom-tools">Opening <select class="field" id="opening" disabled><option value="none">None</option><option value="fade">Fade in</option><option value="rise">Rise</option></select></label>
+    <label class="zoom-tools">Closing <select class="field" id="closing" disabled><option value="none">None</option><option value="fade">Fade out</option><option value="rise">Rise</option></select></label>
+    <span class="dim" id="endsHint">Picture and sound ease in and out over 0.6 s. Rise grows the video out of its background.</span>
+  </div>
+  <div class="trim-head">
+    <b>Text</b>
+    <button class="btn" id="addCaption" title="Show text over the video from the playhead (T)" disabled><i data-lucide="captions"></i>Add Text</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="captionTools" hidden>
+      <input class="field" id="captionText" aria-label="Caption text" maxlength="160" style="width:220px">
+      <select class="field" id="captionPlace" aria-label="Where it shows"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
+      <select class="field" id="captionSize" aria-label="Text size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
+      <button class="btn" id="captionIn" title="Start this text at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="captionOut" title="End this text at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="captionRemove" title="Remove this text (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
   <div class="trim-head" id="cursorRow" hidden>
@@ -153,6 +190,8 @@
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
   <div class="lane" id="lane" aria-label="Zooms"></div>
+  <div class="lane captions" id="captionLane" aria-label="Text"></div>
+  <div class="lane blurs" id="blurLane" aria-label="Blurs"></div>
   <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
@@ -190,6 +229,12 @@
 <script src="shared/backdrop.js"></script>
 <script src="shared/zoom.js"></script>
 <script src="shared/cursor.js"></script>
+<script src="shared/captions.js"></script>
+<script src="shared/transitions.js"></script>
+<script src="shared/blurs.js"></script>
+<script src="shared/private.js"></script>
+<script src="vendor/ocr/tesseract.min.js"></script>
+<script src="ocr.js"></script>
 <script src="shared/gif.js"></script>
 <script src="common.js"></script>
 <script src="video.js"></script>

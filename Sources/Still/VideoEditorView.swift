@@ -80,6 +80,58 @@ import StillCore
         if cuts == (settings.cuts ?? []) { library.toast("Too short to cut"); return }
         settings.cuts = cuts
     }
+    /// Tighten Pauses: listens to the recording for silences longer than a second and cuts each down to a short beat.
+    @Published var listening = false
+    func tightenPauses() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), start = settings.start, end = settings.end
+        Task {
+            defer { listening = false }
+            do {
+                let levels = try await Task.detached(priority: .userInitiated) { () -> [Double] in
+                    let asset = AVURLAsset(url: url)
+                    guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
+                    let reader = try AVAssetReader(asset: asset)
+                    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
+                    reader.add(output); reader.startReading()
+                    var samples: [Float] = []
+                    while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
+                        let length = CMBlockBufferGetDataLength(block)
+                        var chunk = [Float](repeating: 0, count: length / 4)
+                        _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
+                        samples.append(contentsOf: chunk)
+                    }
+                    return AudioPauses.levels(samples, rate: 16000)
+                }.value
+                guard !levels.isEmpty else { library.toast("This recording has no sound to listen to"); return }
+                let found = AudioPauses.find(levels: levels, step: 0.05, start: start, end: end)
+                guard !found.isEmpty else { library.toast("No long pauses found"); return }
+                let before = VideoTimeline.length(settings.kept)
+                settings.cuts = VideoTimeline.normalized((settings.cuts ?? []) + found, start: settings.start, end: settings.end)
+                library.toast("Tightened \(found.count) pause\(found.count == 1 ? "" : "s"), \(String(format: "%.1f", before - VideoTimeline.length(settings.kept))) s shorter. Click a cut to put it back.")
+            } catch { self.error = "Couldn’t listen to this recording: \(error.localizedDescription)" }
+        }
+    }
+    /// Find Private Info: reads the frame at the playhead and blurs each private detail it finds for three seconds.
+    func findPrivateInfo() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), time = playhead, start = settings.start, end = settings.end
+        Task {
+            defer { listening = false }
+            do {
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url)); generator.appliesPreferredTrackTransform = true
+                generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+                let frame = try await generator.image(at: CMTime(seconds: time, preferredTimescale: 600)).image
+                let boxes = try await Task.detached(priority: .userInitiated) { try PrivateInfo.boxes(in: frame) }.value
+                guard !boxes.isEmpty else { library.toast("No private details found in this frame"); return }
+                let found = boxes.map { VideoBlur.fromPixels($0, width: Double(frame.width), height: Double(frame.height), at: time, start: start, end: end) }
+                settings.blurs = ((settings.blurs ?? []) + found).sorted { $0.start < $1.start }
+                library.toast("Blurred \(found.count) private detail\(found.count == 1 ? "" : "s") for 3 seconds")
+            } catch { self.error = "Couldn’t read this frame: \(error.localizedDescription)" }
+        }
+    }
     func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
@@ -202,7 +254,7 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
@@ -233,6 +285,33 @@ struct VideoEditorView: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.accentColor, lineWidth: model.pickedZooms.contains(zoom.id) ? 2 : 0))
             }
             if model.settings.zooms.isEmpty { Text("Add a zoom at the playhead, or generate zooms from recorded clicks.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Text":
+            Button("Add Text at Playhead") { var captions = model.settings.captions ?? []; captions.append(VideoCaption.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.captions = captions.sorted { $0.start < $1.start } }
+            ForEach(Binding(get: { model.settings.captions ?? [] }, set: { model.settings.captions = $0.isEmpty ? nil : $0 })) { $caption in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack { TextField("Text", text: $caption.text, axis: .vertical).lineLimit(1...3); Button { model.settings.captions?.removeAll { $0.id == caption.id }; if model.settings.captions?.isEmpty == true { model.settings.captions = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove text") }
+                    HStack { TextField("Start", value: $caption.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $caption.end, format: .number.precision(.fractionLength(2))) }
+                    HStack {
+                        Picker("Place", selection: $caption.position) { Text("Top").tag("top"); Text("Middle").tag("middle"); Text("Bottom").tag("bottom") }.labelsHidden()
+                        Picker("Size", selection: $caption.size) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.labelsHidden()
+                    }
+                }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.captions ?? []).isEmpty { Text("Add a title, a step or a note that shows over the video for a few seconds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Blur":
+            HStack {
+                Button("Add Blur") { var blurs = model.settings.blurs ?? []; blurs.append(VideoBlur.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.blurs = blurs.sorted { $0.start < $1.start } }
+                Button(model.listening ? "Reading…" : "Find Private Info") { model.findPrivateInfo() }.disabled(model.listening).help("Read the frame at the playhead and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds")
+            }
+            ForEach(Binding(get: { model.settings.blurs ?? [] }, set: { model.settings.blurs = $0.isEmpty ? nil : $0 })) { $blur in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack { Text("Blur").fontWeight(.medium); Spacer(); Button { model.settings.blurs?.removeAll { $0.id == blur.id }; if model.settings.blurs?.isEmpty == true { model.settings.blurs = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove blur") }
+                    HStack { TextField("Start", value: $blur.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $blur.end, format: .number.precision(.fractionLength(2))) }
+                    HStack { Text("X"); Slider(value: $blur.x, in: 0...1); Text("Y"); Slider(value: $blur.y, in: 0...1) }
+                    HStack { Text("W"); Slider(value: $blur.w, in: 0.01...1); Text("H"); Slider(value: $blur.h, in: 0.01...1) }
+                }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
@@ -278,6 +357,10 @@ struct VideoEditorView: View {
                 Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
                 Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
+                Button { model.tightenPauses() } label: { Label(model.listening ? "Listening…" : "Tighten Pauses", systemImage: "waveform") }.disabled(model.listening).help("Find long silences and cut them down to a short beat")
+                Menu { Picker("Opening", selection: Binding(get: { model.settings.opening ?? "none" }, set: { model.settings.opening = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade In").tag("fade"); Text("Rise").tag("rise") }
+                    Picker("Closing", selection: Binding(get: { model.settings.closing ?? "none" }, set: { model.settings.closing = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade Out").tag("fade"); Text("Rise").tag("rise") }
+                } label: { Label("Ends", systemImage: "circle.lefthalf.filled") }.fixedSize().help("How the video opens and closes: picture and sound ease in and out over 0.6 s; Rise grows the video out of its background")
                 Button("Reset") { model.settings.start = 0; model.settings.end = model.duration; model.settings.cuts = nil; model.cutStart = nil }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01 && (model.settings.cuts ?? []).isEmpty)
                 Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10))
             }.buttonStyle(.borderless).controlSize(.small)

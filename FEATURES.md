@@ -81,6 +81,10 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
 | Video editor: cut stretches out of the middle (Cut at the start and end, X), struck through on the trim bar and put back with a click; playback and exports skip them | ☑️ | ☑️ export checked frame by frame in Chromium |
 | Video editor: Export Video asks for a size (Original, 4K, 1440p, 1080p, 720p, 480p; never enlarged) a quality (Maximum, High, Balanced, Smaller File or a bitrate preset) and a speed (1× to 3×, voice at its normal pitch), with the length and file size it comes to | ☑️ | ☑️ downscaled export checked in Chromium |
+| Video editor: text over the video (titles, steps, notes) for a stretch you choose, top, middle or bottom, in three sizes, fading in and out | ☑️ | ☑️ export checked in Chromium |
+| Video editor: Blur boxes for a stretch, following the picture through zooms; Find Private Info reads the frame and blurs emails, card numbers, keys, IP addresses and phone numbers | ☑️ | ☑️ export checked in Chromium |
+| Video editor: Tighten Pauses finds silences over a second and cuts each down to a short beat (each one a normal cut you can put back) | ☑️ | ☑️ checked in Chromium on a recording with gaps |
+| Video editor: Opening and Closing (Fade, or Rise: the picture grows out of its background), picture and sound easing over 0.6 s | ☑️ | ☑️ export checked in Chromium, sound included |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
 | Video editor: pick several zooms on the trim bar (⌘/Ctrl- or Shift-click) and remove them together | ☑️ | ☑️ checked in Chromium |

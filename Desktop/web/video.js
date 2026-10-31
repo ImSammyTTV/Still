@@ -32,7 +32,14 @@ const drawsClicks = () => showClicks && clicks().length > 0;
 let cursorFx = { show: true, size: 1, smooth: true, style: 'arrow' };
 const separateCursor = () => project.cursor === 'separate';
 const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
-const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor();
+// Text shown over the video for a stretch of it, and the one being edited.
+let captions = [], selectedCaption = -1;
+// Parts of the picture blurred for a stretch, and the one being edited.
+let blurs = [], selectedBlur = -1;
+// How the video opens and closes: 'none', 'fade' or 'rise'.
+let opening = 'none', closing = 'none';
+const ends = (t) => StillTransitions.at(t, trim, opening, closing);
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing) || blurs.length > 0;
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -117,6 +124,24 @@ $('#cut').onclick = () => {
   else { const before = cuts.length; cuts = StillTrim.addCut(cuts, cutStart, video.currentTime, trim); cutStart = null; if (cuts.length === before && !cuts.some((c) => c.end - c.start > 0)) toast('Too short to cut'); }
   render();
 };
+// Tighten Pauses: listens to the recording for silences longer than a second and cuts each down to a short beat.
+$('#tighten').onclick = async () => {
+  $('#tighten').disabled = true; toast('Listening for pauses…');
+  try {
+    const data = await (await fetch(video.currentSrc || source)).arrayBuffer();
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+    let sound;
+    try { sound = await context.decodeAudioData(data); } finally { context.close(); }
+    const mono = new Float32Array(sound.length);
+    for (let c = 0; c < sound.numberOfChannels; c++) { const channel = sound.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += channel[i] / sound.numberOfChannels; }
+    const found = StillTrim.pauses(StillTrim.levelsOf(mono, sound.sampleRate), 0.05, trim);
+    const before = StillTrim.keptLength(trim, cuts);
+    cuts = StillTrim.normalizeCuts([...cuts, ...found], trim); render();
+    const saved = before - StillTrim.keptLength(trim, cuts);
+    toast(found.length ? `Tightened ${found.length} pause${found.length === 1 ? '' : 's'}, ${saved.toFixed(1)} s shorter. Click a cut to put it back.` : 'No long pauses found');
+  } catch (error) { toast(`Couldn’t listen to this recording: ${message(error)}`); }
+  finally { $('#tighten').disabled = false; }
+};
 const isWhole = () => StillTrim.isFull(trim, duration) && !cuts.length;
 
 function render() {
@@ -141,7 +166,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -216,15 +241,40 @@ function renderView() {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return;
   const t = video.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(vw, vh, z);
-  video.style.transform = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
+  const e = ends(t);
+  const zoomed = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
+  $('#clip').style.opacity = e.level < 1 ? String(e.level) : ''; $('#clip').style.transform = e.scale < 1 ? `scale(${e.scale})` : '';
+  video.volume = Math.max(0, Math.min(1, e.level));
+  video.style.transform = zoomed;
   const fx = $('#fx'), ctx = fx.getContext('2d');
   ctx.clearRect(0, 0, fx.width, fx.height);
+  drawBlurs(ctx, video, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   drawOverlays(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
+  if (selectedBlur >= 0 && blurs[selectedBlur]) { const b = blurs[selectedBlur], k = fx.width / vw; ctx.save(); ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.strokeRect((b.x * vw - src.x) * z.scale * k, (b.y * vh - src.y) * z.scale * k, b.w * vw * z.scale * k, b.h * vh * z.scale * k); ctx.restore(); }
+}
+
+// Blur boxes: each part of the picture shrunk to a few pixels and smoothed back up, which reads as a soft blur
+// and works in every web engine. `media` is the video element being shown or exported.
+const blurCanvas = document.createElement('canvas');
+function drawBlurs(ctx, media, t, src, scale, k, ox, oy, vw, vh) {
+  for (const b of StillBlurs.at(blurs, t)) {
+    const sx = b.x * vw, sy = b.y * vh, sw = b.w * vw, sh = b.h * vh;
+    const dx = ox + (sx - src.x) * scale * k, dy = oy + (sy - src.y) * scale * k, dw = sw * scale * k, dh = sh * scale * k;
+    const small = Math.max(2, Math.round(Math.max(sw, sh) / 24));
+    blurCanvas.width = Math.max(2, Math.round(small * sw / Math.max(sw, sh))); blurCanvas.height = Math.max(2, Math.round(small * sh / Math.max(sw, sh)));
+    const b2 = blurCanvas.getContext('2d'); b2.imageSmoothingEnabled = true; b2.imageSmoothingQuality = 'high';
+    b2.drawImage(media, sx, sy, sw, sh, 0, 0, blurCanvas.width, blurCanvas.height);
+    ctx.save(); ctx.beginPath(); ctx.roundRect(dx, dy, dw, dh, Math.min(dw, dh) * 0.12); ctx.clip();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(blurCanvas, dx, dy, dw, dh);
+    ctx.restore();
+  }
 }
 
 // What's drawn over the picture: click rings, then the pointer on top. Same arguments as drawRings.
 function drawOverlays(ctx, t, src, scale, k, ox, oy, vw, vh) {
   if (drawsClicks()) drawRings(ctx, t, src, scale, k, ox, oy, vw, vh);
+  // Captions sit over the video area, steady through zooms.
+  StillCaptions.draw(ctx, captions, t, ox, oy, vw * k, vh * k, getComputedStyle(document.body).fontFamily);
   if (!drawsCursor()) return;
   const p = StillCursor.at(project.pointer, t, cursorFx.smooth);
   if (!p) return;
@@ -283,13 +333,97 @@ $('#background').onclick = () => {
 // One exported frame: the background, then the video's current picture inside it.
 function drawFrame(ctx, player, F) {
   const t = player.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(F.width, F.height, z);
+  const e = ends(t);
   ctx.save();
+  if (e.level < 1) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, F.w, F.h); }
   if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg, bgPicture);
   else { ctx.beginPath(); ctx.rect(F.x, F.y, F.width, F.height); ctx.clip(); }
+  // The opening and closing: the picture fades over the background (or black), and rises from slightly smaller.
+  if (e.scale < 1) { const cx = F.x + F.width / 2, cy = F.y + F.height / 2; ctx.translate(cx, cy); ctx.scale(e.scale, e.scale); ctx.translate(-cx, -cy); }
+  ctx.globalAlpha = e.level;
   ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
+  drawBlurs(ctx, player, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
+
+// ---- Blur ---------------------------------------------------------------------------------------
+
+function renderBlurs() {
+  if (selectedBlur >= blurs.length) selectedBlur = -1;
+  const lane = $('#blurLane'); lane.replaceChildren();
+  blurs.forEach((b, i) => {
+    const left = StillTrim.position(b.start, duration) * 100, width = StillTrim.position(b.end, duration) * 100 - left;
+    lane.append(el('button', { class: i === selectedBlur ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Blur ${StillTrim.clock(b.start)} to ${StillTrim.clock(b.end)}`, 'aria-pressed': String(i === selectedBlur),
+      onclick: () => { selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }));
+  });
+  $('#blurTools').hidden = selectedBlur < 0;
+  $('#clip').classList.toggle('placing', selectedBlur >= 0);
+  renderView(); saveProject();
+}
+const changeBlur = (patch) => { let changed = null; blurs = blurs.map((b, i) => (i === selectedBlur ? (changed = { ...b, ...patch }) : b)).sort((a, b) => a.start - b.start); if (changed) selectedBlur = blurs.indexOf(changed); renderBlurs(); };
+$('#addBlur').onclick = () => { const before = new Set(blurs); blurs = StillBlurs.add(blurs, video.currentTime, trim); selectedBlur = blurs.findIndex((b) => !before.has(b)); pickZoom(-1, false); renderZooms(); renderBlurs(); toast('Drag on the video to place the blur'); };
+$('#blurIn').onclick = () => { const b = blurs[selectedBlur]; if (b && video.currentTime < b.end - 0.2) changeBlur({ start: video.currentTime }); };
+$('#blurOut').onclick = () => { const b = blurs[selectedBlur]; if (b && video.currentTime > b.start + 0.2) changeBlur({ end: video.currentTime }); };
+$('#blurRemove').onclick = () => { blurs = blurs.filter((_, i) => i !== selectedBlur); selectedBlur = -1; renderBlurs(); };
+// With a blur picked, dragging on the video draws its box (as shares of the video, through any zoom).
+$('#clip').addEventListener('pointerdown', (down) => {
+  if (selectedBlur < 0 || down.button !== 0) return;
+  down.preventDefault(); down.stopPropagation();
+  const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
+  const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
+  const share = (e) => ({ x: (src.x + (e.clientX - r.left) / r.width * src.w) / vw, y: (src.y + (e.clientY - r.top) / r.height * src.h) / vh });
+  const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
+  const move = (e) => { blurs[selectedBlur] = { ...blurs[selectedBlur], ...StillBlurs.fromDrag(from, share(e)) }; renderView(); };
+  const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderBlurs(); };
+  clip.addEventListener('pointermove', move); clip.addEventListener('pointerup', up);
+}, true);
+// Find Private Info: reads the frame on screen and blurs each email address, card number, key, IP address and
+// phone number it finds, for three seconds from here.
+$('#findPrivate').onclick = async () => {
+  $('#findPrivate').disabled = true; toast('Reading this frame…');
+  try {
+    const c = document.createElement('canvas'); c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+    const found = StillPrivate.boxes(await StillOCR.lines(c.toDataURL('image/png')));
+    if (!found.length) return toast('No private details found in this frame');
+    const time = video.currentTime;
+    for (const box of found) blurs = StillBlurs.add(blurs, time, trim, StillBlurs.fromPixels(box, c.width, c.height));
+    selectedBlur = -1; renderBlurs();
+    toast(`Blurred ${found.length} private detail${found.length === 1 ? '' : 's'} for 3 seconds. Pick one on the lane to adjust it.`);
+  } catch (error) { toast(`Couldn’t read this frame: ${message(error)}`); }
+  finally { $('#findPrivate').disabled = false; }
+};
+
+// ---- Text ---------------------------------------------------------------------------------------
+
+function renderCaptions() {
+  if (selectedCaption >= captions.length) selectedCaption = -1;
+  const lane = $('#captionLane'); lane.replaceChildren();
+  captions.forEach((c, i) => {
+    const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
+    lane.append(el('button', { class: i === selectedCaption ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `“${c.text}” ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}`, 'aria-pressed': String(i === selectedCaption),
+      onclick: () => { selectedCaption = i === selectedCaption ? -1 : i; if (selectedCaption >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); renderCaptions(); } }));
+  });
+  const c = captions[selectedCaption];
+  $('#captionTools').hidden = !c;
+  if (c) { if (document.activeElement !== $('#captionText')) $('#captionText').value = c.text; $('#captionPlace').value = c.position; $('#captionSize').value = c.size; }
+  renderView(); saveProject();
+}
+const changeCaption = (patch) => { let changed = null; captions = captions.map((c, i) => (i === selectedCaption ? (changed = { ...c, ...patch }) : c)).sort((a, b) => a.start - b.start); if (changed) selectedCaption = captions.indexOf(changed); renderCaptions(); };
+$('#addCaption').onclick = () => {
+  captions = StillCaptions.add(captions, video.currentTime, trim);
+  selectedCaption = captions.findIndex((c) => c.start <= video.currentTime + 0.01 && c.end >= video.currentTime && c.text === 'Your text');
+  renderCaptions(); $('#captionText').focus(); $('#captionText').select();
+};
+$('#opening').onchange = (e) => { opening = e.target.value; renderView(); saveProject(); };
+$('#closing').onchange = (e) => { closing = e.target.value; renderView(); saveProject(); };
+$('#captionText').addEventListener('input', (e) => changeCaption({ text: e.target.value }));
+$('#captionPlace').onchange = (e) => changeCaption({ position: e.target.value });
+$('#captionSize').onchange = (e) => changeCaption({ size: e.target.value });
+$('#captionIn').onclick = () => { const c = captions[selectedCaption]; if (c && video.currentTime < c.end - 0.2) changeCaption({ start: video.currentTime }); };
+$('#captionOut').onclick = () => { const c = captions[selectedCaption]; if (c && video.currentTime > c.start + 0.2) changeCaption({ end: video.currentTime }); };
+$('#captionRemove').onclick = () => { captions = captions.filter((_, i) => i !== selectedCaption); selectedCaption = -1; renderCaptions(); };
 
 // ---- Zooms --------------------------------------------------------------------------------------
 
@@ -337,7 +471,7 @@ $('#cursorStyle').onchange = (e) => { cursorFx = { ...cursorFx, style: e.target.
 $('#cursorSmooth').onchange = (e) => { cursorFx = { ...cursorFx, smooth: e.target.checked }; renderZooms(); };
 // With a zoom selected, a click on the video picks the point it zooms to, wherever the view is zoomed right now.
 $('#clip').addEventListener('click', (e) => {
-  if (selectedZoom < 0) return;
+  if (selectedZoom < 0 || selectedBlur >= 0) return;
   e.stopPropagation();
   const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
   const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
@@ -391,7 +525,11 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'o' || e.key === 'O') $('#setOut').click();
   else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
+  else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlur >= 0) $('#blurRemove').click();
+  else if ((e.key === 'b' || e.key === 'B') && !$('#addBlur').disabled) $('#addBlur').click();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaption >= 0) $('#captionRemove').click();
   else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedZooms.size) $('#zoomRemove').click();
 });
 
@@ -433,16 +571,18 @@ function captureSource(player, size) {
   const draw = () => { ctx.setTransform(out.width / F.w, 0, 0, out.height / F.h, 0, 0); drawFrame(ctx, player, F); };
   draw();
   const timer = setInterval(draw, 1000 / 30);
-  let audio = null, sound;
-  if (player.captureStream) sound = player.captureStream().getAudioTracks();
+  let audio = null, sound, gain = null;
+  // The opening and closing fade the sound too, so it goes through a volume control.
+  if (player.captureStream && !StillTransitions.active(opening, closing)) sound = player.captureStream().getAudioTracks();
   else {
     player.muted = false;
     audio = new AudioContext(); const mix = audio.createMediaStreamDestination();
-    audio.createMediaElementSource(player).connect(mix);
+    gain = audio.createGain(); audio.createMediaElementSource(player).connect(gain).connect(mix);
     sound = mix.stream.getAudioTracks();
   }
+  const level = setInterval(() => { if (gain) gain.gain.value = ends(player.currentTime).level; }, 20);
   const tracks = [...canvas.captureStream(30).getVideoTracks(), ...sound];
-  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); if (audio) audio.close(); } };
+  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); clearInterval(level); if (audio) audio.close(); } };
 }
 
 async function recordClip(run, type, plan) {
@@ -621,10 +761,16 @@ async function open() {
   if (project.bg && (StillBackdrop.GRADIENTS[project.bg.style] || (project.bg.style === 'custom' && project.bg.custom))) bg = { ...NO_BG, ...project.bg };
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
+  captions = (Array.isArray(project.captions) ? project.captions : []).filter((c) => c && c.end > c.start && typeof c.text === 'string');
+  blurs = (Array.isArray(project.blurs) ? project.blurs : []).filter((b) => b && b.end > b.start).map((b) => ({ start: b.start, end: b.end, ...StillBlurs.fit(b) }));
+  renderBlurs();
+  opening = StillTransitions.STYLES.includes(project.opening) ? project.opening : 'none'; closing = StillTransitions.STYLES.includes(project.closing) ? project.closing : 'none';
+  $('#opening').value = opening; $('#closing').value = closing;
+  renderCaptions();
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

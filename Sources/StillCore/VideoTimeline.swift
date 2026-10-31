@@ -65,3 +65,116 @@ public enum VideoExportSize {
         return CGSize(width: max(2, floor(width * k / 2) * 2), height: max(2, floor(height * k / 2) * 2))
     }
 }
+
+/// Text shown over a video for a stretch of the recording (in its own time), in a dark rounded pill near the top,
+/// middle or bottom, fading in and out over a quarter of a second. Windows and Linux follow the same rules
+/// (shared/captions.js) and share the test cases.
+public struct VideoCaption: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var start: Double
+    public var end: Double
+    public var text: String
+    public var position: String
+    public var size: String
+    public init(start: Double, end: Double, text: String = "Your text", position: String = "bottom", size: String = "medium") {
+        self.start = start; self.end = end; self.text = text; self.position = position; self.size = size
+    }
+    public static let sizes: [String: Double] = ["small": 0.045, "medium": 0.06, "large": 0.08]
+    public static let places: [String: Double] = ["top": 0.1, "middle": 0.5, "bottom": 0.88]
+
+    /// A new caption at `time`, three seconds long and kept inside the clip.
+    public static func new(at time: Double, start: Double, end: Double) -> VideoCaption { VideoCaption(start: max(start, time), end: min(end, time + 3)) }
+
+    /// How opaque it is at `time` (0 to 1), or nil when it isn't showing.
+    public func alpha(at time: Double) -> Double? {
+        guard !text.isEmpty, time >= start, time <= end else { return nil }
+        let ramp = min(0.25, (end - start) / 3)
+        return ramp > 0 ? min(1, (time - start) / ramp, (end - time) / ramp) : 1
+    }
+
+    /// Font size and the point the pill is centred on (from the top left) in a video area `width` × `height`.
+    public func layout(width: Double, height: Double) -> (fontSize: Double, x: Double, y: Double) {
+        ((max(12, min(width, height) * (Self.sizes[size] ?? 0.06))).rounded(), width / 2, height * (Self.places[position] ?? 0.88))
+    }
+}
+
+/// How a video opens and closes: "fade" eases the picture and sound in from nothing and out again, and "rise" does
+/// the same while the picture grows gently out of its background (and settles back at the end). Times are the
+/// recording's own. Windows and Linux follow the same rules (shared/transitions.js) and share the test cases.
+public enum VideoTransition {
+    public static let styles = ["none", "fade", "rise"]
+    public static let duration = 0.6
+    public static let rise = 0.08
+    private static func ease(_ x: Double) -> Double { let v = min(1, max(0, x)); return v*v*(3-2*v) }
+    public static func length(start: Double, end: Double) -> Double { min(duration, max(0, end-start)/3) }
+
+    /// Level 0 to 1 for the picture's opacity and the sound's volume, and the picture's scale, at `time`.
+    public static func at(_ time: Double, start: Double, end: Double, opening: String, closing: String) -> (level: Double, scale: Double) {
+        let d = length(start: start, end: end)
+        let inside = opening != "none" && styles.contains(opening) && d > 0 ? ease((time-start)/d) : 1
+        let outside = closing != "none" && styles.contains(closing) && d > 0 ? ease((end-time)/d) : 1
+        let level = min(inside, outside), style = inside <= outside ? opening : closing
+        return (level, style == "rise" ? 1-rise*(1-level) : 1)
+    }
+}
+
+/// Tighten Pauses: long silences found in a recording's sound, as cuts. A stretch is silent when it's well under the
+/// speaking level (25 dB below the loud end, between -60 and -30 dB); one longer than `minimum` seconds becomes a cut
+/// that leaves `keep` seconds of quiet each side, so speech isn't clipped. Windows and Linux follow the same rules
+/// (shared/trim.js `pauses`) and share the test cases.
+public enum AudioPauses {
+    public static func find(levels: [Double], step: Double, start: Double, end: Double, minimum: Double = 1, keep: Double = 0.3) -> [VideoCut] {
+        let loud = levels.filter(\.isFinite).sorted()
+        guard !loud.isEmpty else { return [] }
+        let speaking = loud[Int(Double(loud.count) * 0.9)]
+        let threshold = min(-30, max(-60, speaking - 25))
+        var found: [VideoCut] = [], begin: Int?
+        for (index, level) in levels.enumerated() {
+            let quiet = !(level > threshold)
+            if quiet, begin == nil { begin = index }
+            if (!quiet || index == levels.count - 1), let from = begin {
+                let to = quiet ? index + 1 : index
+                let a = Double(from) * step, b = Double(to) * step
+                if b - a >= minimum { found.append(VideoCut(start: a + keep, end: b - keep)) }
+                begin = nil
+            }
+        }
+        return VideoTimeline.normalized(found, start: start, end: end)
+    }
+
+    /// Loudness in decibels for each `step` seconds of mono samples.
+    public static func levels(_ samples: [Float], rate: Double, step: Double = 0.05) -> [Double] {
+        let size = max(1, Int((rate * step).rounded()))
+        return stride(from: 0, to: samples.count, by: size).map { at in
+            let end = min(samples.count, at + size)
+            let sum = samples[at..<end].reduce(0.0) { $0 + Double($1) * Double($1) }
+            let rms = (sum / Double(max(1, end - at))).squareRoot()
+            return rms > 0 ? 20 * log10(rms) : -120
+        }
+    }
+}
+
+/// A part of a video's picture blurred for a stretch of the recording (in its own time). The box is kept as shares of
+/// the video (0 to 1, from the top left) so it fits any export size and follows the picture through zooms. Windows
+/// and Linux follow the same rules (shared/blurs.js) and share the test cases.
+public struct VideoBlur: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var start: Double
+    public var end: Double
+    public var x: Double, y: Double, w: Double, h: Double
+    public init(start: Double, end: Double, x: Double = 0.35, y: Double = 0.42, w: Double = 0.3, h: Double = 0.16) {
+        self.start = start; self.end = end
+        let fitted = Self.fit(x: x, y: y, w: w, h: h); self.x = fitted.x; self.y = fitted.y; self.w = fitted.w; self.h = fitted.h
+    }
+    /// A box kept inside the picture and at least 1% each way.
+    public static func fit(x: Double, y: Double, w: Double, h: Double) -> (x: Double, y: Double, w: Double, h: Double) {
+        let fw = min(1, max(0.01, abs(w))), fh = min(1, max(0.01, abs(h)))
+        return (min(1-fw, max(0, w < 0 ? x+w : x)), min(1-fh, max(0, h < 0 ? y+h : y)), fw, fh)
+    }
+    /// A new box at `time`, three seconds long and kept inside the clip.
+    public static func new(at time: Double, start: Double, end: Double) -> VideoBlur { VideoBlur(start: max(start, time), end: min(end, time+3)) }
+    /// A box in the video's pixels (from the top left), as shares, with a little room around it.
+    public static func fromPixels(_ box: CGRect, width: Double, height: Double, at time: Double, start: Double, end: Double, pad: Double = 4) -> VideoBlur {
+        VideoBlur(start: max(start, time), end: min(end, time+3), x: (box.minX-pad)/width, y: (box.minY-pad)/height, w: (box.width+pad*2)/width, h: (box.height+pad*2)/height)
+    }
+}

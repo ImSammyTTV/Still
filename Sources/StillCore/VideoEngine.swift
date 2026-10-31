@@ -63,6 +63,15 @@ public enum VideoEngine {
         mix.inputParameters = mixInputs
         // A faster export squeezes every track into less time; each frame still maps back to the recording's moment.
         let speed = min(4, max(1, settings.speed ?? 1))
+        // The opening and closing fade the sound with the picture.
+        let fade = VideoTransition.length(start: start, end: end)
+        for input in mixInputs where fade > 0 {
+            let full: Float = settings.muted ? 0 : 1
+            if (settings.opening ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: 0, toEndVolume: full, timeRange: CMTimeRange(start: .zero, duration: cm(fade/speed))) }
+            if (settings.closing ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: full, toEndVolume: 0, timeRange: CMTimeRange(start: cm(max(0, total-fade)/speed), duration: cm(fade/speed))) }
+        }
+        // The mix keeps copies of its inputs, so they go back in after the speed and fades are set.
+        mix.inputParameters = mixInputs
         if speed > 1.001 { asset.scaleTimeRange(CMTimeRange(start: .zero, duration: cm(total)), toDuration: cm(total/speed)); for input in mixInputs { input.audioTimePitchAlgorithm = .spectral } }
         let padding = settings.frame == "none" ? 0 : settings.padding
         var width = oriented.width+padding*2, height = oriented.height+padding*2
@@ -204,6 +213,14 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
         var background = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: 0, y: i.size.height), "inputPoint1": CIVector(x: i.size.width, y: 0), "inputColor0": CIColor(cgColor: colors[0].cgColor), "inputColor1": CIColor(cgColor: colors[1].cgColor)])!.outputImage!.cropped(to: bounds)
         var screen = CIImage(cvPixelBuffer: source).transformed(by: i.transform)
         screen = screen.transformed(by: CGAffineTransform(translationX: -screen.extent.minX, y: -screen.extent.minY))
+        // Blur boxes, on the recording's own picture so they follow it through zooms. Core Image counts from the bottom.
+        for blur in s.blurs ?? [] where time >= blur.start && time <= blur.end {
+            let w = screen.extent.width, h = screen.extent.height
+            let rect = CGRect(x: blur.x*w, y: (1-blur.y-blur.h)*h, width: blur.w*w, height: blur.h*h).integral
+            let radius = max(6, min(rect.width, rect.height)/5)
+            let soft = screen.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius]).cropped(to: rect)
+            screen = soft.composited(over: screen)
+        }
         let padding = style == .none ? 0 : s.padding
         let scale = min((i.size.width-padding*2)/screen.extent.width, (i.size.height-padding*2)/screen.extent.height)
         let contentSize = CGSize(width: screen.extent.width*scale, height: screen.extent.height*scale)
@@ -244,6 +261,17 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
                 result = overlay.composited(over: result)
             }
         }
+        // Captions sit over the video area, steady through zooms.
+        for caption in s.captions ?? [] {
+            guard let alpha = caption.alpha(at: time) else { continue }
+            let at = caption.layout(width: contentRect.width, height: contentRect.height)
+            let pill = captionImage(caption.text, fontSize: at.fontSize, maxWidth: contentRect.width*0.9)
+            let x = contentRect.minX+at.x-pill.extent.width/2
+            let centre = min(contentRect.height-pill.extent.height/2-4, max(pill.extent.height/2+4, at.y))
+            let y = contentRect.maxY-centre-pill.extent.height/2
+            result = pill.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
+                .transformed(by: CGAffineTransform(translationX: x, y: y)).composited(over: result)
+        }
         if s.showKeystrokes, let key = i.metadata.keys.last(where: { $0.time <= time && time-$0.time < 1.7 }) {
             let factor = max(0.5, min(3, s.keysSize ?? 1))
             let overlay = textImage(key.text, light: s.keysStyle == "light").transformed(by: CGAffineTransform(scaleX: factor, y: factor))
@@ -268,6 +296,17 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             let rect = CGRect(x: x, y: y, width: side, height: side), mask = roundedMask(rect, radius: s.cameraShape == "circle" ? side/2 : side*0.12)
             result = image.cropped(to: rect).applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: result, kCIInputMaskImageKey: mask])
         }
+        // The opening and closing: the picture fades over its background (or black) and rises from slightly smaller.
+        if let first = i.kept.first, let last = i.kept.last {
+            let ends = VideoTransition.at(time, start: first.start, end: last.end, opening: s.opening ?? "none", closing: s.closing ?? "none")
+            if ends.level < 0.999 || ends.scale < 0.999 {
+                let centre = CGPoint(x: contentRect.midX, y: contentRect.midY)
+                let layer = result.cropped(to: contentRect)
+                    .transformed(by: CGAffineTransform(translationX: -centre.x, y: -centre.y).concatenating(CGAffineTransform(scaleX: ends.scale, y: ends.scale)).concatenating(CGAffineTransform(translationX: centre.x, y: centre.y)))
+                    .applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: max(0, ends.level))])
+                result = layer.composited(over: background)
+            }
+        }
         return result.cropped(to: bounds)
     }
     private func roundedMask(_ rect: CGRect, radius: Double) -> CIImage { CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: rect), "inputRadius": radius, "inputColor": CIColor.white])!.outputImage! }
@@ -291,6 +330,26 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
         ctx.setStrokeColor(color.cgColor); ctx.setFillColor(color.withAlphaComponent(0.4).cgColor); ctx.setLineWidth(3)
         ctx.addEllipse(in: CGRect(x: 10, y: 10, width: 44, height: 44)); ctx.drawPath(using: filled ? .fill : .stroke)
         return CIImage(cgImage: ctx.makeImage()!)
+    }
+    /// A caption's pill: white semibold text, up to three lines, on a dark rounded box.
+    private func captionImage(_ text: String, fontSize: Double, maxWidth: Double) -> CIImage {
+        let cacheKey = "caption:\(Int(fontSize)):\(Int(maxWidth)):\(text)"
+        if let image = textImages[cacheKey] { return image }
+        let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil) ?? CTFontCreateWithName("HelveticaNeue-Medium" as CFString, fontSize, nil)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).prefix(3).map { CTLineCreateWithAttributedString(NSAttributedString(string: String($0), attributes: [kCTFontAttributeName as NSAttributedString.Key: font, kCTForegroundColorAttributeName as NSAttributedString.Key: NSColor.white.cgColor])) }
+        let lineHeight = fontSize*1.25, padX = fontSize*0.8, padY = fontSize*0.45
+        let textWidth = min(maxWidth, lines.map { CTLineGetTypographicBounds($0, nil, nil, nil) }.max() ?? 0)
+        let width = Int(textWidth+padX*2), height = Int(lineHeight*Double(lines.count)+padY*2)
+        guard width > 0, height > 0, let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return CIImage.empty() }
+        let radius = min(Double(height)/2, fontSize*0.6)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.72).cgColor); ctx.addPath(CGPath(roundedRect: CGRect(x: 0, y: 0, width: width, height: height), cornerWidth: radius, cornerHeight: radius, transform: nil)); ctx.fillPath()
+        for (index, line) in lines.enumerated() {
+            let lineWidth = min(textWidth, CTLineGetTypographicBounds(line, nil, nil, nil))
+            // Lines from the top; Core Graphics counts from the bottom.
+            let baseline = Double(height)-padY-lineHeight*Double(index+1)+lineHeight*0.3
+            ctx.textPosition = CGPoint(x: (Double(width)-lineWidth)/2, y: baseline); CTLineDraw(line, ctx)
+        }
+        let image = CIImage(cgImage: ctx.makeImage()!); if textImages.count > 200 { textImages.removeAll() }; textImages[cacheKey] = image; return image
     }
     private func textImage(_ text: String, light: Bool = false) -> CIImage {
         let cacheKey = "\(light):\(text)"
