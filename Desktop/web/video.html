@@ -128,10 +128,10 @@
     <label class="zoom-tools" id="clicksToggle" hidden><input type="checkbox" id="showClicks"> Show clicks</label>
     <span class="grow"></span>
     <span class="zoom-tools" id="zoomTools" hidden>
-      <label>Zoom <select class="field" id="zoomScale"><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.7">1.7×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select></label>
-      <button class="btn" id="zoomIn" title="Start this zoom at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
-      <button class="btn" id="zoomOut" title="End this zoom at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
-      <span id="zoomHint">Click the video to choose where it zooms.</span>
+      <label class="one-zoom">Zoom <select class="field" id="zoomScale"><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.7">1.7×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select></label>
+      <button class="btn one-zoom" id="zoomIn" title="Start this zoom at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn one-zoom" id="zoomOut" title="End this zoom at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <span id="zoomHint">Click the video to choose where it zooms. Ctrl-click zooms to pick several.</span>
       <button class="btn plain" id="zoomRemove" title="Remove this zoom (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>

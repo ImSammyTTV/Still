@@ -18,6 +18,14 @@ const NO_BG = { style: 'none', padding: 8, radius: 2, shadow: true };
 let bg = { ...NO_BG };
 const hasBg = () => bg.style !== 'none';
 let zooms = [], selectedZoom = -1, showClicks = false, bgPicture = null;
+// The zooms picked on the lane: a click picks one, Ctrl- (⌘-) or Shift-click adds or drops one, so several can be
+// removed together. `selectedZoom` is the one being edited when exactly one is picked.
+let pickedZooms = new Set();
+function pickZoom(i, adding) {
+  if (!adding) pickedZooms = i >= 0 && !(pickedZooms.size === 1 && pickedZooms.has(i)) ? new Set([i]) : new Set();
+  else if (pickedZooms.has(i)) pickedZooms.delete(i); else pickedZooms.add(i);
+  selectedZoom = pickedZooms.size === 1 ? [...pickedZooms][0] : -1;
+}
 const clicks = () => (Array.isArray(project.clicks) ? project.clicks : []);
 const drawsClicks = () => showClicks && clicks().length > 0;
 // Recordings made with Cursor effects on leave the pointer out of the picture; it's drawn here from the path.
@@ -286,15 +294,19 @@ function drawFrame(ctx, player, F) {
 // ---- Zooms --------------------------------------------------------------------------------------
 
 function renderZooms() {
-  if (selectedZoom >= zooms.length) selectedZoom = -1;
+  pickedZooms = new Set([...pickedZooms].filter((i) => i < zooms.length));
+  selectedZoom = pickedZooms.size === 1 ? [...pickedZooms][0] : -1;
   const lane = $('#lane'); lane.replaceChildren();
   zooms.forEach((z, i) => {
     const left = StillTrim.position(z.start, duration) * 100, width = (StillTrim.position(z.end, duration) * 100) - left;
-    lane.append(el('button', { class: i === selectedZoom ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Zoom ${StillTrim.clock(z.start)} to ${StillTrim.clock(z.end)}, ${z.scale}×`,
-      'aria-pressed': String(i === selectedZoom), onclick: () => { selectedZoom = i === selectedZoom ? -1 : i; if (selectedZoom >= 0) jump(z.start + Math.min(0.5, (z.end - z.start) / 2)); renderZooms(); } }));
+    lane.append(el('button', { class: pickedZooms.has(i) ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Zoom ${StillTrim.clock(z.start)} to ${StillTrim.clock(z.end)}, ${z.scale}×. Ctrl-click to pick several.`,
+      'aria-pressed': String(pickedZooms.has(i)), onclick: (e) => { pickZoom(i, e.ctrlKey || e.metaKey || e.shiftKey); if (selectedZoom >= 0) jump(z.start + Math.min(0.5, (z.end - z.start) / 2)); renderZooms(); } }));
   });
-  const z = zooms[selectedZoom];
-  $('#zoomTools').hidden = !z;
+  const z = zooms[selectedZoom], several = pickedZooms.size > 1;
+  $('#zoomTools').hidden = !pickedZooms.size;
+  $$('#zoomTools .one-zoom, #zoomHint').forEach((part) => { part.hidden = several; });
+  $('#zoomRemove').innerHTML = `${icon('trash-2')}${several ? `Remove ${pickedZooms.size} Zooms` : 'Remove'}`; refreshIcons();
+  $('#zoomRemove').title = several ? 'Remove the picked zooms (Delete)' : 'Remove this zoom (Delete)';
   $('#clip').classList.toggle('aiming', !!z);
   if (z) $('#zoomScale').value = String(z.scale);
   $('#autoZoom').disabled = !duration || !clicks().length;
@@ -306,15 +318,15 @@ function renderZooms() {
   $$('#cursorSize, #cursorSmooth, #cursorStyle').forEach((input) => { input.disabled = !cursorFx.show; });
   renderView(); saveProject();
 }
-const changeZoom = (patch) => { zooms = zooms.map((z, i) => (i === selectedZoom ? { ...z, ...patch } : z)).sort((a, b) => a.start - b.start); renderZooms(); };
+const changeZoom = (patch) => { let changed = null; zooms = zooms.map((z, i) => (i === selectedZoom ? (changed = { ...z, ...patch }) : z)).sort((a, b) => a.start - b.start); if (changed) pickZoom(zooms.indexOf(changed), false); renderZooms(); };
 
 $('#addZoom').onclick = () => {
   const time = video.currentTime;
   zooms = StillZoom.add(zooms, time, trim, project.pointer);
-  selectedZoom = zooms.findIndex((z) => z.start <= time && z.end >= time); renderZooms();
+  pickZoom(zooms.findIndex((z) => z.start <= time && z.end >= time), false); renderZooms();
 };
-$('#autoZoom').onclick = () => { zooms = StillZoom.auto(clicks(), trim); selectedZoom = -1; renderZooms(); toast(zooms.length ? `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} added` : 'No clicks in the trimmed part'); };
-$('#zoomRemove').onclick = () => { zooms = zooms.filter((_, i) => i !== selectedZoom); selectedZoom = -1; renderZooms(); };
+$('#autoZoom').onclick = () => { zooms = StillZoom.auto(clicks(), trim); pickZoom(-1, false); renderZooms(); toast(zooms.length ? `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} added` : 'No clicks in the trimmed part'); };
+$('#zoomRemove').onclick = () => { const gone = pickedZooms.size; zooms = zooms.filter((_, i) => !pickedZooms.has(i)); pickZoom(-1, false); renderZooms(); if (gone > 1) toast(`${gone} zooms removed`); };
 $('#zoomScale').onchange = (e) => changeZoom({ scale: Number(e.target.value) });
 $('#zoomIn').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime < z.end - 0.2) changeZoom({ start: video.currentTime }); };
 $('#zoomOut').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime > z.start + 0.2) changeZoom({ end: video.currentTime }); };
@@ -380,7 +392,7 @@ addEventListener('keydown', (e) => {
   else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedZoom >= 0) $('#zoomRemove').click();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedZooms.size) $('#zoomRemove').click();
 });
 
 // ---- Export -------------------------------------------------------------------------------------
