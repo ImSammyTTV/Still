@@ -649,6 +649,23 @@ async function recognize() {
   try { const text = (await still.invoke('editor:ocr', flatten())).trim(); if (!text) return toast('No text found'); await navigator.clipboard.writeText(text); toast('Text copied'); }
   catch (error) { toast(`Text recognition failed: ${error.message}`); }
 }
+// Covers every email address, card number, key, IP address and phone number the text recognition finds with a
+// redact box, as one step that a single undo takes back.
+$('#private').onclick = () => hidePrivate();
+async function hidePrivate() {
+  finishTextEdit(); toast('Looking for private details…');
+  try {
+    const c = document.createElement('canvas'); c.width = image.naturalWidth; c.height = image.naturalHeight;
+    c.getContext('2d').drawImage(image, 0, 0);
+    const found = StillPrivate.boxes(await still.invoke('editor:ocrLines', c.toDataURL('image/png')));
+    const covered = (b) => doc.marks.some((m) => m.type === 'redact' && m.x <= b.x + 1 && m.y <= b.y + 1 && m.x + m.w >= b.x + b.w - 1 && m.y + m.h >= b.y + b.h - 1);
+    const fresh = found.filter((b) => !covered(b));
+    if (!fresh.length) return toast(found.length ? 'Everything private is already hidden' : 'No private details found');
+    for (const b of fresh) doc.marks.push({ type: 'redact', x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h), color, stroke });
+    selected = null; commit(); render();
+    toast(`Hid ${fresh.length} private detail${fresh.length === 1 ? '' : 's'}. Undo brings them back.`);
+  } catch (error) { toast(`Couldn’t look for private details: ${error.message || error}`); }
+}
 dragOut($('#dragMe'), () => { finishTextEdit(); still.send('editor:drag', flatten()); });
 
 // ---- Keyboard -----------------------------------------------------------------------------------

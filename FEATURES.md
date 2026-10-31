@@ -48,6 +48,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Feature | Mac | Windows & Linux |
 |---|---|---|
 | Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, loupe, crop | ✅ | ✅ |
+| Hide Private Info: finds email addresses, card numbers, keys, IP addresses and phone numbers in the picture and covers them, undoable in one step | ☑️ | ✅ checked on a sample picture |
 | Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
 | Solid redaction that survives export | ✅ | ☑️ |
 | Arrow styles (plain, filled, double, curved) and text styles | ☑️ | ☑️ |

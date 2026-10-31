@@ -43,6 +43,7 @@
     'preview:close': () => win.close(),
     'shortcut:label': (accelerator) => StillGeometry.shortcutLabel(accelerator, platform),
     'editor:ocr': (dataUrl) => StillOCR.recognize(dataUrl),
+    'editor:ocrLines': (dataUrl) => StillOCR.lines(dataUrl),
     'pin:move': async (dx, dy) => { const p = await win.outerPosition(); await win.setPosition(new T.dpi.PhysicalPosition(Math.round(p.x + dx * scale), Math.round(p.y + dy * scale))); },
     'pin:resize': async (delta) => { const s = await win.innerSize(); const w = Math.max(80, Math.round(s.width * (1 + delta))); await win.setSize(new T.dpi.PhysicalSize(w, Math.round(w * s.height / s.width))); },
     'pin:opacity': (value) => { document.body.style.opacity = value; },

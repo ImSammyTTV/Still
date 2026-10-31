@@ -223,6 +223,27 @@ final class EditorModel: ObservableObject {
         do { library.export(try flattened(), title: item?.title ?? "Still capture") }
         catch { self.error = error.localizedDescription }
     }
+    /// Covers every email address, card number, key, IP address and phone number found in the picture with a redact
+    /// box, as one step that a single undo takes back.
+    func hidePrivate() {
+        guard !isRecognizing else { return }
+        isRecognizing = true
+        let image = source
+        Task {
+            do {
+                let found = try await Task.detached(priority: .userInitiated) { try PrivateInfo.boxes(in: image) }.value
+                let fresh = found.filter { box in !marks.contains { $0.tool == .redact && $0.rect.insetBy(dx: -1, dy: -1).contains(box) } }
+                if fresh.isEmpty { library.toast(found.isEmpty ? "No private details found" : "Everything private is already hidden") }
+                else {
+                    snapshot()
+                    for box in fresh { marks.append(Mark(tool: .redact, points: [PixelPoint(x: box.minX, y: box.minY), PixelPoint(x: box.maxX, y: box.maxY)], color: color, width: lineWidth)) }
+                    selectedID = nil; dirty = true
+                    library.toast("Hid \(fresh.count) private detail\(fresh.count == 1 ? "" : "s"). Undo brings them back.")
+                }
+            } catch { self.error = "Couldn’t look for private details: \(error.localizedDescription)" }
+            isRecognizing = false
+        }
+    }
     func recognize() {
         guard !isRecognizing else { return }
         isRecognizing = true
