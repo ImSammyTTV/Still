@@ -97,7 +97,7 @@ struct CloudSettingsView: View {
                     let prefs = Preferences.shared
                     let result = try await GoogleDrive.upload(file, title: title, public: prefs.driveAccess == "link", folder: prefs.driveFolder, progress: { [weak self] value in Task { @MainActor in self?.progress = value } })
                     prefs.driveFolder = result.folder
-                    if let item { library.setCloudURL(item, url: result.link) }
+                    if let item { library.setCloudURL(item, url: result.link) }; library.lastLink = result.link.absoluteString
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result.link.absoluteString, forType: .string); library.toast("Uploaded to Google Drive. Link copied to clipboard.")
                     if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?(); return
                 }
@@ -105,7 +105,7 @@ struct CloudSettingsView: View {
                 var options = CloudOptions(title: title); options.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }; options.expiryDays = expiry; options.password = password; options.visibility = visibility; options.maxViews = max(0, Int(views) ?? 0)
                 if let item { options.ocr = item.recognizedText ?? ""; let metadata = library.recordingMetadata(item); options.transcript = metadata.transcript ?? ""; options.captions = metadata.captions ?? "" }
                 let url = try await client.upload(file, options: options, progress: { [weak self] value in Task { @MainActor in self?.progress = value } })
-                if let item { library.setCloudURL(item, url: url) }
+                if let item { library.setCloudURL(item, url: url) }; library.lastLink = url.absoluteString
                 NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string); library.toast("Uploaded. Link copied to clipboard.")
                 if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?()
             } catch is CancellationError { if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?() }

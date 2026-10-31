@@ -4,6 +4,18 @@ const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('-
 const selectionAlpha = (alpha) => { const hex = SELECTION.replace('#', ''); const n = parseInt(hex.length === 3 ? hex.replace(/./g, '$&$&') : hex, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`; };
 const canvas = $('#canvas'), ctx = canvas.getContext('2d');
 const image = new Image();
+image.crossOrigin = 'anonymous'; // So the colour under the crosshair can be read from it.
+// One pixel at a time, for the colour under the crosshair.
+const sampler = document.createElement('canvas'); sampler.width = sampler.height = 1;
+const sample = sampler.getContext('2d', { willReadFrequently: true });
+function colourAt(p) {
+  try {
+    sample.clearRect(0, 0, 1, 1);
+    sample.drawImage(image, Math.floor(p.x * pixelScale), Math.floor(p.y * pixelScale), 1, 1, 0, 0, 1, 1);
+    const [r, g, b] = sample.getImageData(0, 0, 1, 1).data;
+    return G.hexColor(r, g, b);
+  } catch { return null; } // A picture the page may not read: no colour, nothing else lost.
+}
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
 let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
 // The magnifier's zoom steps; the scroll wheel moves between them and the choice is remembered.
@@ -130,6 +142,14 @@ function drawMagnifier() {
   ctx.fillStyle = '#fff'; ctx.fillText(tag, x + size - 8, y + size - 5); ctx.textAlign = 'left';
   ctx.restore();
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; roundRect(x, y, size, size, 10); ctx.stroke();
+  // The colour under the crosshair, ready to copy with C.
+  const hex = colourAt(pointer);
+  if (!hex) return;
+  ctx.font = `500 10px ${getComputedStyle(document.body).getPropertyValue('--mono')}`; ctx.textBaseline = 'middle';
+  const text = `${hex}  C`, width = ctx.measureText(text).width + 26, top = y + size + 6;
+  ctx.fillStyle = 'rgba(0,0,0,.72)'; roundRect(x, top, width, 18, 5); ctx.fill();
+  ctx.fillStyle = hex; ctx.fillRect(x + 5, top + 4, 10, 10); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(x + 5.5, top + 4.5, 9, 9);
+  ctx.fillStyle = '#fff'; ctx.fillText(text, x + 20, top + 9.5);
 }
 
 function drawWindowMode() {
@@ -214,6 +234,11 @@ addEventListener('keydown', (e) => {
   else if (key === 'v') { setWindowMode(false); setPurpose('record'); }
   else if (key === 's' && config.canScroll) { setWindowMode(false); setPurpose('scroll'); }
   else if (key === 't') still.send('overlay:timer', 5);
+  else if (key === 'c' && pointer.x >= 0) {
+    // Copy the colour under the crosshair and keep selecting: grab a few, then capture or press Esc.
+    const hex = colourAt(pointer);
+    if (hex) { still.send('overlay:color', hex); toast(`Copied ${hex}`); }
+  }
   updateBar();
 }, true);
 

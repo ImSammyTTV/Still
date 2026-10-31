@@ -167,7 +167,7 @@ struct MainView: View {
             section("Screenshots") {
                 choice("Image format", selection: $prefs.exportFormat) { Text("PNG").tag("png"); Text("JPEG").tag("jpg"); Text("TIFF").tag("tiff"); Text("HEIC").tag("heic") }
                 TextField("File name", text: $prefs.filenamePattern)
-                Text("Available tokens: {date}, {time}, {width}, {height}").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("Next: \(CaptureNaming.name(pattern: prefs.filenamePattern, width: 1440, height: 900)).\(prefs.exportFormat) · tokens {type} {date} {time} {n} {width} {height}").font(.system(size: 10)).foregroundStyle(.secondary)
                 Toggle("Capture mouse cursor", isOn: $prefs.includeCursor)
             }
             section("Window Screenshots") {

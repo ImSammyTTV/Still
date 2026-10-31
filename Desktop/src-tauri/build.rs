@@ -6,13 +6,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=STILL_GOOGLE_CLIENT_SECRET");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
         "settings_get", "settings_set", "settings_reset", "settings_choose_folder", "shortcuts_pause", "overlay_done",
-        "overlay_cancel", "overlay_fullscreen", "overlay_timer", "overlay_purpose", "overlay_window_mode", "overlay_pointer", "overlay_ready",
+        "overlay_cancel", "overlay_fullscreen", "overlay_timer", "overlay_purpose", "overlay_window_mode", "overlay_pointer", "overlay_color", "overlay_ready",
         "library_list", "library_get", "library_rename", "library_delete", "library_copy", "library_save",
         "library_save_as", "library_reveal", "library_open", "library_play", "library_pin", "library_drag", "editor_save",
         "editor_copy", "editor_export", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
         "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_prepared", "recording_started",
         "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save",
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",
-        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data", "drive_get", "drive_connect", "drive_disconnect", "scroll_stop", "scroll_auto",
+        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data", "qr_svg", "library_qr", "drive_get", "drive_connect", "drive_disconnect", "scroll_stop", "scroll_auto",
     ]))).expect("failed to run tauri-build");
 }

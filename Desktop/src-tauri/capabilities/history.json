@@ -17,6 +17,7 @@
     "allow-library-reveal",
     "allow-library-save",
     "allow-library-save-as",
-    "allow-cloud-upload"
+    "allow-cloud-upload",
+    "allow-library-qr"
   ]
 }

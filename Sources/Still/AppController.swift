@@ -255,6 +255,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: "Scrolling Capture", action: #selector(scrollingCapture), keyEquivalent: "")
         menu.addItem(withTitle: "Capture History", action: #selector(showHistory), keyEquivalent: "")
         menu.addItem(withTitle: "Restore Last Capture", action: #selector(restoreLastCapture), keyEquivalent: "")
+        menu.addItem(withTitle: "Show Last Link as QR Code", action: #selector(showLastLinkQR), keyEquivalent: "")
         menu.addItem(withTitle: "Hide / Show Overlays", action: #selector(toggleOverlays), keyEquivalent: "")
         menu.addItem(withTitle: "Toggle Desktop Icons", action: #selector(toggleDesktop), keyEquivalent: "")
         menu.addItem(withTitle: "Unlock Pinned Screenshots", action: #selector(unlockPins), keyEquivalent: "")
@@ -678,6 +679,10 @@ extension AppController {
         lastExternalApp?.activate()
     }
     private func restoreOverlays() { if !overlaysHidden { for panel in Array(previewPanels.values)+Array(pins.values) { panel.orderFrontRegardless() } } }
+    @objc func showLastLinkQR() {
+        if let link = library.lastLink ?? library.items.first(where: { $0.cloudURL != nil })?.cloudURL { QRCodePanel.show(link) }
+        else { library.toast("Upload a capture first, then its link can be shown as a QR code") }
+    }
     @objc func restoreLastCapture() { if let item = lastPreviewItem ?? library.items.first { showPreview(item) } }
     @objc func showHistory() {
         if let panel = historyPanel { panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }

@@ -22,7 +22,7 @@ let zooms = [], selectedZoom = -1, showClicks = false, bgPicture = null;
 const clicks = () => (Array.isArray(project.clicks) ? project.clicks : []);
 const drawsClicks = () => showClicks && clicks().length > 0;
 // Recordings made with Cursor effects on leave the pointer out of the picture; it's drawn here from the path.
-let cursorFx = { show: true, size: 1, smooth: true };
+let cursorFx = { show: true, size: 1, smooth: true, style: 'arrow' };
 const separateCursor = () => project.cursor === 'separate';
 const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
 const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor();
@@ -200,7 +200,9 @@ function drawOverlays(ctx, t, src, scale, k, ox, oy, vw, vh) {
   if (!p) return;
   // As on the Mac: about a real pointer's size for the recording's width, times the chosen size and the zoom.
   const size = 24 * cursorFx.size * Math.max(0.7, vw / 1920) * scale * k;
-  StillCursor.draw(ctx, ox + (p.x * vw - src.x) * scale * k, oy + (p.y * vh - src.y) * scale * k, size);
+  const x = ox + (p.x * vw - src.x) * scale * k, y = oy + (p.y * vh - src.y) * scale * k;
+  // The Mac's Dot is 44 of its 64-point cursor box: about twice the arrow's height.
+  if (cursorFx.style === 'dot') StillCursor.dot(ctx, x, y, size * 44 / 24); else StillCursor.draw(ctx, x, y, size);
 }
 
 // Rings where the pointer clicked, growing and fading. `k` turns video pixels into the target's pixels.
@@ -278,7 +280,8 @@ function renderZooms() {
   $('#clicksToggle').hidden = !clicks().length; $('#showClicks').checked = showClicks;
   $('#cursorRow').hidden = !separateCursor();
   $('#cursorShow').checked = cursorFx.show; $('#cursorSize').value = String(cursorFx.size); $('#cursorSmooth').checked = cursorFx.smooth;
-  $$('#cursorSize, #cursorSmooth').forEach((input) => { input.disabled = !cursorFx.show; });
+  $('#cursorStyle').value = cursorFx.style === 'dot' ? 'dot' : 'arrow';
+  $$('#cursorSize, #cursorSmooth, #cursorStyle').forEach((input) => { input.disabled = !cursorFx.show; });
   renderView(); saveProject();
 }
 const changeZoom = (patch) => { zooms = zooms.map((z, i) => (i === selectedZoom ? { ...z, ...patch } : z)).sort((a, b) => a.start - b.start); renderZooms(); };
@@ -296,6 +299,7 @@ $('#zoomOut').onclick = () => { const z = zooms[selectedZoom]; if (z && video.cu
 $('#showClicks').onchange = (e) => { showClicks = e.target.checked; renderZooms(); };
 $('#cursorShow').onchange = (e) => { cursorFx = { ...cursorFx, show: e.target.checked }; renderZooms(); };
 $('#cursorSize').onchange = (e) => { cursorFx = { ...cursorFx, size: Number(e.target.value) }; renderZooms(); };
+$('#cursorStyle').onchange = (e) => { cursorFx = { ...cursorFx, style: e.target.value }; renderZooms(); };
 $('#cursorSmooth').onchange = (e) => { cursorFx = { ...cursorFx, smooth: e.target.checked }; renderZooms(); };
 // With a zoom selected, a click on the video picks the point it zooms to, wherever the view is zoomed right now.
 $('#clip').addEventListener('click', (e) => {

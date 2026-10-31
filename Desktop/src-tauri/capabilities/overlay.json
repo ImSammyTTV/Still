@@ -13,6 +13,7 @@
     "allow-overlay-purpose",
     "allow-overlay-window-mode",
     "allow-overlay-pointer",
-    "allow-overlay-ready"
+    "allow-overlay-ready",
+    "allow-overlay-color"
   ]
 }

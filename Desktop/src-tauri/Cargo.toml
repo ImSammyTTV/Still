@@ -1,6 +1,6 @@
 [package]
 name = "still"
-version = "1.2.19"
+version = "1.2.20"
 description = "Capture, annotate and record your screen"
 authors = ["ImSammyTTV"]
 edition = "2021"
@@ -25,6 +25,7 @@ tauri-plugin-single-instance = "=2.5.3"
 drag = "=2.1.1"
 xcap = "=0.9.8"
 rqrr = { version = "=0.11.0", default-features = false }
+qrcode = { version = "=0.14.1", default-features = false }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

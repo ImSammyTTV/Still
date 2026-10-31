@@ -234,13 +234,9 @@ final class Library: ObservableObject {
             catch { toast("Couldn’t save: \(error.localizedDescription)") }
         }
     }
-    func captureName(width: Int, height: Int) -> String {
-        let date = DateFormatter(); date.dateFormat = "yyyy-MM-dd"
-        let time = DateFormatter(); time.dateFormat = "HH.mm.ss"
-        let now = Date()
-        let name = Preferences.shared.filenamePattern.replacingOccurrences(of: "{date}", with: date.string(from: now)).replacingOccurrences(of: "{time}", with: time.string(from: now)).replacingOccurrences(of: "{width}", with: String(width)).replacingOccurrences(of: "{height}", with: String(height))
-        let cleaned = name.components(separatedBy: CharacterSet(charactersIn: "/:\0\n")).joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? "Screenshot \(date.string(from: now)) \(time.string(from: now))" : String(cleaned.prefix(180))
+    func captureName(width: Int, height: Int, isVideo: Bool = false) -> String {
+        let today = items.filter { Calendar.current.isDateInToday($0.date) }.count
+        return CaptureNaming.name(pattern: Preferences.shared.filenamePattern, isVideo: isVideo, width: width, height: height, number: today + 1)
     }
     /// Where saves go unless you choose a folder: Documents/Still, created when first needed.
     static var defaultExportFolder: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Still", isDirectory: true) }
@@ -290,6 +286,11 @@ final class Library: ObservableObject {
     }
     func replaceVideo(_ item: CaptureItem, file: URL) throws {
         try Data(contentsOf: file).write(to: url(item), options: .atomic); forgetThumbnail(item.id); objectWillChange.send()
+    }
+    /// The most recent link an upload produced, for showing it again as a QR code.
+    var lastLink: String? {
+        get { UserDefaults.standard.string(forKey: "lastShareLink") }
+        set { UserDefaults.standard.set(newValue, forKey: "lastShareLink") }
     }
     func setCloudURL(_ item: CaptureItem, url: URL) {
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].cloudURL = url.absoluteString; do { try persist() } catch { toast(error.localizedDescription) } }

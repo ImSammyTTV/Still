@@ -10,7 +10,7 @@
     'settings:chooseFolder': ['settings_choose_folder'], 'shortcuts:pause': ['shortcuts_pause', 'paused'],
     'overlay:done': ['overlay_done', 'payload'], 'overlay:cancel': ['overlay_cancel'], 'overlay:fullscreen': ['overlay_fullscreen', 'displayId'],
     'overlay:timer': ['overlay_timer', 'delay'], 'overlay:purpose': ['overlay_purpose', 'purpose'], 'overlay:windowMode': ['overlay_window_mode', 'on'],
-    'overlay:pointer': ['overlay_pointer'], 'overlay:ready': ['overlay_ready'],
+    'overlay:pointer': ['overlay_pointer'], 'overlay:color': ['overlay_color', 'hex'], 'overlay:ready': ['overlay_ready'],
     'library:list': ['library_list', 'query'], 'library:get': ['library_get', 'id'], 'library:rename': ['library_rename', 'id', 'title'],
     'library:delete': ['library_delete', 'id'], 'library:copy': ['library_copy', 'id'], 'library:save': ['library_save', 'id'],
     'library:saveAs': ['library_save_as', 'id'], 'library:reveal': ['library_reveal', 'id'], 'library:open': ['library_open', 'id'],
@@ -28,7 +28,7 @@
     'recording:tick': ['recording_tick', 'seconds', 'paused'], 'video:target': ['video_export_target', 'ext'], 'video:copy': ['video_export_copy'], 'video:project': ['video_project_save', 'project'],
     'cloud:get': ['cloud_get'], 'cloud:connect': ['cloud_connect', 'endpoint', 'token'], 'cloud:disconnect': ['cloud_disconnect'],
     'drive:get': ['drive_get'], 'drive:connect': ['drive_connect'], 'drive:disconnect': ['drive_disconnect'],
-    'cloud:upload': ['cloud_upload', 'id'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],
+    'cloud:upload': ['cloud_upload', 'id'], 'library:qr': ['library_qr', 'id'], 'qr:svg': ['qr_svg', 'link'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],
     'scroll:stop': ['scroll_stop', 'save'], 'scroll:auto': ['scroll_auto', 'on'],
     'update:status': ['update_status'], 'update:check': ['update_check'], 'update:install': ['update_install']
   };

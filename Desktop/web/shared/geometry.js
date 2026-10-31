@@ -89,5 +89,26 @@
     return Math.round(Math.min(100_000_000, Math.max(400_000, width * height * Math.max(1, fps) * factor)));
   };
 
-  return { videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
+  // A colour as #RRGGBB, and the recent colours list it joins: newest first, no repeats, at most `max`.
+  const hexColor = (r, g, b) => '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+  const rememberColor = (list, color, max = 10) => [color, ...(Array.isArray(list) ? list : []).filter((c) => typeof c === 'string' && c.toUpperCase() !== color.toUpperCase())].slice(0, max);
+  // Black or white, whichever reads better on the colour.
+  const inkOn = (hex) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) > 150 ? '#000000' : '#FFFFFF'; };
+
+  // The name a new capture gets from Settings → Screenshots → File name. The app names files with the same rule
+  // (library.rs `name_from`); this copy shows the preview while you type.
+  const DEFAULT_NAME = '{type} {date} at {time}';
+  const fileName = (pattern, { date = new Date(), kind = 'screenshot', width = 0, height = 0, n = 1 } = {}) => {
+    const two = (v) => String(v).padStart(2, '0');
+    const fill = (p) => p.split('{date}').join(`${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`)
+      .split('{time}').join(`${two(date.getHours())}.${two(date.getMinutes())}.${two(date.getSeconds())}`)
+      .split('{type}').join(kind === 'recording' ? 'Recording' : 'Screenshot')
+      .split('{width}').join(width > 0 ? String(width) : '').split('{height}').join(height > 0 ? String(height) : '')
+      .split('{n}').join(String(n));
+    const clean = (s) => s.replace(/[\\/:*?"<>|\n\r\t]/g, '-').split(/\s+/).filter(Boolean).join(' ');
+    const name = [...clean(fill(String(pattern || '')))].slice(0, 180).join('');
+    return name.replace(/^[-. ]+|[-. ]+$/g, '') ? name : clean(fill(DEFAULT_NAME));
+  };
+
+  return { DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
 });

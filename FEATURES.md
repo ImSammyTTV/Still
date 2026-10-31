@@ -26,6 +26,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Capture the previous area again | ☑️ | ☑️ |
 | Scrolling capture | ☑️ | ☑️ down or sideways, worked out from how you scroll · Auto Scroll stops at the end of the page · off on Wayland |
 | Hide desktop icons while capturing | ☑️ | ☑️ Windows · — Linux |
+| Colour under the crosshair, copied with C and kept as recent colours in the editor | ☑️ | ☑️ |
 | Copy text from the screen (OCR) | ✅ | ✅ English |
 | QR code reading | ☑️ | ☑️ |
 
@@ -37,6 +38,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Copies to the clipboard automatically | ✅ | ✅ |
 | Closes on its own after 15 s, pauses while hovered | ✅ | ☑️ |
 | Drag the capture into another app | ☑️ | ☑️ |
+| File name pattern with {type} {date} {time} {n} {width} {height} and a live preview | ☑️ | ☑️ |
 | Save to an export folder, Save As | ☑️ | ☑️ |
 | Pinned captures (move, resize, opacity, click-through) | ☑️ | ☑️ |
 | Capture History with search, rename, delete | ☑️ | ✅ opens and reopens captures |
@@ -45,7 +47,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, crop | ✅ | ✅ |
+| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, loupe, crop | ✅ | ✅ |
 | Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
 | Solid redaction that survives export | ✅ | ☑️ |
 | Arrow styles (plain, filled, double, curved) and text styles | ☑️ | ☑️ |
@@ -73,7 +75,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
-| Video editor: cursor size and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
+| Video editor: cursor size, style (Arrow or Dot) and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
 | Audio transcription | ☑️ | — |
 
 ## Sharing
@@ -84,6 +86,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
 | Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
 | Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
+| Show a share link as a QR code to open it on a phone (History, and the menu bar / tray for the last link) | ☑️ | ☑️ code checked by reading it back |
 | Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM, Trash with Empty Trash and Delete Forever | ✅ 15 server tests | (same server) |
 
 ## App
@@ -96,12 +99,12 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Settings: appearance, sounds, export folder, after-capture actions, start at login | ☑️ | ☑️ |
 | Setup assistant for the first capture; leaves Settings once finished, reopens from General | ☑️ | ☑️ |
 | Automatic updates | ☑️ check, download, verify, relaunch | ☑️ signed updates, install card, About button |
-| `still://` actions (Mac) / `still --capture=…` (Windows & Linux) | ☑️ | ✅ |
-| Right-click Services for images: Open in Still, Copy Text from Image, Pin Image | ☑️ | — |
+| `still://` actions (Mac) / `still --capture=…`, `--open=`, `--text=`, `--pin=` (Windows & Linux) | ☑️ | ✅ capture actions · ☑️ image files |
+| Right-click Services for images: Open in Still, Copy Text from Image, Pin Image | ☑️ | ☑️ Windows: Open in Still, Copy Text with Still and Pin with Still on PNG and JPEG files · Linux: Still under Open With |
 
 ## Not done yet
 
-- **Windows and Linux:** audio transcription, and cursor styles other than the arrow. Linux can't hide desktop icons.
+- **Windows and Linux:** audio transcription. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the

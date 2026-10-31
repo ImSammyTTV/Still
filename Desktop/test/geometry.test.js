@@ -53,3 +53,21 @@ test('recording qualities match the Mac and stay within bounds', () => {
   assert.equal(G.videoBitrate(1920, 1080, 30, 'bitrate:500'), 1_000_000);
   assert.equal(G.videoBitrate(1920, 1080, 30, 'bitrate:x'), 11_197_440);
 });
+
+test('picked colours are hex, newest first, without repeats, and get readable ink', () => {
+  assert.equal(G.hexColor(255, 128.4, 0), '#FF8000');
+  assert.equal(G.hexColor(-4, 300, 15), '#00FF0F');
+  assert.deepEqual(G.rememberColor(['#111111', '#ff8000', '#222222'], '#FF8000', 3), ['#FF8000', '#111111', '#222222']);
+  assert.deepEqual(G.rememberColor(undefined, '#ABCDEF'), ['#ABCDEF']);
+  assert.equal(G.rememberColor(Array.from({ length: 12 }, (_, i) => `#00000${i % 10}`), '#FFFFFF').length, 10);
+  assert.equal(G.inkOn('#FFFFFF'), '#000000'); assert.equal(G.inkOn('#1D1D1F'), '#FFFFFF');
+});
+
+test('file names follow the pattern, the same way the app names files', () => {
+  const date = new Date(2026, 9, 31, 9, 5, 7);
+  assert.equal(G.fileName(G.DEFAULT_NAME, { date, width: 800, height: 600 }), 'Screenshot 2026-10-31 at 09.05.07');
+  assert.equal(G.fileName('{type} #{n} {width}x{height}', { date, kind: 'recording', n: 12 }), 'Recording #12 x');
+  assert.equal(G.fileName('Bug: {date}/{time}?', { date }), 'Bug- 2026-10-31-09.05.07-');
+  assert.equal(G.fileName(' ... ', { date }), 'Screenshot 2026-10-31 at 09.05.07');
+  assert.equal([...G.fileName('x'.repeat(300), { date })].length, 180);
+});

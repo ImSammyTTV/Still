@@ -95,7 +95,7 @@ Windows downloads are not yet signed with a Windows publisher certificate. Revie
 - **Debian / Ubuntu:** install the `.deb` package.
 - **Fedora / other RPM distributions:** install the `.rpm` package.
 
-Linux builds use Ubuntu 24.04 and need compatible WebKitGTK and desktop screen-sharing libraries. Wayland uses your desktop's sharing portal. If global shortcuts are restricted, bind a desktop shortcut to `still --capture=area`. Other actions include `window`, `fullscreen`, `text`, `record`, `allInOne`, and `history`.
+Linux builds use Ubuntu 24.04 and need compatible WebKitGTK and desktop screen-sharing libraries. Wayland uses your desktop's sharing portal. If global shortcuts are restricted, bind a desktop shortcut to `still --capture=area`. Other actions include `window`, `fullscreen`, `text`, `record`, `allInOne`, and `history`. For an image file, `still --open=FILE` opens it in the editor, `--text=FILE` copies its text and `--pin=FILE` pins it; the Windows installer adds these to the right-click menu of PNG and JPEG files, and on Linux Still is listed under Open With.
 
 </details>
 

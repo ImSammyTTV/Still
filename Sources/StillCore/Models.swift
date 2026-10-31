@@ -9,7 +9,7 @@ public struct PixelPoint: Codable, Equatable {
 }
 
 public enum MarkTool: String, CaseIterable, Codable, Identifiable {
-    case select, arrow, rectangle, filledRectangle, ellipse, line, pen, highlight, text, number, redact, blur, pixelate, spotlight, crop, image
+    case select, arrow, rectangle, filledRectangle, ellipse, line, pen, highlight, text, number, redact, blur, pixelate, spotlight, loupe, crop, image
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -19,6 +19,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .blur: return "Blur"
         case .pixelate: return "Pixelate"
         case .spotlight: return "Spotlight"
+        case .loupe: return "Loupe"
         case .image: return "Add Image"
         case .arrow: return "Arrow"
         case .rectangle: return "Rectangle"
@@ -39,6 +40,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .blur: return "drop.fill"
         case .pixelate: return "square.grid.3x3.fill"
         case .spotlight: return "circle.lefthalf.filled"
+        case .loupe: return "plus.magnifyingglass"
         case .image: return "photo.badge.plus"
         case .arrow: return "arrow.up.right"
         case .rectangle: return "rectangle"
@@ -59,6 +61,7 @@ public enum MarkTool: String, CaseIterable, Codable, Identifiable {
         case .blur: return "u"
         case .pixelate: return "x"
         case .spotlight: return "s"
+        case .loupe: return "m"
         case .image: return "i"
         case .arrow: return "a"
         case .rectangle: return "r"

@@ -39,6 +39,19 @@ const select = (label, path, options, number = false) => {
   return row(label, s);
 };
 
+// How new captures are named, with what the next one will be called right under it as you type.
+const fileNameRow = () => {
+  const preview = el('div', { class: 'hint', style: 'margin:4px 0 0' });
+  const show = (pattern) => {
+    const ext = prefs.imageFormat === 'jpg' ? 'jpg' : 'png';
+    preview.textContent = `Next: ${StillGeometry.fileName(pattern, { width: 1440, height: 900 })}.${ext} · tokens {type} {date} {time} {n} {width} {height}`;
+  };
+  const input = el('input', { type: 'text', class: 'field', value: get('fileName') || StillGeometry.DEFAULT_NAME, 'aria-label': 'File name', style: 'width:260px', spellcheck: 'false',
+    oninput: (e) => show(e.target.value), onchange: (e) => set({ fileName: e.target.value.trim() || StillGeometry.DEFAULT_NAME }) });
+  show(input.value);
+  return el('div', { class: 'row', style: 'flex-wrap:wrap' }, [el('span', {}, 'File name'), el('span', { style: 'display:grid;justify-items:end' }, [input, preview])]);
+};
+
 // High, Balanced, Smaller File, a named preset, or a bitrate you choose. A bitrate is saved as the Mac's
 // "bitrate:N" tag, and presets as the Mac keeps them: a name and megabits, 1 to 100.
 const mbit = (value) => Math.min(100, Math.max(1, Number(value) || 12));
@@ -136,6 +149,7 @@ const pages = {
   ],
   Screenshots: () => [
     group('File', [
+      fileNameRow(),
       select('Format', 'imageFormat', [['png', 'PNG'], ['jpg', 'JPEG']]),
       select('JPEG quality', 'jpegQuality', [[100, 'Maximum'], [90, 'High'], [75, 'Medium'], [60, 'Low']], true)
     ]),
