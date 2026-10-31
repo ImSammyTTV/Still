@@ -20,7 +20,7 @@ pub struct Item {
     #[serde(default)] pub duration: f64,
 }
 
-pub struct Library { dir: PathBuf, pub items: Vec<Item> }
+pub struct Library { dir: PathBuf, pub items: Vec<Item>, /** Settings → Screenshots → File names. */ pub name_pattern: String }
 
 /// A thumbnail lives in its capture's folder, so deleting the capture removes it too.
 const THUMBS: [&str; 2] = ["thumb.jpg", "thumb.png"];
@@ -32,7 +32,30 @@ pub fn capture_name(kind: &str) -> String {
     format!("{} {}", kind, chrono::Local::now().format("%Y-%m-%d at %H.%M.%S"))
 }
 
+/// The pattern a new install starts with: "Screenshot 2026-10-31 at 13.05.22", as on the Mac.
+pub const DEFAULT_NAME: &str = "{type} {date} at {time}";
+
+/// A capture's name from a pattern. Tokens: {date} 2026-10-31, {time} 13.05.22, {type} Screenshot or Recording,
+/// {width} and {height} in pixels (empty when not known yet, as for a recording), {n} its number among today's
+/// captures. Characters no file system accepts become "-", and an empty result falls back to the default.
+pub fn name_from(pattern: &str, kind: &str, now: chrono::DateTime<chrono::Local>, width: u32, height: u32, n: usize) -> String {
+    let size = |v: u32| if v > 0 { v.to_string() } else { String::new() };
+    let fill = |p: &str| p.replace("{date}", &now.format("%Y-%m-%d").to_string()).replace("{time}", &now.format("%H.%M.%S").to_string())
+        .replace("{type}", if kind == "recording" { "Recording" } else { "Screenshot" }).replace("{width}", &size(width)).replace("{height}", &size(height))
+        .replace("{n}", &n.to_string());
+    let clean = |s: String| s.chars().map(|c| if "\\/:*?\"<>|\n\r\t".contains(c) { '-' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    let name: String = clean(fill(pattern)).chars().take(180).collect();
+    if name.trim_matches(['-', ' ', '.']).is_empty() { clean(fill(DEFAULT_NAME)) } else { name }
+}
+
 impl Library {
+    /// The name a new capture gets when nothing else names it.
+    pub fn default_title(&self, kind: &str, width: u32, height: u32) -> String {
+        let now = chrono::Local::now();
+        let today = now.date_naive();
+        let n = 1 + self.items.iter().filter(|i| chrono::DateTime::from_timestamp_millis(i.created).map(|t| t.with_timezone(&chrono::Local).date_naive() == today).unwrap_or(false)).count();
+        name_from(&self.name_pattern, kind, now, width, height, n)
+    }
     pub fn open(dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
         let index = dir.join("library.json");
@@ -45,7 +68,7 @@ impl Library {
                 Err(_) => { let _ = fs::rename(&index, dir.join(format!("library-damaged-{}.json", now_ms()))); rebuild(&dir) }
             },
         };
-        let mut lib = Library { dir, items };
+        let mut lib = Library { dir, items, name_pattern: DEFAULT_NAME.to_string() };
         lib.items.retain(|i| lib_file(&lib.dir, i).exists());
         let _ = lib.save();
         lib
@@ -78,7 +101,7 @@ impl Library {
     pub fn add(&mut self, bytes: &[u8], kind: &str, ext: &str, title: Option<String>, width: u32, height: u32) -> Result<Item, String> {
         let item = Item {
             id: uuid::Uuid::new_v4().to_string(), kind: kind.into(),
-            title: title.unwrap_or_else(|| capture_name(if kind == "recording" { "Still Recording" } else { "Still" })),
+            title: title.unwrap_or_else(|| self.default_title(kind, width, height)),
             file_name: format!("capture.{ext}"), original_name: format!("original.{ext}"),
             created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0,
         };
@@ -149,6 +172,18 @@ fn rebuild(dir: &Path) -> Vec<Item> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_follow_the_file_name_pattern() {
+        use chrono::TimeZone;
+        let now = chrono::Local.with_ymd_and_hms(2026, 10, 31, 9, 5, 7).unwrap();
+        assert_eq!(name_from(DEFAULT_NAME, "screenshot", now, 800, 600, 1), "Screenshot 2026-10-31 at 09.05.07");
+        assert_eq!(name_from("{type} #{n} {width}x{height}", "recording", now, 0, 0, 12), "Recording #12 x");
+        assert_eq!(name_from("Bug: {date}/{time}?", "screenshot", now, 1, 1, 1), "Bug- 2026-10-31-09.05.07-");
+        // Nothing usable left: the default instead of an empty or dot-only name.
+        assert_eq!(name_from(" ... ", "screenshot", now, 1, 1, 1), "Screenshot 2026-10-31 at 09.05.07");
+        assert_eq!(name_from(&"x".repeat(300), "screenshot", now, 1, 1, 1).chars().count(), 180);
+    }
+
     use super::*;
     #[test]
     fn keeps_original_edits_and_project() {

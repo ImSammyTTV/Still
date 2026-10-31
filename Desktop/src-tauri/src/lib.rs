@@ -960,7 +960,13 @@ async fn settings_reset(app: AppHandle, key: String) -> Value {
     after_settings(&app, &json!({ key: true }));
     values
 }
+/// Hands Settings → File names to the library, which names new captures.
+fn apply_name_pattern(app: &AppHandle) {
+    let pattern = setting(app, "fileName").as_str().filter(|p| !p.trim().is_empty()).unwrap_or(library::DEFAULT_NAME).to_string();
+    st(app).library.lock().unwrap().name_pattern = pattern;
+}
 fn after_settings(app: &AppHandle, patch: &Value) {
+    if patch.get("fileName").is_some() { apply_name_pattern(app); }
     if patch.get("shortcuts").is_some() { register_shortcuts(app); }
     if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
     if patch.get("quickAccess").is_some() { layout_previews(app); }
@@ -1794,6 +1800,7 @@ pub fn run() {
                 library: Mutex::new(Library::open(data.join("Library"))),
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
+            apply_name_pattern(&handle);
             let menu = tray_menu(&handle)?;
             TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))

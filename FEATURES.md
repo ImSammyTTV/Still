@@ -38,6 +38,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Copies to the clipboard automatically | ✅ | ✅ |
 | Closes on its own after 15 s, pauses while hovered | ✅ | ☑️ |
 | Drag the capture into another app | ☑️ | ☑️ |
+| File name pattern with {type} {date} {time} {n} {width} {height} and a live preview | ☑️ | ☑️ |
 | Save to an export folder, Save As | ☑️ | ☑️ |
 | Pinned captures (move, resize, opacity, click-through) | ☑️ | ☑️ |
 | Capture History with search, rename, delete | ☑️ | ✅ opens and reopens captures |

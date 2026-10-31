@@ -62,3 +62,12 @@ test('picked colours are hex, newest first, without repeats, and get readable in
   assert.equal(G.rememberColor(Array.from({ length: 12 }, (_, i) => `#00000${i % 10}`), '#FFFFFF').length, 10);
   assert.equal(G.inkOn('#FFFFFF'), '#000000'); assert.equal(G.inkOn('#1D1D1F'), '#FFFFFF');
 });
+
+test('file names follow the pattern, the same way the app names files', () => {
+  const date = new Date(2026, 9, 31, 9, 5, 7);
+  assert.equal(G.fileName(G.DEFAULT_NAME, { date, width: 800, height: 600 }), 'Screenshot 2026-10-31 at 09.05.07');
+  assert.equal(G.fileName('{type} #{n} {width}x{height}', { date, kind: 'recording', n: 12 }), 'Recording #12 x');
+  assert.equal(G.fileName('Bug: {date}/{time}?', { date }), 'Bug- 2026-10-31-09.05.07-');
+  assert.equal(G.fileName(' ... ', { date }), 'Screenshot 2026-10-31 at 09.05.07');
+  assert.equal([...G.fileName('x'.repeat(300), { date })].length, 180);
+});
