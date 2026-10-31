@@ -62,6 +62,8 @@
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane.captions button { background: var(--text); opacity: .4; }
   .lane.blurs button { background: var(--red); opacity: .45; }
+  .lane.callouts button { background: var(--yellow); opacity: .45; }
+  .lane.callouts button.selected { opacity: .95; }
   .lane.blurs button.selected { opacity: .95; }
   .clip.placing { cursor: crosshair; }
   .lane.captions button.selected { opacity: .9; }
@@ -168,6 +170,21 @@
     </span>
   </div>
   <div class="trim-head">
+    <b>Callouts</b>
+    <button class="btn" id="addArrow" title="An arrow from the playhead for 3 seconds (A)" disabled><i data-lucide="move-up-right"></i>Arrow</button>
+    <button class="btn" id="addBox" title="A box from the playhead for 3 seconds" disabled><i data-lucide="square"></i>Box</button>
+    <button class="btn" id="addSpot" title="Dim everything but one part, from the playhead for 3 seconds" disabled><i data-lucide="sun-dim"></i>Spotlight</button>
+    <button class="btn" id="pointClicks" title="An arrow pointing at each click you made while recording" hidden><i data-lucide="mouse-pointer-click"></i>Point at Clicks</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="calloutTools" hidden>
+      <span class="dim" id="calloutHint">Drag on the video to place it.</span>
+      <select class="field" id="calloutColor" aria-label="Colour"><option value="#FF453A">Red</option><option value="#FFD60A">Yellow</option><option value="#32D74B">Green</option><option value="#0A84FF">Blue</option><option value="#FFFFFF">White</option></select>
+      <button class="btn" id="calloutIn" title="Start this callout at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="calloutOut" title="End this callout at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="calloutRemove" title="Remove this callout (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
     <b>Blur</b>
     <button class="btn" id="addBlur" title="Blur part of the video from the playhead (B)" disabled><i data-lucide="eye-off"></i>Add Blur</button>
     <button class="btn" id="findPrivate" title="Read the frame on screen and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds" disabled><i data-lucide="shield-check"></i>Find Private Info</button>
@@ -219,6 +236,7 @@
   <div class="lane" id="lane" aria-label="Zooms"></div>
   <div class="lane captions" id="captionLane" aria-label="Text"></div>
   <div class="lane blurs" id="blurLane" aria-label="Blurs"></div>
+  <div class="lane callouts" id="calloutLane" aria-label="Callouts"></div>
   <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
@@ -260,6 +278,7 @@
 <script src="shared/captions.js"></script>
 <script src="shared/transitions.js"></script>
 <script src="shared/blurs.js"></script>
+<script src="shared/callouts.js"></script>
 <script src="shared/private.js"></script>
 <script src="vendor/ocr/tesseract.min.js"></script>
 <script src="ocr.js"></script>

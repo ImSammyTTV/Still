@@ -120,4 +120,22 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(AudioPauses.duck(1.925, ranges: r), 0.65, accuracy: 1e-9)
         XCTAssertEqual(AudioPauses.duck(4.075, ranges: r), 0.65, accuracy: 1e-9)
     }
+
+    /// The same cases as Desktop/test/callouts.test.js.
+    func testCalloutsStartInTheMiddleAndFade() {
+        let a = VideoCallout.new("arrow", at: 1, start: 0, end: 10)
+        XCTAssertEqual([a.start, a.end, a.x, a.y, a.x2!, a.y2!], [1, 4, 0.5, 0.5, 0.38, 0.36])
+        let b = VideoCallout.new("box", at: 9, start: 0, end: 10)
+        XCTAssertEqual([b.end, b.x, b.w!], [10, 0.35, 0.3])
+        let c = VideoCallout(kind: "box", start: 1, end: 3, color: "FF453A", x: 0, y: 0)
+        XCTAssertNil(c.alpha(at: 0.5)); XCTAssertEqual(c.alpha(at: 1.1)!, 0.5, accuracy: 1e-9); XCTAssertEqual(c.alpha(at: 2), 1)
+    }
+
+    func testAnArrowPointsAtEachClick() {
+        let clicks = [ClickSample(time: 2, x: 0.6, y: 0.5), ClickSample(time: 2.5, x: 0.6, y: 0.5), ClickSample(time: 5, x: 0.1, y: 0.1), ClickSample(time: 30, x: 0.5, y: 0.5)]
+        let arrows = VideoCallout.fromClicks(clicks, start: 0, end: 10)
+        XCTAssertEqual(arrows.count, 2)
+        XCTAssertEqual([arrows[0].start, arrows[0].end, arrows[0].x2!, arrows[0].y2!], [1.6, 3.2, 0.48, 0.38])
+        XCTAssertEqual(arrows[1].x2!, 0.22, accuracy: 1e-9); XCTAssertEqual(arrows[1].y2!, 0.22, accuracy: 1e-9)
+    }
 }

@@ -92,6 +92,8 @@ public struct VideoSettings: Codable, Equatable {
     public var chapters: [VideoChapter]?
     /// Background music; nil for none.
     public var music: VideoMusic?
+    /// Arrows, boxes and spotlights; nil for none.
+    public var callouts: [VideoCallout]?
     public var opening: String?
     public var closing: String?
     /// The stretches of the recording that make the finished video.

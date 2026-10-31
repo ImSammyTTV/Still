@@ -252,3 +252,44 @@ public struct VideoMusic: Codable, Equatable, Hashable {
         self.filename = filename; self.name = name; self.volume = volume; self.duck = duck; self.speech = speech
     }
 }
+
+/// An arrow, a box or a spotlight shown over a video for a stretch of the recording (in its own time). Places are
+/// shares of the video (0 to 1, from the top left); an arrow's tip is (x, y) and its tail (x2, y2). Windows and Linux
+/// follow the same rules (shared/callouts.js) and share the test cases.
+public struct VideoCallout: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var kind: String
+    public var start: Double
+    public var end: Double
+    public var color: String
+    public var x: Double, y: Double
+    public var x2: Double?, y2: Double?
+    public var w: Double?, h: Double?
+    public static let kinds = ["arrow", "box", "spotlight"]
+    public static let colors = ["FF453A", "FFD60A", "32D74B", "0A84FF", "FFFFFF"]
+
+    /// A new callout at `time`, three seconds long, in the middle until it's placed somewhere else.
+    public static func new(_ kind: String, at time: Double, start: Double, end: Double) -> VideoCallout {
+        kind == "arrow"
+            ? VideoCallout(kind: kind, start: max(start, time), end: min(end, time + 3), color: colors[0], x: 0.5, y: 0.5, x2: 0.38, y2: 0.36)
+            : VideoCallout(kind: kind, start: max(start, time), end: min(end, time + 3), color: colors[0], x: 0.35, y: 0.35, w: 0.3, h: 0.3)
+    }
+    /// How opaque it is at `time` (0 to 1), or nil when it isn't showing; it fades in and out over 0.2 s.
+    public func alpha(at time: Double) -> Double? {
+        guard time >= start, time <= end else { return nil }
+        let ramp = min(0.2, (end - start) / 3)
+        return ramp > 0 ? min(1, (time - start) / ramp, (end - time) / ramp) : 1
+    }
+    /// An arrow for each recorded click inside the clip: from 0.4 s before it to 1.2 s after, its tail up and to the
+    /// left (or wherever there's room). Clicks within a second of the last are skipped.
+    public static func fromClicks(_ clicks: [ClickSample], start: Double, end: Double) -> [VideoCallout] {
+        var out: [VideoCallout] = [], last = -Double.infinity
+        let clamp = { (v: Double) in min(1, max(0, v)) }
+        for click in clicks where click.time >= start && click.time <= end && click.time - last >= 1 {
+            last = click.time
+            let dx = click.x > 0.2 ? -0.12 : 0.12, dy = click.y > 0.2 ? -0.12 : 0.12
+            out.append(VideoCallout(kind: "arrow", start: max(start, click.time - 0.4), end: min(end, click.time + 1.2), color: colors[0], x: clamp(click.x), y: clamp(click.y), x2: clamp(click.x + dx), y2: clamp(click.y + dy)))
+        }
+        return out
+    }
+}

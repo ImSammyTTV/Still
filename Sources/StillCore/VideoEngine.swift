@@ -289,6 +289,31 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
                 result = overlay.composited(over: result)
             }
         }
+        // Callouts: arrows, boxes and spotlights on the recording's picture, so they follow it through zooms.
+        let showing = (s.callouts ?? []).compactMap { c in c.alpha(at: time).map { (c, $0) } }
+        if !showing.isEmpty, let ctx = CGContext(data: nil, width: Int(i.size.width), height: Int(i.size.height), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            let unit = max(1, min(contentSize.width, contentSize.height)/360)*min(2, zoom)
+            ctx.setLineCap(.round); ctx.setLineJoin(.round)
+            for (c, alpha) in showing {
+                ctx.saveGState(); ctx.setAlpha(alpha)
+                let color = NSColor(hex: c.color).cgColor
+                ctx.setStrokeColor(color); ctx.setFillColor(color); ctx.setShadow(offset: .zero, blur: 4*unit, color: NSColor.black.withAlphaComponent(0.45).cgColor)
+                if c.kind == "arrow", let x2 = c.x2, let y2 = c.y2 {
+                    let tip = mapPoint(c.x, c.y), tail = mapPoint(x2, y2), angle = atan2(tip.y-tail.y, tip.x-tail.x), size = 16*unit
+                    ctx.setLineWidth(5*unit); ctx.move(to: tail); ctx.addLine(to: tip); ctx.strokePath()
+                    ctx.move(to: CGPoint(x: tip.x-size*cos(angle-0.5), y: tip.y-size*sin(angle-0.5))); ctx.addLine(to: tip); ctx.addLine(to: CGPoint(x: tip.x-size*cos(angle+0.5), y: tip.y-size*sin(angle+0.5))); ctx.closePath(); ctx.fillPath()
+                } else if let w = c.w, let h = c.h {
+                    let a = mapPoint(c.x, c.y), b = mapPoint(c.x+w, c.y+h)
+                    let box = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x-a.x), height: abs(b.y-a.y))
+                    if c.kind == "spotlight" {
+                        ctx.setShadow(offset: .zero, blur: 0, color: nil); ctx.setFillColor(NSColor.black.withAlphaComponent(0.6).cgColor)
+                        ctx.addRect(contentRect); ctx.addPath(CGPath(roundedRect: box, cornerWidth: 10*unit, cornerHeight: 10*unit, transform: nil)); ctx.fillPath(using: .evenOdd)
+                    } else { ctx.setLineWidth(4*unit); ctx.addPath(CGPath(roundedRect: box, cornerWidth: 8*unit, cornerHeight: 8*unit, transform: nil)); ctx.strokePath() }
+                }
+                ctx.restoreGState()
+            }
+            if let image = ctx.makeImage() { result = CIImage(cgImage: image).cropped(to: contentRect).composited(over: result) }
+        }
         // Captions sit over the video area, steady through zooms.
         for caption in s.captions ?? [] {
             guard let alpha = caption.alpha(at: time) else { continue }

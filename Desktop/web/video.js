@@ -40,12 +40,14 @@ let music = null;
 const musicPlayer = new Audio();
 // Chapter markers, and the one being edited.
 let chapters = [], selectedChapter = -1;
+// Arrows, boxes and spotlights shown for a stretch, and the one being edited.
+let callouts = [], selectedCallout = -1;
 // Parts of the picture blurred for a stretch, and the one being edited.
 let blurs = [], selectedBlur = -1;
 // How the video opens and closes: 'none', 'fade' or 'rise'.
 let opening = 'none', closing = 'none';
 const ends = (t) => StillTransitions.at(t, trim, opening, closing);
-const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing) || blurs.length > 0 || !!music;
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing) || blurs.length > 0 || !!music || callouts.length > 0;
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -178,7 +180,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, music, chapters: chapters.length ? chapters : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, music, callouts: callouts.length ? callouts : null, chapters: chapters.length ? chapters : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -262,6 +264,7 @@ function renderView() {
   const fx = $('#fx'), ctx = fx.getContext('2d');
   ctx.clearRect(0, 0, fx.width, fx.height);
   drawBlurs(ctx, video, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
+  drawCallouts(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   drawOverlays(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   if (selectedBlur >= 0 && blurs[selectedBlur]) { const b = blurs[selectedBlur], k = fx.width / vw; ctx.save(); ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.strokeRect((b.x * vw - src.x) * z.scale * k, (b.y * vh - src.y) * z.scale * k, b.w * vw * z.scale * k, b.h * vh * z.scale * k); ctx.restore(); }
 }
@@ -279,6 +282,28 @@ function drawBlurs(ctx, media, t, src, scale, k, ox, oy, vw, vh) {
     b2.drawImage(media, sx, sy, sw, sh, 0, 0, blurCanvas.width, blurCanvas.height);
     ctx.save(); ctx.beginPath(); ctx.roundRect(dx, dy, dw, dh, Math.min(dw, dh) * 0.12); ctx.clip();
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(blurCanvas, dx, dy, dw, dh);
+    ctx.restore();
+  }
+}
+
+// Callouts: arrows, boxes and spotlights, placed on the recording's picture so they follow it through zooms.
+function drawCallouts(ctx, t, src, scale, k, ox, oy, vw, vh) {
+  const px = (x, y) => ({ x: ox + (x * vw - src.x) * scale * k, y: oy + (y * vh - src.y) * scale * k });
+  const unit = Math.max(1, Math.min(vw, vh) / 360) * k * Math.min(2, scale);
+  for (const { callout: c, alpha } of StillCallouts.at(callouts, t)) {
+    ctx.save(); ctx.globalAlpha = Math.max(0, alpha); ctx.strokeStyle = c.color; ctx.fillStyle = c.color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 4 * unit;
+    if (c.kind === 'arrow') {
+      const tip = px(c.x, c.y), tail = px(c.x2, c.y2), [l, r] = StillCallouts.head(tail, tip, 16 * unit);
+      ctx.lineWidth = 5 * unit; ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(tip.x, tip.y); ctx.lineTo(r.x, r.y); ctx.closePath(); ctx.fill();
+    } else {
+      const a = px(c.x, c.y), b = px(c.x + c.w, c.y + c.h);
+      if (c.kind === 'spotlight') {
+        ctx.shadowColor = 'transparent'; ctx.fillStyle = 'rgba(0,0,0,.6)';
+        ctx.beginPath(); ctx.rect(ox, oy, vw * k, vh * k); ctx.roundRect(a.x, a.y, b.x - a.x, b.y - a.y, 10 * unit); ctx.fill('evenodd');
+      } else { ctx.lineWidth = 4 * unit; ctx.beginPath(); ctx.roundRect(a.x, a.y, b.x - a.x, b.y - a.y, 8 * unit); ctx.stroke(); }
+    }
     ctx.restore();
   }
 }
@@ -356,6 +381,7 @@ function drawFrame(ctx, player, F) {
   ctx.globalAlpha = e.level;
   ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
   drawBlurs(ctx, player, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
+  drawCallouts(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
@@ -430,6 +456,56 @@ $('#copyChapters').onclick = async () => {
   catch { toast('Couldn’t copy the chapters'); }
 };
 
+// ---- Callouts -----------------------------------------------------------------------------------
+
+function renderCallouts(save = true) {
+  if (selectedCallout >= callouts.length) selectedCallout = -1;
+  const lane = $('#calloutLane'); lane.replaceChildren();
+  callouts.forEach((c, i) => {
+    const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
+    lane.append(el('button', { class: i === selectedCallout ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `${c.kind[0].toUpperCase()}${c.kind.slice(1)} ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}`, 'aria-pressed': String(i === selectedCallout),
+      onclick: () => { pickCallout(i === selectedCallout ? -1 : i); if (selectedCallout >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); } }));
+  });
+  const c = callouts[selectedCallout];
+  $('#calloutTools').hidden = !c;
+  if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag on the video from the tail to the tip.' : 'Drag on the video to place it.'; }
+  $('#pointClicks').hidden = !clicks().length;
+  $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
+  renderView(); if (save) saveProject();
+}
+function pickCallout(i) { selectedCallout = i; if (i >= 0) { selectedBlur = -1; pickZoom(-1, false); renderZooms(); renderBlurs(); } renderCallouts(); }
+const changeCallout = (patch) => { let changed = null; callouts = callouts.map((c, i) => (i === selectedCallout ? (changed = { ...c, ...patch }) : c)).sort((a, b) => a.start - b.start); if (changed) selectedCallout = callouts.indexOf(changed); renderCallouts(); };
+for (const [button, kind] of [['#addArrow', 'arrow'], ['#addBox', 'box'], ['#addSpot', 'spotlight']]) {
+  $(button).onclick = () => { const before = new Set(callouts); callouts = StillCallouts.add(callouts, kind, video.currentTime, trim); pickCallout(callouts.findIndex((c) => !before.has(c))); toast(kind === 'arrow' ? 'Drag on the video from where the arrow starts to what it points at' : 'Drag on the video to place it'); };
+}
+$('#pointClicks').onclick = () => {
+  const found = StillCallouts.fromClicks(clicks(), trim);
+  if (!found.length) return toast('No clicks in the part you keep');
+  callouts = [...callouts, ...found].sort((a, b) => a.start - b.start); pickCallout(-1);
+  toast(`${found.length} arrow${found.length === 1 ? '' : 's'} added, one for each click`);
+};
+$('#calloutColor').onchange = (e) => changeCallout({ color: e.target.value });
+$('#calloutIn').onclick = () => { const c = callouts[selectedCallout]; if (c && video.currentTime < c.end - 0.2) changeCallout({ start: video.currentTime }); };
+$('#calloutOut').onclick = () => { const c = callouts[selectedCallout]; if (c && video.currentTime > c.start + 0.2) changeCallout({ end: video.currentTime }); };
+$('#calloutRemove').onclick = () => { callouts = callouts.filter((_, i) => i !== selectedCallout); selectedCallout = -1; renderCallouts(); };
+// With a callout picked, dragging on the video places it: an arrow from its tail to its tip, a box or spotlight
+// across the drag.
+$('#clip').addEventListener('pointerdown', (down) => {
+  if (selectedCallout < 0 || down.button !== 0) return;
+  down.preventDefault(); down.stopPropagation();
+  const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
+  const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
+  const share = (e) => ({ x: Math.min(1, Math.max(0, (src.x + (e.clientX - r.left) / r.width * src.w) / vw)), y: Math.min(1, Math.max(0, (src.y + (e.clientY - r.top) / r.height * src.h) / vh)) });
+  const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
+  const move = (e) => {
+    const to = share(e), c = callouts[selectedCallout];
+    callouts[selectedCallout] = c.kind === 'arrow' ? { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y } : { ...c, ...StillBlurs.fromDrag(from, to) };
+    renderView();
+  };
+  const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderCallouts(); };
+  clip.addEventListener('pointermove', move); clip.addEventListener('pointerup', up);
+}, true);
+
 // ---- Blur ---------------------------------------------------------------------------------------
 
 function renderBlurs() {
@@ -438,10 +514,10 @@ function renderBlurs() {
   blurs.forEach((b, i) => {
     const left = StillTrim.position(b.start, duration) * 100, width = StillTrim.position(b.end, duration) * 100 - left;
     lane.append(el('button', { class: i === selectedBlur ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Blur ${StillTrim.clock(b.start)} to ${StillTrim.clock(b.end)}`, 'aria-pressed': String(i === selectedBlur),
-      onclick: () => { selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }));
+      onclick: () => { selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { selectedCallout = -1; renderCallouts(false); pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }));
   });
   $('#blurTools').hidden = selectedBlur < 0;
-  $('#clip').classList.toggle('placing', selectedBlur >= 0);
+  $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
   renderView(); saveProject();
 }
 const changeBlur = (patch) => { let changed = null; blurs = blurs.map((b, i) => (i === selectedBlur ? (changed = { ...b, ...patch }) : b)).sort((a, b) => a.start - b.start); if (changed) selectedBlur = blurs.indexOf(changed); renderBlurs(); };
@@ -554,7 +630,7 @@ $('#cursorStyle').onchange = (e) => { cursorFx = { ...cursorFx, style: e.target.
 $('#cursorSmooth').onchange = (e) => { cursorFx = { ...cursorFx, smooth: e.target.checked }; renderZooms(); };
 // With a zoom selected, a click on the video picks the point it zooms to, wherever the view is zoomed right now.
 $('#clip').addEventListener('click', (e) => {
-  if (selectedZoom < 0 || selectedBlur >= 0) return;
+  if (selectedZoom < 0 || selectedBlur >= 0 || selectedCallout >= 0) return;
   e.stopPropagation();
   const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
   const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
@@ -610,6 +686,8 @@ addEventListener('keydown', (e) => {
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
   else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCallout >= 0) $('#calloutRemove').click();
+  else if ((e.key === 'a' || e.key === 'A') && !$('#addArrow').disabled) $('#addArrow').click();
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedChapter >= 0) $('#chapterRemove').click();
   else if ((e.key === 'm' || e.key === 'M') && !$('#addChapter').disabled) { e.preventDefault(); $('#addChapter').click(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlur >= 0) $('#blurRemove').click();
@@ -867,6 +945,8 @@ async function open() {
   captions = (Array.isArray(project.captions) ? project.captions : []).filter((c) => c && c.end > c.start && typeof c.text === 'string');
   music = project.music && typeof project.music.path === 'string' ? { name: String(project.music.name || 'Music'), path: project.music.path, volume: Math.min(1, Math.max(0, Number(project.music.volume) || 0.3)), duck: project.music.duck !== false, speech: Array.isArray(project.music.speech) ? project.music.speech : [] } : null;
   await loadMusic(); renderMusic(false);
+  callouts = (Array.isArray(project.callouts) ? project.callouts : []).filter((c) => c && StillCallouts.KINDS.includes(c.kind) && c.end > c.start);
+  renderCallouts(false);
   chapters = (Array.isArray(project.chapters) ? project.chapters : []).filter((c) => c && Number.isFinite(c.time)).map((c) => ({ time: c.time, title: String(c.title || 'Chapter') })).sort((a, b) => a.time - b.time);
   renderChapters(false);
   blurs = (Array.isArray(project.blurs) ? project.blurs : []).filter((b) => b && b.end > b.start).map((b) => ({ start: b.start, end: b.end, ...StillBlurs.fit(b) }));
@@ -877,7 +957,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

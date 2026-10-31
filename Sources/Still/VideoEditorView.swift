@@ -281,7 +281,7 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Callouts", "arrow.up.right.circle"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
@@ -364,6 +364,27 @@ struct VideoEditorView: View {
                 Button("Remove Music", role: .destructive) { model.settings.music = nil }
             }
             Text("Music plays under the whole video, looping if it’s shorter, and dips whenever someone speaks so the voice stays clear.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        case "Callouts":
+            HStack {
+                ForEach([("Arrow", "arrow"), ("Box", "box"), ("Spotlight", "spotlight")], id: \.1) { title, kind in
+                    Button(title) { var list = model.settings.callouts ?? []; list.append(VideoCallout.new(kind, at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.callouts = list.sorted { $0.start < $1.start } }
+                }
+                if !model.metadata.clicks.isEmpty { Button("Point at Clicks") { let found = VideoCallout.fromClicks(model.metadata.clicks, start: model.settings.start, end: model.settings.end); model.settings.callouts = ((model.settings.callouts ?? []) + found).sorted { $0.start < $1.start }; model.library.toast("\(found.count) arrow\(found.count == 1 ? "" : "s") added, one for each click") } }
+            }
+            ForEach(Binding(get: { model.settings.callouts ?? [] }, set: { model.settings.callouts = $0.isEmpty ? nil : $0 })) { $callout in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text(callout.kind.capitalized).fontWeight(.medium)
+                        Picker("Colour", selection: $callout.color) { ForEach(VideoCallout.colors, id: \.self) { hex in Text(["FF453A": "Red", "FFD60A": "Yellow", "32D74B": "Green", "0A84FF": "Blue", "FFFFFF": "White"][hex] ?? hex).tag(hex) } }.labelsHidden().fixedSize()
+                        Spacer(); Button { model.settings.callouts?.removeAll { $0.id == callout.id }; if model.settings.callouts?.isEmpty == true { model.settings.callouts = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove callout")
+                    }
+                    HStack { TextField("Start", value: $callout.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $callout.end, format: .number.precision(.fractionLength(2))) }
+                    HStack { Text(callout.kind == "arrow" ? "Tip X" : "X"); Slider(value: $callout.x, in: 0...1); Text("Y"); Slider(value: $callout.y, in: 0...1) }
+                    if callout.kind == "arrow" { HStack { Text("Tail X"); Slider(value: Binding(get: { callout.x2 ?? 0.38 }, set: { callout.x2 = $0 }), in: 0...1); Text("Y"); Slider(value: Binding(get: { callout.y2 ?? 0.36 }, set: { callout.y2 = $0 }), in: 0...1) } }
+                    else { HStack { Text("W"); Slider(value: Binding(get: { callout.w ?? 0.3 }, set: { callout.w = $0 }), in: 0.02...1); Text("H"); Slider(value: Binding(get: { callout.h ?? 0.3 }, set: { callout.h = $0 }), in: 0.02...1) } }
+                }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.callouts ?? []).isEmpty { Text("Point things out: an arrow, a box, or a spotlight that dims everything else. Point at Clicks adds an arrow for each click you made while recording.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
