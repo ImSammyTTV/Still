@@ -6,7 +6,7 @@
 use crate::{build_tray_menu, capture, complete_image, desktop, hide_floating, notify, st, Grab};
 use image::RgbaImage;
 use serde_json::json;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
@@ -235,6 +235,10 @@ impl Scroller {
         if down.0.is_ok() || across.0.is_ok() { Ok(()) } else { down.0 }
     }
 
+    /// Whether the capture has settled on sideways.
+    pub fn sideways(&self) -> bool { self.down.is_none() }
+    /// Changes whenever a frame grows the picture or moves within it, and only then.
+    fn progress(&self) -> (u32, u32, i64) { let (w, h) = self.dimensions(); (w, h, self.active().position) }
     fn active(&self) -> &Stitcher { self.down.as_ref().or(self.across.as_ref()).expect("one way is always kept") }
     pub fn frames(&self) -> u32 { self.active().frames }
     /// The picture's size as it will be saved.
@@ -275,15 +279,43 @@ pub fn place_controls(area: Rect, bounds: Rect, size: (f64, f64), gap: f64) -> (
 const TICK: Duration = Duration::from_millis(600);
 const CONTROLS: (f64, f64) = (536.0, 68.0);
 const SCROLLING: &str = "Scroll slowly inside the area, down or sideways, then click Done.";
+const AUTO: &str = "Scrolling for you. Click Stop Auto to take over, or Done.";
+const END: &str = "Reached the end of the page. Click Done to keep it.";
+/// Grabs in a row with nothing new before Auto Scroll decides the page has ended.
+const END_AFTER: u32 = 3;
+
+/// What Auto Scroll does after a grab.
+#[derive(Debug, PartialEq)]
+enum Next { Turn { aim: bool }, End, Fail }
+
+/// Auto Scroll's memory between grabs: whether the pointer is over the page yet, and how many grabs in a row
+/// brought nothing new.
+#[derive(Default)]
+struct Autoscroll { aimed: bool, idle: u32 }
+
+impl Autoscroll {
+    /// `moved` is whether the grab grew the picture or moved in it; `ok` is whether it could be stitched.
+    fn next(&mut self, moved: bool, ok: bool) -> Next {
+        if !ok { return Next::Fail; }
+        // The first idle grab is the one taken before the wheel has turned at all.
+        self.idle = if moved { 0 } else { self.idle + 1 };
+        if self.idle > END_AFTER { return Next::End; }
+        let aim = !self.aimed;
+        self.aimed = true;
+        Next::Turn { aim }
+    }
+}
 const RUNNING: u8 = 0;
 const DONE: u8 = 1;
 const CANCELLED: u8 = 2;
 
-/// Tells the capture loop to stop. Only the first request counts.
+/// Tells the capture loop to stop, and whether Still is turning the wheel itself. Only the first stop counts.
 #[derive(Default)]
-pub struct Control(AtomicU8);
+pub struct Control(AtomicU8, AtomicBool);
 impl Control {
     fn request(&self, state: u8) { let _ = self.0.compare_exchange(RUNNING, state, Ordering::SeqCst, Ordering::SeqCst); }
+    fn auto(&self) -> bool { self.1.load(Ordering::SeqCst) }
+    fn set_auto(&self, on: bool) { self.1.store(on, Ordering::SeqCst); }
     /// Sleeps until the next grab is due or a stop is requested, and says which.
     fn wait(&self, time: Duration) -> u8 {
         let start = Instant::now();
@@ -308,6 +340,48 @@ pub fn stop(app: &AppHandle, save: bool) {
 
 #[tauri::command]
 pub async fn scroll_stop(app: AppHandle, save: bool) { stop(&app, save); }
+
+/// Auto Scroll: Still turns the mouse wheel over the area between grabs, as the Mac app does.
+#[tauri::command]
+pub async fn scroll_auto(app: AppHandle, on: bool) {
+    if let Some(control) = st(&app).session.lock().unwrap().scroll.as_ref() { control.set_auto(on); }
+}
+
+/// One turn of the wheel over the page: about two notches, down, or right once the capture has gone sideways.
+/// `aim` first puts the pointer in the middle of the area, since the wheel scrolls whatever is under it.
+mod wheel {
+    #[cfg(windows)]
+    pub fn turn(x: i32, y: i32, sideways: bool, aim: bool) -> Result<(), String> {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_WHEEL, MOUSEINPUT};
+        use windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos;
+        if aim && unsafe { SetCursorPos(x, y) } == 0 { return Err("Still couldn’t move the pointer onto the page.".into()); }
+        // A notch is 120. The wheel scrolls down with negative amounts and right with positive ones.
+        let mi = MOUSEINPUT { dx: 0, dy: 0, mouseData: if sideways { 240 } else { (-240i32) as u32 }, dwFlags: if sideways { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL }, time: 0, dwExtraInfo: 0 };
+        let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi } };
+        if unsafe { SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) } == 1 { Ok(()) } else { Err("Windows didn’t take the scroll. Scroll by hand, then click Done.".into()) }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn turn(x: i32, y: i32, sideways: bool, aim: bool) -> Result<(), String> {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::{ConnectionExt as _, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT};
+        use x11rb::protocol::xtest::ConnectionExt as _;
+        let failed = |e: &dyn std::fmt::Display| format!("Still couldn’t scroll for you ({e}). Scroll by hand, then click Done.");
+        let (conn, screen) = x11rb::connect(None).map_err(|e| failed(&e))?;
+        let root = conn.setup().roots.get(screen).ok_or_else(|| failed(&"no screen"))?.root;
+        if aim { conn.warp_pointer(x11rb::NONE, root, 0, 0, 0, 0, x as i16, y as i16).map_err(|e| failed(&e))?; }
+        // X11 scrolls with buttons: 5 is down, 7 is right.
+        let button = if sideways { 7 } else { 5 };
+        for _ in 0..2 {
+            conn.xtest_fake_input(BUTTON_PRESS_EVENT, button, 0, root, 0, 0, 0).map_err(|e| failed(&e))?;
+            conn.xtest_fake_input(BUTTON_RELEASE_EVENT, button, 0, root, 0, 0, 0).map_err(|e| failed(&e))?;
+        }
+        conn.flush().map_err(|e| failed(&e))
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    pub fn turn(_: i32, _: i32, _: bool, _: bool) -> Result<(), String> { Err("Auto Scroll is only on Windows and Linux here.".into()) }
+}
 
 /// Starts from the frozen selection: `grab` holds the first frame, and the rectangle is in its pixels.
 pub fn start(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64) {
@@ -338,18 +412,29 @@ pub fn start(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64) {
     let _ = window.show();
     build_tray_menu(app);
     let (app, display) = (app.clone(), grab.id);
-    std::thread::spawn(move || run(app, control, display, area, first, icons));
+    let middle = ((grab.x as f64 + area.x + area.w / 2.0) as i32, (grab.y as f64 + area.y + area.h / 2.0) as i32);
+    std::thread::spawn(move || run(app, control, display, area, middle, first, icons));
 }
 
-fn run(app: AppHandle, control: Arc<Control>, display: u32, area: Rect, first: RgbaImage, icons: Option<desktop::Hidden>) {
+fn run(app: AppHandle, control: Arc<Control>, display: u32, area: Rect, middle: (i32, i32), first: RgbaImage, icons: Option<desktop::Hidden>) {
     let mut stitcher = Scroller::new(first);
+    let mut auto = Autoscroll::default();
     let save = loop {
         let state = control.wait(TICK);
         if state == CANCELLED { break false; }
         // Done takes one last grab, so a scroll made just before clicking still counts.
+        let before = stitcher.progress();
         let grabbed = capture::grab_display(display).map(|g| capture::crop(&g.image, area.x, area.y, area.w, area.h));
         let result = grabbed.and_then(|frame| stitcher.append(frame).map_err(|e| e.message().to_string()));
-        report(&app, &stitcher, result.as_ref().err().map(String::as_str).unwrap_or(SCROLLING));
+        let mut message = result.as_ref().err().cloned().unwrap_or_else(|| (if control.auto() { AUTO } else { SCROLLING }).to_string());
+        if control.auto() && state == RUNNING {
+            match auto.next(stitcher.progress() != before, result.is_ok()) {
+                Next::Turn { aim } => if let Err(e) = wheel::turn(middle.0, middle.1, stitcher.sideways(), aim) { control.set_auto(false); message = e; },
+                Next::End => { control.set_auto(false); message = END.to_string(); }
+                Next::Fail => control.set_auto(false), // The stitching error is already the message.
+            }
+        } else { auto = Autoscroll::default(); }
+        report(&app, &stitcher, &message, control.auto());
         if state == DONE { break true; }
     };
     drop(icons);
@@ -357,9 +442,9 @@ fn run(app: AppHandle, control: Arc<Control>, display: u32, area: Rect, first: R
     if save { complete_image(&app, stitcher.into_image(), false); }
 }
 
-fn report(app: &AppHandle, stitcher: &Scroller, message: &str) {
+fn report(app: &AppHandle, stitcher: &Scroller, message: &str, auto: bool) {
     let (w, h) = stitcher.dimensions();
-    let _ = app.emit_to("scroll", "scroll:status", json!({ "frames": stitcher.frames(), "width": w, "height": h, "message": message }));
+    let _ = app.emit_to("scroll", "scroll:status", json!({ "frames": stitcher.frames(), "width": w, "height": h, "message": message, "auto": auto }));
 }
 
 fn finish(app: &AppHandle) {
@@ -537,6 +622,17 @@ mod tests {
         let screen = Rect { x: 0.0, y: 0.0, w: 300.0, h: 600.0 };
         let ((x, _), _) = place_controls(Rect { x: 10.0, y: 10.0, w: 100.0, h: 100.0 }, screen, (488.0, 68.0), 12.0);
         assert_eq!(x, 12.0);
+    }
+    #[test]
+    fn auto_scroll_aims_once_and_stops_at_the_end_of_the_page() {
+        let mut auto = Autoscroll::default();
+        assert_eq!(auto.next(false, true), Next::Turn { aim: true }); // Before the wheel has turned.
+        assert_eq!(auto.next(true, true), Next::Turn { aim: false });
+        assert_eq!(auto.next(false, true), Next::Turn { aim: false }); // A slow page, once.
+        assert_eq!(auto.next(true, true), Next::Turn { aim: false });
+        for _ in 0..END_AFTER { assert_eq!(auto.next(false, true), Next::Turn { aim: false }); }
+        assert_eq!(auto.next(false, true), Next::End);
+        assert_eq!(Autoscroll::default().next(true, false), Next::Fail);
     }
     #[test]
     fn only_the_first_stop_counts() {

@@ -1784,7 +1784,7 @@ pub fn run() {
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save,
             update_status, update_check, update_install,
-            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop
+            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop, scroll::scroll_auto
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")

@@ -24,7 +24,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Arrow-key nudging and resizing of the selection | ☑️ | ☑️ |
 | Escape cancels and Enter confirms, even when another app had focus | ✅ keyboard policy tested | ☑️ Windows takes focus for the overlay; Escape works without it |
 | Capture the previous area again | ☑️ | ☑️ |
-| Scrolling capture | ☑️ | ☑️ down or sideways, worked out from how you scroll · no auto-scroll · off on Wayland |
+| Scrolling capture | ☑️ | ☑️ down or sideways, worked out from how you scroll · Auto Scroll stops at the end of the page · off on Wayland |
 | Hide desktop icons while capturing | ☑️ | ☑️ Windows · — Linux |
 | Copy text from the screen (OCR) | ✅ | ✅ English |
 | QR code reading | ☑️ | ☑️ |
@@ -101,8 +101,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** video editor cursor effects, named bitrate presets, audio transcription, and auto-scrolling
-  capture. Linux can't hide desktop icons.
+- **Windows and Linux:** video editor cursor effects, named bitrate presets and audio transcription. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
