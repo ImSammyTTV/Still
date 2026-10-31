@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-video-image-save"
+description = "Enables the video_image_save command without any pre-configured scope."
+commands.allow = ["video_image_save"]
+
+[[permission]]
+identifier = "deny-video-image-save"
+description = "Denies the video_image_save command without any pre-configured scope."
+commands.deny = ["video_image_save"]
