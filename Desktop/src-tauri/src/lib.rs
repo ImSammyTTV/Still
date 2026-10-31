@@ -58,6 +58,8 @@ struct Session {
     recorder: Option<Arc<record::Handle>>,
     marks: Option<marks::Options>,
     listener: Option<marks::Listener>,
+    /// The pointer's path and clicks for the video editor's zooms, kept with the recording when it's saved.
+    trail: Option<marks::Trail>,
     failed_shortcuts: Vec<String>,
     update: Value,
     pending_update: Option<Arc<tauri_plugin_updater::Update>>,
@@ -551,7 +553,8 @@ fn native_engine(rec: &Value) -> Result<(), String> {
 
 fn stop_recording_state(app: &AppHandle) {
     end_recording_extras(app);
-    let recorder = { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; s.recorder.take() };
+    let (recorder, trail) = { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; (s.recorder.take(), s.trail.take()) };
+    drop(trail);
     if let Some(recorder) = recorder { recorder.cancel(); } // Only reached by a recording that ended without being saved.
     if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
     build_tray_menu(app);
@@ -1211,11 +1214,18 @@ async fn recording_prepared(app: AppHandle) {
 }
 #[tauri::command]
 async fn recording_started(app: AppHandle) {
-    st(&app).session.lock().unwrap().recording_began = Some(std::time::Instant::now());
+    {
+        let mut s = st(&app).session.lock().unwrap();
+        s.recording_began = Some(std::time::Instant::now());
+        // Where the pointer goes is only watched while recording, and only where it can be (not on Wayland).
+        if let Some(place) = s.recorded { s.trail = marks::trail(place.area).ok(); }
+    }
     build_tray_menu(&app); start_listening(&app);
 }
 #[tauri::command]
 async fn recording_listen(app: AppHandle, on: bool) {
+    // The controls say "listen" when recording runs and "don't" when it pauses or stops: the trail's clock follows.
+    if let Some(trail) = &st(&app).session.lock().unwrap().trail { trail.pause(!on); }
     if on { start_listening(&app); } else { let listener = st(&app).session.lock().unwrap().listener.take(); drop(listener); }
 }
 #[tauri::command]
@@ -1264,6 +1274,7 @@ async fn recording_pause(app: AppHandle, on: bool) {
 async fn recording_restart(app: AppHandle) {
     let recorder = st(&app).session.lock().unwrap().recorder.clone();
     if let Some(recorder) = recorder { recorder.restart(); }
+    if let Some(trail) = &st(&app).session.lock().unwrap().trail { trail.restart(); }
 }
 
 /// Ends a recording made by Still's own recorder and puts it in the library.
@@ -1308,7 +1319,10 @@ async fn recording_chunk(app: AppHandle, data: String, ext: String) -> Result<()
 }
 /// Restart throws the recording away and begins again.
 #[tauri::command]
-async fn recording_reset(app: AppHandle) { let _ = std::fs::remove_file(recording_part(&app)); }
+async fn recording_reset(app: AppHandle) {
+    let _ = std::fs::remove_file(recording_part(&app));
+    if let Some(trail) = &st(&app).session.lock().unwrap().trail { trail.restart(); }
+}
 #[tauri::command]
 async fn recording_save(app: AppHandle, ext: String, duration: f64) -> Result<(), String> {
     let part = recording_part(&app);
@@ -1335,6 +1349,7 @@ fn salvage_recording(app: &AppHandle) -> bool {
 }
 /// Puts a finished recording in the library and does what the After Recording settings ask.
 fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> Result<(), String> {
+    let trail = st(app).session.lock().unwrap().trail.take().map(marks::Trail::finish);
     stop_recording_state(app);
     let added = st(app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
     let item = match added {
@@ -1349,6 +1364,8 @@ fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> R
         }
     };
     st(app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
+    // The video editor reads the path and clicks from here, and keeps its own settings beside them.
+    if let Some(trail) = trail.filter(|t| t["pointer"].as_array().is_some_and(|p| !p.is_empty())) { let _ = st(app).library.lock().unwrap().save_project(&item.id, &trail); }
     if setting(app, "afterRecording.save").as_bool().unwrap_or(true) { if let Err(e) = export_item(app, &item.id, None) { notify(app, "Couldn’t save to your folder", &e); } }
     if setting(app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, false); }
     broadcast(app, "library:changed", Value::Null);

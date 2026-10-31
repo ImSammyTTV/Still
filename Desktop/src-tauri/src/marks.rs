@@ -2,8 +2,10 @@
 //!
 //! Input is sampled about a hundred times a second rather than hooked. No hook or event stream ever hands
 //! Still what is typed: with "Shortcuts only" on, the keyboard isn't read at all unless Ctrl, Alt or Win/Super
-//! is held, which `Tracker::step` decides. What it finds goes to the on-screen overlay and nowhere else:
-//! nothing here writes to disk or a log.
+//! is held, which `Tracker::step` decides. What it finds goes to the on-screen overlay and nowhere else.
+//!
+//! The one exception is the `Trail`: where the pointer was inside the recorded area, and where it clicked, kept
+//! beside the recording so the video editor can zoom to the action. It never reads the keyboard.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -133,6 +135,82 @@ fn sample(mut source: impl Source + Send + 'static, options: Options, emit: impl
         }
     }).map_err(|e| e.to_string())?;
     Ok(Listener { stop })
+}
+
+// ---- Trail ---------------------------------------------------------------------------------------
+
+/// The pointer's path and clicks during a recording, in seconds of recording time (pauses don't count) and in
+/// shares of the recorded area. Positions outside the area aren't kept.
+#[derive(Default)]
+pub struct TrailLog { pub pointer: Vec<[f64; 3]>, pub clicks: Vec<[f64; 3]>, left: bool, right: bool, last: Option<(f64, f64, f64)> }
+
+/// Roughly how often the path is noted while the pointer moves.
+const TRAIL_EVERY: f64 = 0.05;
+/// About an hour of movement at that rate; a longer recording keeps its first hour of path, and all its clicks.
+const TRAIL_MAX: usize = 72_000;
+
+impl TrailLog {
+    pub fn note(&mut self, area: Area, time: f64, p: Pointer) {
+        let pressed = (p.left && !self.left) || (p.right && !self.right);
+        (self.left, self.right) = (p.left, p.right);
+        let Some((x, y)) = area.locate(p.x, p.y) else { return };
+        let round = |v: f64| (v * 10_000.0).round() / 10_000.0;
+        let (t, x, y) = (round(time), round(x), round(y));
+        if pressed { self.clicks.push([t, x, y]); }
+        let moved = self.last.is_none_or(|(lt, lx, ly)| time - lt >= TRAIL_EVERY && (lx != x || ly != y));
+        if (moved || pressed) && self.pointer.len() < TRAIL_MAX { self.pointer.push([t, x, y]); self.last = Some((time, x, y)); }
+    }
+}
+
+struct TrailClock { start: std::time::Instant, paused_total: Duration, paused_at: Option<std::time::Instant> }
+impl TrailClock {
+    fn now(&self) -> Option<f64> {
+        if self.paused_at.is_some() { return None; }
+        Some(self.start.elapsed().saturating_sub(self.paused_total).as_secs_f64())
+    }
+}
+
+/// Keeps a `TrailLog` for the recording on a thread of its own until finished or dropped.
+pub struct Trail { log: Arc<std::sync::Mutex<(TrailLog, TrailClock)>>, stop: Arc<AtomicBool> }
+
+impl Drop for Trail { fn drop(&mut self) { self.stop.store(true, Ordering::SeqCst); } }
+
+impl Trail {
+    pub fn pause(&self, on: bool) {
+        let Ok(mut state) = self.log.lock() else { return };
+        let clock = &mut state.1;
+        match (on, clock.paused_at) {
+            (true, None) => clock.paused_at = Some(std::time::Instant::now()),
+            (false, Some(at)) => { clock.paused_total += at.elapsed(); clock.paused_at = None; }
+            _ => {}
+        }
+    }
+    /// The recording began again: so does the trail.
+    pub fn restart(&self) {
+        if let Ok(mut state) = self.log.lock() { *state = (TrailLog::default(), TrailClock { start: std::time::Instant::now(), paused_total: Duration::ZERO, paused_at: None }); }
+    }
+    /// The path and clicks, as the video editor reads them from the recording's project.
+    pub fn finish(self) -> serde_json::Value {
+        self.stop.store(true, Ordering::SeqCst);
+        let log = self.log.lock().map(|mut s| std::mem::take(&mut s.0)).unwrap_or_default();
+        serde_json::json!({ "pointer": log.pointer, "clicks": log.clicks })
+    }
+}
+
+pub fn trail(area: Area) -> Result<Trail, String> {
+    let mut source = native::open()?;
+    let clock = TrailClock { start: std::time::Instant::now(), paused_total: Duration::ZERO, paused_at: None };
+    let log = Arc::new(std::sync::Mutex::new((TrailLog::default(), clock)));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (shared, stopped) = (log.clone(), stop.clone());
+    std::thread::Builder::new().name("still-trail".into()).spawn(move || {
+        while !stopped.load(Ordering::SeqCst) {
+            let Some(p) = source.pointer() else { return };
+            if let Ok(mut state) = shared.lock() { if let Some(t) = state.1.now() { state.0.note(area, t, p); } }
+            std::thread::sleep(POLL);
+        }
+    }).map_err(|e| e.to_string())?;
+    Ok(Trail { log, stop })
 }
 
 // ---- Key names -----------------------------------------------------------------------------------
@@ -295,6 +373,26 @@ mod native {
         fn mods(&mut self) -> Option<Mods> { None }
         fn keys(&mut self, _: &mut Vec<u32>) {}
         fn label(&self, _: u32) -> Option<String> { None }
+    }
+}
+
+#[cfg(test)]
+mod trail_tests {
+    use super::*;
+
+    #[test]
+    fn the_trail_keeps_moves_and_clicks_inside_the_area() {
+        let area = Area { x: 100.0, y: 100.0, w: 200.0, h: 100.0 };
+        let mut log = TrailLog::default();
+        let at = |x: f64, y: f64, left: bool| Pointer { x, y, left, right: false };
+        log.note(area, 0.0, at(150.0, 150.0, false));
+        log.note(area, 0.01, at(151.0, 150.0, false)); // Too soon after the last: not noted.
+        log.note(area, 0.1, at(200.0, 150.0, true)); // A click.
+        log.note(area, 0.2, at(200.0, 150.0, true)); // Still held: not a second click, and it hasn't moved.
+        log.note(area, 0.3, at(50.0, 50.0, false)); // Outside the area.
+        log.note(area, 0.4, at(50.0, 50.0, true)); // A click outside.
+        assert_eq!(log.pointer, vec![[0.0, 0.25, 0.5], [0.1, 0.5, 0.5]]);
+        assert_eq!(log.clicks, vec![[0.1, 0.5, 0.5]]);
     }
 }
 

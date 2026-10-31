@@ -8,7 +8,8 @@
 // looser: on WebKit a 1.5 second clip came out about 0.6 seconds too long. It pauses while the window is hidden,
 // because the page's timers slow down then. An untrimmed export skips all this and copies the file exactly.
 // The trim points and background are saved beside the recording (its project.json), so the editor opens where it
-// was left. A background is drawn into every exported frame, so it always means re-encoding.
+// was left, beside the pointer's path and clicks that Still noted while recording. A background, zooms and click
+// rings are drawn into every exported frame, so any of them means re-encoding.
 const id = params.get('id');
 const video = $('#video');
 const BITRATE = 12_000_000; // Matches the recording HUD.
@@ -17,6 +18,10 @@ let item, source, duration = 0, trim = { start: 0, end: 0 }, job = null, project
 const NO_BG = { style: 'none', padding: 8, radius: 2, shadow: true };
 let bg = { ...NO_BG };
 const hasBg = () => bg.style !== 'none';
+let zooms = [], selectedZoom = -1, showClicks = false;
+const clicks = () => (Array.isArray(project.clicks) ? project.clicks : []);
+const drawsClicks = () => showClicks && clicks().length > 0;
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks();
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -102,7 +107,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, bg: hasBg() ? bg : null };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, bg: hasBg() ? bg : null, zooms, showClicks };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -110,6 +115,7 @@ function saveProject() {
 function renderPlayhead() {
   $('#playhead').style.left = `${StillTrim.position(video.currentTime, duration) * 100}%`;
   $('#now').textContent = StillTrim.clock(video.currentTime);
+  renderView();
 }
 
 function gifPlan() {
@@ -165,8 +171,31 @@ function layoutPreview() {
   Object.assign(frame.style, { width: `${F.w * s}px`, height: `${F.h * s}px`, left: `${(stage.clientWidth - F.w * s) / 2}px`, top: `${(stage.clientHeight - F.h * s) / 2}px` });
   const [a, b] = StillBackdrop.GRADIENTS[bg.style] || [];
   frame.style.background = hasBg() ? `linear-gradient(135deg, ${a}, ${b})` : 'none';
-  Object.assign(video.style, { left: `${F.x * s}px`, top: `${F.y * s}px`, width: `${vw * s}px`, height: `${vh * s}px`, borderRadius: `${F.radius * s}px`,
+  Object.assign($('#clip').style, { left: `${F.x * s}px`, top: `${F.y * s}px`, width: `${vw * s}px`, height: `${vh * s}px`, borderRadius: `${F.radius * s}px`,
     boxShadow: hasBg() && bg.shadow ? `0 ${Math.max(6, vw / 120) * s}px ${Math.max(20, vw / 30) * s}px rgba(0,0,0,.35)` : 'none' });
+  const fx = $('#fx'); fx.width = Math.round(vw * s * devicePixelRatio); fx.height = Math.round(vh * s * devicePixelRatio);
+  renderView();
+}
+
+// The zoom and click rings at the playhead, on the preview. The same StillZoom maths draws the exports.
+function renderView() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return;
+  const t = video.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(vw, vh, z);
+  video.style.transform = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
+  const fx = $('#fx'), ctx = fx.getContext('2d');
+  ctx.clearRect(0, 0, fx.width, fx.height);
+  if (drawsClicks()) drawRings(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
+}
+
+// Rings where the pointer clicked, growing and fading. `k` turns video pixels into the target's pixels.
+function drawRings(ctx, t, src, scale, k, ox, oy, vw, vh) {
+  const unit = Math.max(1, vw / 900) * k;
+  for (const ring of StillZoom.rings(clicks(), t)) {
+    const x = ox + (ring.x * vw - src.x) * scale * k, y = oy + (ring.y * vh - src.y) * scale * k;
+    ctx.beginPath(); ctx.arc(x, y, (10 + 22 * ring.progress) * unit, 0, Math.PI * 2);
+    ctx.lineWidth = 3 * unit; ctx.strokeStyle = `rgba(255, 72, 94, ${1 - ring.progress})`; ctx.stroke();
+  }
 }
 new ResizeObserver(layoutPreview).observe($('#stage'));
 video.addEventListener('loadedmetadata', layoutPreview);
@@ -192,11 +221,56 @@ $('#background').onclick = () => {
 
 // One exported frame: the background, then the video's current picture inside it.
 function drawFrame(ctx, player, F) {
+  const t = player.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(F.width, F.height, z);
   ctx.save();
   if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg);
-  ctx.drawImage(player, F.x, F.y, F.width, F.height);
+  else { ctx.beginPath(); ctx.rect(F.x, F.y, F.width, F.height); ctx.clip(); }
+  ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
+  if (drawsClicks()) drawRings(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
+
+// ---- Zooms --------------------------------------------------------------------------------------
+
+function renderZooms() {
+  if (selectedZoom >= zooms.length) selectedZoom = -1;
+  const lane = $('#lane'); lane.replaceChildren();
+  zooms.forEach((z, i) => {
+    const left = StillTrim.position(z.start, duration) * 100, width = (StillTrim.position(z.end, duration) * 100) - left;
+    lane.append(el('button', { class: i === selectedZoom ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Zoom ${StillTrim.clock(z.start)} to ${StillTrim.clock(z.end)}, ${z.scale}×`,
+      'aria-pressed': String(i === selectedZoom), onclick: () => { selectedZoom = i === selectedZoom ? -1 : i; if (selectedZoom >= 0) jump(z.start + Math.min(0.5, (z.end - z.start) / 2)); renderZooms(); } }));
+  });
+  const z = zooms[selectedZoom];
+  $('#zoomTools').hidden = !z;
+  $('#clip').classList.toggle('aiming', !!z);
+  if (z) $('#zoomScale').value = String(z.scale);
+  $('#autoZoom').disabled = !duration || !clicks().length;
+  $('#autoZoom').title = clicks().length ? 'A zoom wherever you clicked while recording' : 'Auto Zoom needs a recording made with Still 1.2.15 or later on Windows, or on Linux with X11';
+  $('#clicksToggle').hidden = !clicks().length; $('#showClicks').checked = showClicks;
+  renderView(); saveProject();
+}
+const changeZoom = (patch) => { zooms = zooms.map((z, i) => (i === selectedZoom ? { ...z, ...patch } : z)).sort((a, b) => a.start - b.start); renderZooms(); };
+
+$('#addZoom').onclick = () => {
+  const time = video.currentTime;
+  zooms = StillZoom.add(zooms, time, trim, project.pointer);
+  selectedZoom = zooms.findIndex((z) => z.start <= time && z.end >= time); renderZooms();
+};
+$('#autoZoom').onclick = () => { zooms = StillZoom.auto(clicks(), trim); selectedZoom = -1; renderZooms(); toast(zooms.length ? `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} added` : 'No clicks in the trimmed part'); };
+$('#zoomRemove').onclick = () => { zooms = zooms.filter((_, i) => i !== selectedZoom); selectedZoom = -1; renderZooms(); };
+$('#zoomScale').onchange = (e) => changeZoom({ scale: Number(e.target.value) });
+$('#zoomIn').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime < z.end - 0.2) changeZoom({ start: video.currentTime }); };
+$('#zoomOut').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime > z.start + 0.2) changeZoom({ end: video.currentTime }); };
+$('#showClicks').onchange = (e) => { showClicks = e.target.checked; renderZooms(); };
+// With a zoom selected, a click on the video picks the point it zooms to, wherever the view is zoomed right now.
+$('#clip').addEventListener('click', (e) => {
+  if (selectedZoom < 0) return;
+  e.stopPropagation();
+  const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
+  const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
+  const x = (src.x + (e.clientX - r.left) / r.width * src.w) / vw, y = (src.y + (e.clientY - r.top) / r.height * src.h) / vh;
+  changeZoom({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
+}, true);
 
 // ---- Playback -----------------------------------------------------------------------------------
 
@@ -241,6 +315,8 @@ addEventListener('keydown', (e) => {
   if (e.key === ' ') { e.preventDefault(); togglePlay(); }
   else if (e.key === 'i' || e.key === 'I') $('#setIn').click();
   else if (e.key === 'o' || e.key === 'O') $('#setOut').click();
+  else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedZoom >= 0) $('#zoomRemove').click();
 });
 
 // ---- Export -------------------------------------------------------------------------------------
@@ -271,7 +347,7 @@ const save = (bytes) => { setProgress(1); $('#cancel').disabled = true; return s
 // WebKitGTK can't, so there the picture goes through a canvas, as in the HUD, and the sound through Web Audio.
 // A background always goes through the canvas, which draws it into each frame.
 function captureSource(player) {
-  if (player.captureStream && !hasBg()) return { stream: player.captureStream(), stop() {} };
+  if (player.captureStream && !needsCanvas()) return { stream: player.captureStream(), stop() {} };
   const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg);
   const canvas = el('canvas', { width: F.w, height: F.h }), ctx = canvas.getContext('2d', { alpha: false });
   const draw = () => drawFrame(ctx, player, F);
@@ -331,7 +407,7 @@ async function recordClip(run, type) {
 
 $('#exportVideo').onclick = () => {
   const ext = item.path.split('.').pop().toLowerCase();
-  if (StillTrim.isFull(trim, duration) && !hasBg()) {
+  if (StillTrim.isFull(trim, duration) && !needsCanvas()) {
     return runExport('Exporting…', async () => {
       const target = await still.invoke('video:target', ext);
       return target && still.invoke('video:copy');
@@ -339,7 +415,7 @@ $('#exportVideo').onclick = () => {
   }
   const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && MediaRecorder.isTypeSupported(type));
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
-  runExport(hasBg() ? 'Exporting…' : 'Trimming…', async (run) => {
+  runExport(needsCanvas() ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);
     if (!target || run.cancelled) return null;
     const bytes = await recordClip(run, format.type);
@@ -412,9 +488,11 @@ async function open() {
   project = item.project && typeof item.project === 'object' ? item.project : {};
   trim = StillTrim.restore(project.trim, duration);
   if (project.bg && StillBackdrop.GRADIENTS[project.bg.style]) bg = { ...NO_BG, ...project.bg };
+  zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
+  showClicks = !!project.showClicks;
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #exportVideo, #exportGif, #background').forEach((button) => { button.disabled = false; });
-  render(); renderPlayhead(); renderBackground();
+  $$('#play, #setIn, #setOut, #exportVideo, #exportGif, #background, #addZoom').forEach((button) => { button.disabled = false; });
+  render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.
 }
