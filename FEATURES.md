@@ -59,7 +59,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Record an area or the whole screen | ✅ | ☑️ Windows, tried on real hardware and fixed in 1.2.11, needs a re-test · ☑️ Linux, not yet confirmed on real WebKitGTK |
+| Record an area or the whole screen | ✅ | ☑️ Windows · ☑️ Linux, not yet confirmed on real WebKitGTK |
+| Windows: Still's own recorder (H.264 MP4, no screen picker, no "sharing your screen" bar, controls kept out of the video) | — | ☑️ used when no sound is recorded; self-test records 3 s where the runner supports it |
 | Microphone and computer audio | ☑️ | ☑️ Windows (computer audio) |
 | Stop from the menu bar or tray, with a timer | ✅ | ☑️ tray menu · click to stop on Windows |
 | Stop with the Start / Stop Recording shortcut, even behind a full-screen app | ☑️ | ☑️ shortcut shown on the Stop button |
@@ -102,9 +103,9 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
   such as horizontal and auto-scrolling, and saved trim points. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
-- **Windows:** whole-screen recordings include the system's "sharing your screen" bar, which comes from the web
-  engine that records the screen and can't be turned off. Pressing its Hide button keeps most of it out. A native
-  Windows recorder would remove it.
+- **Windows:** Still's own recorder doesn't record sound yet. Recordings with the microphone or computer audio turned
+  on still use the system web engine, which asks for a screen and shows its "sharing your screen" bar (pressing Hide
+  keeps most of it out of the video). Windows "N" editions without the Media Feature Pack also use the web engine.
 - **Windows and Linux:** recording needs a hands-on pass on real hardware after the 1.2.11 fixes.
 - **Everywhere:** the ☑️ items above need a hands-on pass.
 

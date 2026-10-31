@@ -6,6 +6,7 @@ mod library;
 mod marks;
 mod previous;
 mod qr;
+mod record;
 mod scroll;
 mod settings;
 mod video;
@@ -52,6 +53,9 @@ struct Session {
     /// controls stop answering can still be saved with a sensible name and duration.
     recording_ext: String,
     recording_began: Option<std::time::Instant>,
+    /// Still's own recorder, when it is the one recording (Windows). Held outside any work done under this lock:
+    /// stopping it waits for the video file to be finished.
+    recorder: Option<Arc<record::Handle>>,
     marks: Option<marks::Options>,
     listener: Option<marks::Listener>,
     failed_shortcuts: Vec<String>,
@@ -489,7 +493,7 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
     let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
-        "stopShortcut": setting(app, "shortcuts")["record"] });
+        "stopShortcut": setting(app, "shortcuts")["record"], "native": native_engine(&rec) });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     {
         let mut s = st(app).session.lock().unwrap();
@@ -518,7 +522,8 @@ fn window_gone(app: &AppHandle, label: &str) {
         "hud" => {
             end_recording_extras(app);
             // The controls went away mid-recording (Alt+F4, a crashed page): keep what was recorded up to then.
-            if st(app).session.lock().unwrap().recording.is_some() { salvage_recording(app); }
+            if st(app).session.lock().unwrap().recorder.is_some() { let a = app.clone(); std::thread::spawn(move || { let _ = finish_native(&a); }); }
+            else if st(app).session.lock().unwrap().recording.is_some() { salvage_recording(app); }
         }
         // Never keep watching the keyboard with nothing on screen to show for it.
         "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
@@ -533,9 +538,18 @@ fn window_gone(app: &AppHandle, label: &str) {
         _ => {}
     }
 }
+/// Whether Still records by itself rather than through the web engine: on Windows, when the computer supports it,
+/// the user hasn't chosen the web engine, and no audio is wanted (Still's recorder doesn't record sound yet).
+fn native_engine(rec: &Value) -> bool {
+    cfg!(windows) && rec["engine"].as_str() != Some("webview")
+        && !rec["microphone"].as_bool().unwrap_or(false) && !rec["systemAudio"].as_bool().unwrap_or(false)
+        && record::available().is_ok()
+}
+
 fn stop_recording_state(app: &AppHandle) {
     end_recording_extras(app);
-    { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; }
+    let recorder = { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; s.recorder.take() };
+    if let Some(recorder) = recorder { recorder.cancel(); } // Only reached by a recording that ended without being saved.
     if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
     build_tray_menu(app);
 }
@@ -1210,6 +1224,54 @@ async fn camera_failed(app: AppHandle, message: String) {
 }
 #[tauri::command]
 async fn recording_cancel(app: AppHandle) { let _ = std::fs::remove_file(recording_part(&app)); stop_recording_state(&app); }
+
+/// Where Still's own recorder writes the video while it records.
+fn native_part() -> PathBuf { private_temp().join(format!("still-native-{}.mp4", std::process::id())) }
+
+/// Starts Still's own recorder on the area chosen for this recording.
+#[tauri::command]
+async fn recording_begin(app: AppHandle) -> Result<(), String> {
+    let (params, place) = { let s = st(&app).session.lock().unwrap(); (s.recording.clone(), s.recorded) };
+    let (Some(params), Some(place)) = (params, place) else { return Err("There is no recording to start.".into()) };
+    let rect = &params["rect"];
+    let crop = record::even_crop(rect["x"].as_f64().unwrap_or(0.0), rect["y"].as_f64().unwrap_or(0.0), rect["w"].as_f64().unwrap_or(0.0), rect["h"].as_f64().unwrap_or(0.0),
+        params["imageWidth"].as_u64().unwrap_or(0) as u32, params["imageHeight"].as_u64().unwrap_or(0) as u32);
+    let options = record::Options {
+        monitor: (place.display.x as i32 + 1, place.display.y as i32 + 1), crop,
+        fps: params["options"]["fps"].as_u64().unwrap_or(30) as u32,
+        cursor: params["options"]["cursor"].as_bool().unwrap_or(true),
+        path: native_part(),
+    };
+    let handle = record::start(options)?;
+    st(&app).session.lock().unwrap().recorder = Some(Arc::new(handle));
+    Ok(())
+}
+#[tauri::command]
+async fn recording_stop(app: AppHandle) -> Result<(), String> { finish_native(&app) }
+#[tauri::command]
+async fn recording_pause(app: AppHandle, on: bool) {
+    let recorder = st(&app).session.lock().unwrap().recorder.clone();
+    if let Some(recorder) = recorder { recorder.pause(on); }
+}
+#[tauri::command]
+async fn recording_restart(app: AppHandle) {
+    let recorder = st(&app).session.lock().unwrap().recorder.clone();
+    if let Some(recorder) = recorder { recorder.restart(); }
+}
+
+/// Ends a recording made by Still's own recorder and puts it in the library.
+fn finish_native(app: &AppHandle) -> Result<(), String> {
+    let Some(recorder) = st(app).session.lock().unwrap().recorder.take() else { return Ok(()) }; // Already finished.
+    let finished = recorder.stop();
+    let saved = finished.and_then(|f| {
+        let bytes = std::fs::read(&f.path).map_err(|e| format!("The recording’s file couldn’t be read: {e}"))?;
+        let _ = std::fs::remove_file(&f.path);
+        eprintln!("[recording] {} frames, {} dropped, hardware encoder: {}", f.frames, f.dropped, f.hardware);
+        store_recording(app, &bytes, "mp4", f.duration)
+    });
+    if let Err(e) = &saved { stop_recording_state(app); notify(app, "Recording couldn’t be saved", e); }
+    saved
+}
 #[tauri::command]
 async fn recording_error(app: AppHandle, message: String, stage: Option<String>) {
     if stage.as_deref() == Some("save") {
@@ -1288,6 +1350,12 @@ fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> R
 /// Asks the HUD to stop. If it hasn't ended the recording a few seconds later, its page has stopped answering, so
 /// the recording ends here and whatever it had already written is saved. Stopping is never a dead end.
 fn request_stop(app: &AppHandle) {
+    // Still's own recorder stops here, without the controls' page.
+    if st(app).session.lock().unwrap().recorder.is_some() {
+        let app = app.clone();
+        std::thread::spawn(move || { let _ = finish_native(&app); });
+        return;
+    }
     let _ = app.emit_to("hud", "hud:stop", ());
     let app = app.clone();
     std::thread::spawn(move || {
@@ -1575,6 +1643,31 @@ fn self_test(app: AppHandle, dir: PathBuf) {
         st(&app).settings.lock().unwrap().update(&json!({ "recording": { "clicks": false, "keys": false } }));
         wait(500);
         log("extrasClosed", json!(app.get_webview_window("marks").is_none() && app.get_webview_window("camera").is_none() && st(&app).session.lock().unwrap().listener.is_none()));
+        // Still's own recorder: three seconds of a 400×300 area, finished into a real MP4 (Windows only).
+        match record::available() {
+            Err(reason) => log("nativeRecorder", json!(reason)),
+            Ok(()) => {
+                let origin = capture::grab_all().ok().and_then(|g| g.first().map(|g| (g.x + 1, g.y + 1))).unwrap_or((1, 1));
+                let path = dir.join("native-recording.mp4");
+                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, cursor: true, path: path.clone() };
+                match record::start(options) {
+                    Err(e) => log("nativeRecorder", json!(format!("didn’t start: {e}"))),
+                    Ok(recorder) => {
+                        wait(3000);
+                        match recorder.stop() {
+                            Ok(f) => {
+                                log("nativeRecorder", json!("recorded"));
+                                log("nativeDuration", json!((f.duration * 10.0).round() / 10.0));
+                                log("nativeFrames", json!(f.frames));
+                                log("nativeHardwareEncoder", json!(f.hardware));
+                                log("nativeBytes", json!(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)));
+                            }
+                            Err(e) => log("nativeRecorder", json!(format!("didn’t finish: {e}"))),
+                        }
+                    }
+                }
+            }
+        }
         let _ = app.run_on_main_thread({ let a = app.clone(); move || { let _ = builder(&a, "ocr-probe", "ocr.html", json!({ "probe": "1" })).build(); } });
         for _ in 0..60 { if dir.join("ocr.txt").exists() { break; } wait(1000); }
         log("ocr", json!(std::fs::read_to_string(dir.join("ocr.txt")).unwrap_or_default().trim()));
@@ -1656,7 +1749,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_tick, video_export_target, video_export_save, video_export_copy,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy,
             update_status, update_check, update_install,
             cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop
         ])
