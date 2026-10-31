@@ -15,6 +15,10 @@
     "allow-recording-chunk",
     "allow-recording-reset",
     "allow-recording-save",
-    "allow-recording-tick"
+    "allow-recording-tick",
+    "allow-recording-begin",
+    "allow-recording-stop",
+    "allow-recording-pause",
+    "allow-recording-restart"
   ]
 }

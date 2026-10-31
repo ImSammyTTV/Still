@@ -52,7 +52,29 @@ function pickType(format) {
   return '';
 }
 
-async function begin() {
+// Still's own recorder (Windows): Still captures and encodes by itself, so there is no system picker and no
+// "sharing your screen" bar, and this page is only the controls. If it can't start, the web engine records instead.
+let native = false, nativeLive = false;
+async function beginNative() {
+  native = true;
+  const o = opts.options || {};
+  await still.invoke('recording:prepared').catch(() => {}); // The camera and overlays are extras: never a reason not to record.
+  for (let n = o.countdown || 0; n > 0; n--) { $('#time').textContent = `Starts in ${n}`; await new Promise((res) => setTimeout(res, 1000)); if (cancelled || finishing) break; }
+  if (cancelled || finishing) return still.invoke('recording:cancel'); // Stopped before anything was recorded.
+  try {
+    await still.invoke('recording:begin');
+  } catch (error) {
+    native = false;
+    toast('Still’s recorder couldn’t start here, so the system recorder is used');
+    console.warn('Still’s recorder:', error);
+    return begin(false);
+  }
+  nativeLive = true; start = performance.now(); $('#time').textContent = '0:00';
+  still.invoke('recording:started');
+}
+
+async function begin(tryNative = true) {
+  if (tryNative && opts.native) return beginNative();
   if (reloadForMedia()) return;
   const o = opts.options || {};
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder) throw new Error('Screen recording isn’t supported by this system’s web engine yet.');
@@ -98,6 +120,15 @@ async function begin() {
 
 function stop() {
   still.send('recording:listen', false); // Keys stop here, not when the file has finished saving.
+  if (native) {
+    if (finishing) return;
+    finishing = true;
+    if (!nativeLive) return; // Still counting down: beginNative sees this and ends the recording.
+    $('#time').textContent = 'Saving…';
+    // Still finishes the file, stores it and closes these controls; a failure arrives as a notification.
+    still.invoke(cancelled ? 'recording:cancel' : 'recording:stop').catch(() => {});
+    return;
+  }
   // A second Stop while saving has stalled is a way out, never a dead button: Still keeps what was written.
   if (finishing) { if (finishedAt && performance.now() - finishedAt > 5000) still.invoke('recording:error', failure || 'Saving didn’t finish.', 'save').catch(() => {}); return; }
   if (recorder && recorder.state !== 'inactive') recorder.stop(); else finish();
@@ -123,6 +154,13 @@ async function finish() {
 }
 
 function togglePause() {
+  if (native) {
+    if (!nativeLive || finishing) return;
+    paused = !paused;
+    if (paused) pausedAt = performance.now(); else pausedTotal += performance.now() - pausedAt;
+    still.invoke('recording:pause', paused).catch(() => {});
+    return showPaused();
+  }
   if (!recorder || recorder.state === 'inactive') return; // Nothing to pause in the countdown, and nothing to listen for yet.
   if (recorder.state === 'recording') { recorder.pause(); paused = true; pausedAt = performance.now(); }
   else if (recorder.state === 'paused') { recorder.resume(); paused = false; pausedTotal += performance.now() - pausedAt; }
@@ -137,7 +175,14 @@ function showPaused() {
 $('#stop').onclick = () => stop();
 $('#pause').onclick = () => togglePause();
 $('#cancel').onclick = () => { cancelled = true; stop(); };
-$('#restart').onclick = () => { if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
+$('#restart').onclick = () => {
+  if (native) {
+    if (!nativeLive || finishing) return;
+    still.invoke('recording:restart').catch(() => {});
+    start = performance.now(); pausedTotal = 0; if (paused) { paused = false; still.invoke('recording:pause', false).catch(() => {}); showPaused(); }
+    return;
+  }
+  if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
 if (opts.stopShortcut) still.invoke('shortcut:label', opts.stopShortcut).then((label) => { const stop = $('#stop'); stop.title = `Stop and save (${label})`; stop.setAttribute('aria-label', stop.title); }).catch(() => {});
 begin().catch((error) => still.invoke('recording:error', error.message || String(error)));

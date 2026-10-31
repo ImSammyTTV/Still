@@ -116,6 +116,9 @@ const pages = {
     prefs.platform === 'win32' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], 'Your icons come back as soon as the capture ends.') : null
   ],
   Recording: () => [
+    prefs.platform === 'win32' ? group('Recorder', [
+      select('Record with', 'recording.engine', [['auto', 'Still (recommended)'], ['webview', 'System web engine']])
+    ], 'Still records the screen itself, with no screen picker and no “sharing your screen” bar. Recordings with sound use the system web engine for now, as does this computer if Still’s recorder isn’t available on it.') : null,
     group('Video', [
       select('Format', 'recording.format', [['mp4', 'MP4'], ['webm', 'WebM']]),
       select('Frame rate', 'recording.fps', [[24, '24 fps'], [30, '30 fps'], [60, '60 fps']], true),
