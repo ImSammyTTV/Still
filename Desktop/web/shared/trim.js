@@ -78,5 +78,40 @@
     return before;
   }
 
-  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, kept, keptLength, skip, sourceAt, outputAt };
+  // ---- Tighten Pauses: long silences found in the sound, as cuts ------------------------------------
+  // `levels` is the loudness in decibels for each `step` seconds of the recording. A stretch counts as silent
+  // when it's well under the speaking level (25 dB below the loud end, between -60 and -30 dB);
+  // one longer than `minimum` seconds becomes a cut that leaves `keep` seconds of quiet each side, so speech
+  // isn't clipped and the rhythm stays natural. The Mac app's AudioPauses follows the same rules.
+  function pauses(levels, step, clip, { minimum = 1, keep = 0.3 } = {}) {
+    const loud = [...levels].filter(Number.isFinite).sort((a, b) => a - b);
+    if (!loud.length) return [];
+    const speaking = loud[Math.floor(loud.length * 0.9)];
+    const threshold = Math.min(-30, Math.max(-60, speaking - 25));
+    const found = []; let begin = null;
+    levels.forEach((level, i) => {
+      const quiet = !(level > threshold);
+      if (quiet && begin === null) begin = i;
+      if ((!quiet || i === levels.length - 1) && begin !== null) {
+        const end = quiet ? i + 1 : i;
+        const a = begin * step, b = end * step;
+        if (b - a >= minimum) found.push({ start: a + keep, end: b - keep });
+        begin = null;
+      }
+    });
+    return normalizeCuts(found, clip);
+  }
+  // Loudness in decibels for each `step` seconds of mono samples.
+  function levelsOf(samples, rate, step = 0.05) {
+    const size = Math.max(1, Math.round(rate * step)), out = [];
+    for (let at = 0; at < samples.length; at += size) {
+      let sum = 0; const end = Math.min(samples.length, at + size);
+      for (let i = at; i < end; i++) sum += samples[i] * samples[i];
+      const rms = Math.sqrt(sum / Math.max(1, end - at));
+      out.push(rms > 0 ? 20 * Math.log10(rms) : -120);
+    }
+    return out;
+  }
+
+  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf };
 });

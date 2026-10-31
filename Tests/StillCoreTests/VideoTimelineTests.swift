@@ -71,4 +71,17 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoTransition.at(10, start: 0, end: 10, opening: "rise", closing: "fade").scale, 1)
         XCTAssertEqual(VideoTransition.at(0.25, start: 0, end: 1.5, opening: "fade", closing: "none").level, 0.5, accuracy: 1e-9)
     }
+
+    /// The same cases as the Tighten Pauses tests in Desktop/test/trim.test.js.
+    func testLongSilencesBecomeCutsThatLeaveABeatEachSide() {
+        let levels = Array(repeating: -20.0, count: 10) + Array(repeating: -70.0, count: 20) + Array(repeating: -20.0, count: 10) + Array(repeating: -70.0, count: 5) + Array(repeating: -20.0, count: 10)
+        let cuts = AudioPauses.find(levels: levels, step: 0.1, start: 0, end: 5.5)
+        XCTAssertEqual(cuts.count, 1)
+        XCTAssertEqual(cuts[0].start, 1.3, accuracy: 1e-9); XCTAssertEqual(cuts[0].end, 2.7, accuracy: 1e-9)
+        XCTAssertEqual(AudioPauses.find(levels: Array(repeating: -20.0, count: 30), step: 0.1, start: 0, end: 3), [])
+    }
+
+    func testLoudnessLevelsFromSamples() {
+        XCTAssertEqual(AudioPauses.levels([1, -1, 1, -1, 0, 0, 0, 0], rate: 40, step: 0.1).map { $0.rounded() }, [0, -120])
+    }
 }

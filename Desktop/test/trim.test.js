@@ -79,3 +79,19 @@ test('the kept stretches, their length, and times either side of a cut', () => {
   assert.equal(T.sourceAt(0, kept), 1); assert.equal(T.sourceAt(3, kept), 4); assert.equal(T.sourceAt(3.5, kept), 7.5); assert.equal(T.sourceAt(99, kept), 10);
   assert.equal(T.outputAt(2, kept), 1); assert.equal(T.outputAt(5, kept), 3); assert.equal(T.outputAt(8, kept), 4);
 });
+
+// The same cases are in the Mac app's AudioPausesTests.
+test('long silences become cuts that leave a short beat each side', () => {
+  const speech = -20, quiet = -70, step = 0.1;
+  // 1 s talk, 2 s silence, 1 s talk, 0.5 s silence, 1 s talk.
+  const levels = [...Array(10).fill(speech), ...Array(20).fill(quiet), ...Array(10).fill(speech), ...Array(5).fill(quiet), ...Array(10).fill(speech)];
+  const cuts = T.pauses(levels, step, { start: 0, end: 5.5 });
+  assert.equal(cuts.length, 1, 'the short pause stays');
+  assert.ok(Math.abs(cuts[0].start - 1.3) < 1e-9 && Math.abs(cuts[0].end - 2.7) < 1e-9, JSON.stringify(cuts));
+  assert.deepEqual(T.pauses(Array(30).fill(speech), step, { start: 0, end: 3 }), [], 'no silence, no cuts');
+});
+
+test('loudness levels from samples', () => {
+  const lv = T.levelsOf(new Float32Array([1, -1, 1, -1, 0, 0, 0, 0]), 40, 0.1);
+  assert.deepEqual(lv.map((v) => Math.round(v)), [0, -120]);
+});

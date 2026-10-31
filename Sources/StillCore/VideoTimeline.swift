@@ -117,3 +117,39 @@ public enum VideoTransition {
         return (level, style == "rise" ? 1-rise*(1-level) : 1)
     }
 }
+
+/// Tighten Pauses: long silences found in a recording's sound, as cuts. A stretch is silent when it's well under the
+/// speaking level (25 dB below the loud end, between -60 and -30 dB); one longer than `minimum` seconds becomes a cut
+/// that leaves `keep` seconds of quiet each side, so speech isn't clipped. Windows and Linux follow the same rules
+/// (shared/trim.js `pauses`) and share the test cases.
+public enum AudioPauses {
+    public static func find(levels: [Double], step: Double, start: Double, end: Double, minimum: Double = 1, keep: Double = 0.3) -> [VideoCut] {
+        let loud = levels.filter(\.isFinite).sorted()
+        guard !loud.isEmpty else { return [] }
+        let speaking = loud[Int(Double(loud.count) * 0.9)]
+        let threshold = min(-30, max(-60, speaking - 25))
+        var found: [VideoCut] = [], begin: Int?
+        for (index, level) in levels.enumerated() {
+            let quiet = !(level > threshold)
+            if quiet, begin == nil { begin = index }
+            if (!quiet || index == levels.count - 1), let from = begin {
+                let to = quiet ? index + 1 : index
+                let a = Double(from) * step, b = Double(to) * step
+                if b - a >= minimum { found.append(VideoCut(start: a + keep, end: b - keep)) }
+                begin = nil
+            }
+        }
+        return VideoTimeline.normalized(found, start: start, end: end)
+    }
+
+    /// Loudness in decibels for each `step` seconds of mono samples.
+    public static func levels(_ samples: [Float], rate: Double, step: Double = 0.05) -> [Double] {
+        let size = max(1, Int((rate * step).rounded()))
+        return stride(from: 0, to: samples.count, by: size).map { at in
+            let end = min(samples.count, at + size)
+            let sum = samples[at..<end].reduce(0.0) { $0 + Double($1) * Double($1) }
+            let rms = (sum / Double(max(1, end - at))).squareRoot()
+            return rms > 0 ? 20 * log10(rms) : -120
+        }
+    }
+}

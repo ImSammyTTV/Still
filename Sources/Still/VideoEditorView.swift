@@ -80,6 +80,39 @@ import StillCore
         if cuts == (settings.cuts ?? []) { library.toast("Too short to cut"); return }
         settings.cuts = cuts
     }
+    /// Tighten Pauses: listens to the recording for silences longer than a second and cuts each down to a short beat.
+    @Published var listening = false
+    func tightenPauses() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), start = settings.start, end = settings.end
+        Task {
+            defer { listening = false }
+            do {
+                let levels = try await Task.detached(priority: .userInitiated) { () -> [Double] in
+                    let asset = AVURLAsset(url: url)
+                    guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
+                    let reader = try AVAssetReader(asset: asset)
+                    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
+                    reader.add(output); reader.startReading()
+                    var samples: [Float] = []
+                    while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
+                        let length = CMBlockBufferGetDataLength(block)
+                        var chunk = [Float](repeating: 0, count: length / 4)
+                        _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
+                        samples.append(contentsOf: chunk)
+                    }
+                    return AudioPauses.levels(samples, rate: 16000)
+                }.value
+                guard !levels.isEmpty else { library.toast("This recording has no sound to listen to"); return }
+                let found = AudioPauses.find(levels: levels, step: 0.05, start: start, end: end)
+                guard !found.isEmpty else { library.toast("No long pauses found"); return }
+                let before = VideoTimeline.length(settings.kept)
+                settings.cuts = VideoTimeline.normalized((settings.cuts ?? []) + found, start: settings.start, end: settings.end)
+                library.toast("Tightened \(found.count) pause\(found.count == 1 ? "" : "s"), \(String(format: "%.1f", before - VideoTimeline.length(settings.kept))) s shorter. Click a cut to put it back.")
+            } catch { self.error = "Couldn’t listen to this recording: \(error.localizedDescription)" }
+        }
+    }
     func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
@@ -291,6 +324,7 @@ struct VideoEditorView: View {
                 Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
                 Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
+                Button { model.tightenPauses() } label: { Label(model.listening ? "Listening…" : "Tighten Pauses", systemImage: "waveform") }.disabled(model.listening).help("Find long silences and cut them down to a short beat")
                 Menu { Picker("Opening", selection: Binding(get: { model.settings.opening ?? "none" }, set: { model.settings.opening = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade In").tag("fade"); Text("Rise").tag("rise") }
                     Picker("Closing", selection: Binding(get: { model.settings.closing ?? "none" }, set: { model.settings.closing = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade Out").tag("fade"); Text("Rise").tag("rise") }
                 } label: { Label("Ends", systemImage: "circle.lefthalf.filled") }.fixedSize().help("How the video opens and closes: picture and sound ease in and out over 0.6 s; Rise grows the video out of its background")

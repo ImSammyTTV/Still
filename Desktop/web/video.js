@@ -122,6 +122,24 @@ $('#cut').onclick = () => {
   else { const before = cuts.length; cuts = StillTrim.addCut(cuts, cutStart, video.currentTime, trim); cutStart = null; if (cuts.length === before && !cuts.some((c) => c.end - c.start > 0)) toast('Too short to cut'); }
   render();
 };
+// Tighten Pauses: listens to the recording for silences longer than a second and cuts each down to a short beat.
+$('#tighten').onclick = async () => {
+  $('#tighten').disabled = true; toast('Listening for pauses…');
+  try {
+    const data = await (await fetch(video.currentSrc || source)).arrayBuffer();
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+    let sound;
+    try { sound = await context.decodeAudioData(data); } finally { context.close(); }
+    const mono = new Float32Array(sound.length);
+    for (let c = 0; c < sound.numberOfChannels; c++) { const channel = sound.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += channel[i] / sound.numberOfChannels; }
+    const found = StillTrim.pauses(StillTrim.levelsOf(mono, sound.sampleRate), 0.05, trim);
+    const before = StillTrim.keptLength(trim, cuts);
+    cuts = StillTrim.normalizeCuts([...cuts, ...found], trim); render();
+    const saved = before - StillTrim.keptLength(trim, cuts);
+    toast(found.length ? `Tightened ${found.length} pause${found.length === 1 ? '' : 's'}, ${saved.toFixed(1)} s shorter. Click a cut to put it back.` : 'No long pauses found');
+  } catch (error) { toast(`Couldn’t listen to this recording: ${message(error)}`); }
+  finally { $('#tighten').disabled = false; }
+};
 const isWhole = () => StillTrim.isFull(trim, duration) && !cuts.length;
 
 function render() {
@@ -678,7 +696,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.
