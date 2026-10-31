@@ -102,6 +102,19 @@ import StillCore
     func close() { loadTask?.cancel(); player.pause(); previewTask?.cancel(); cancelTranscription(); if let observer { player.removeTimeObserver(observer); self.observer = nil } }
     func undo() { guard let state = undoStack.popLast() else { return }; redoStack.append(settings); restoring = true; settings = state; restoring = false; dirty = true; schedulePreview() }
     func redo() { guard let state = redoStack.popLast() else { return }; undoStack.append(settings); restoring = true; settings = state; restoring = false; dirty = true; schedulePreview() }
+    /// Zooms picked on the trim bar: a click picks one, ⌘- or ⇧-click adds or drops one, so several can be removed together.
+    @Published var pickedZooms: Set<UUID> = []
+    func pickZoom(_ zoom: ZoomSegment, adding: Bool) {
+        if adding { if pickedZooms.contains(zoom.id) { pickedZooms.remove(zoom.id) } else { pickedZooms.insert(zoom.id) } }
+        else { pickedZooms = pickedZooms == [zoom.id] ? [] : [zoom.id]; if !pickedZooms.isEmpty { seek(zoom.start + min(0.5, (zoom.end - zoom.start)/2)) } }
+        panel = "Zoom"
+    }
+    func removePickedZooms() {
+        guard !pickedZooms.isEmpty else { return }
+        let count = pickedZooms.count
+        settings.zooms.removeAll { pickedZooms.contains($0.id) }; pickedZooms = []
+        if count > 1 { library.toast("\(count) zooms removed") }
+    }
     func addZoom() {
         let position = metadata.pointer.min(by: { abs($0.time-playhead) < abs($1.time-playhead) })
         settings.zooms.append(ZoomSegment(start: max(settings.start, playhead-0.2), end: min(settings.end, playhead+2), x: position?.x ?? 0.5, y: position?.y ?? 0.5))
@@ -205,7 +218,11 @@ struct VideoEditorView: View {
             slider("Shadow", value: $model.settings.shadow, range: 0...80)
             slider("Motion Blur", value: $model.settings.motionBlur, range: 0...1)
         case "Zoom":
-            HStack { Button("Add Zoom") { model.addZoom() }; Button("Smart Zooms") { model.smartZooms() } }
+            HStack {
+                Button("Add Zoom") { model.addZoom() }; Button("Smart Zooms") { model.smartZooms() }
+                if !model.pickedZooms.isEmpty { Spacer(); Button(model.pickedZooms.count == 1 ? "Remove Zoom" : "Remove \(model.pickedZooms.count) Zooms", role: .destructive) { model.removePickedZooms() }.keyboardShortcut(.delete, modifiers: []) }
+            }
+            if !model.settings.zooms.isEmpty { Text("Click zooms on the trim bar to pick them; ⌘-click picks several.").font(.system(size: 10)).foregroundStyle(.secondary) }
             ForEach($model.settings.zooms) { $zoom in
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { Text("Zoom \(Int(zoom.scale*100))%").fontWeight(.medium); Spacer(); Button { model.settings.zooms.removeAll { $0.id == zoom.id } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove zoom") }
@@ -213,6 +230,7 @@ struct VideoEditorView: View {
                     Slider(value: $zoom.scale, in: 1.1...3)
                     HStack { Text("X"); Slider(value: $zoom.x, in: 0...1); Text("Y"); Slider(value: $zoom.y, in: 0...1) }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.accentColor, lineWidth: model.pickedZooms.contains(zoom.id) ? 2 : 0))
             }
             if model.settings.zooms.isEmpty { Text("Add a zoom at the playhead, or generate zooms from recorded clicks.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
@@ -271,7 +289,14 @@ struct VideoEditorView: View {
                     HStack(spacing: 1) { ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, image in Image(nsImage: image).resizable().scaledToFill().frame(width: width/9, height: 52).clipped() } }
                         .frame(width: width, height: 52, alignment: .leading).clipShape(RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { model.seek(max(model.settings.start, min(model.settings.end, Double($0.location.x/width)*total))) })
-                    ForEach(model.settings.zooms) { zoom in Rectangle().fill(Color.accentColor.opacity(0.4)).frame(width: max(3, x(zoom.end-zoom.start)), height: 8).offset(x: x(zoom.start), y: 22).allowsHitTesting(false) }
+                    // Zooms: click to pick one, ⌘- or ⇧-click to pick several.
+                    ForEach(model.settings.zooms) { zoom in
+                        let picked = model.pickedZooms.contains(zoom.id)
+                        Capsule().fill(Color.accentColor.opacity(picked ? 1 : 0.45)).overlay(Capsule().strokeBorder(.white, lineWidth: picked ? 2 : 0))
+                            .frame(width: max(6, x(zoom.end-zoom.start)), height: 12).offset(x: x(zoom.start), y: 20)
+                            .onTapGesture { model.pickZoom(zoom, adding: !NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty) }
+                            .help("Zoom \(time(zoom.start)) to \(time(zoom.end)). ⌘-click to pick several.")
+                    }
                     // Dim what gets cut.
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, startX), height: 52).allowsHitTesting(false)
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, width-endX), height: 52).offset(x: endX).allowsHitTesting(false)
