@@ -34,6 +34,8 @@ const separateCursor = () => project.cursor === 'separate';
 const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
 // Text shown over the video for a stretch of it, and the one being edited.
 let captions = [], selectedCaption = -1;
+// Chapter markers, and the one being edited.
+let chapters = [], selectedChapter = -1;
 // Parts of the picture blurred for a stretch, and the one being edited.
 let blurs = [], selectedBlur = -1;
 // How the video opens and closes: 'none', 'fade' or 'rise'.
@@ -146,7 +148,7 @@ const isWhole = () => StillTrim.isFull(trim, duration) && !cuts.length;
 
 function render() {
   cuts = StillTrim.normalizeCuts(cuts, trim);
-  renderCuts();
+  renderCuts(); renderChapters(false);
   const start = StillTrim.position(trim.start, duration) * 100, end = StillTrim.position(trim.end, duration) * 100;
   $('#shadeIn').style.width = `${start}%`; $('#shadeOut').style.width = `${100 - end}%`;
   $('#kept').style.left = `${start}%`; $('#kept').style.width = `${end - start}%`;
@@ -166,7 +168,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, chapters: chapters.length ? chapters : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -346,6 +348,38 @@ function drawFrame(ctx, player, F) {
   drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
+
+// ---- Chapters -----------------------------------------------------------------------------------
+
+function renderChapters(save = true) {
+  if (selectedChapter >= chapters.length) selectedChapter = -1;
+  const holder = $('#chapters'); holder.replaceChildren();
+  chapters.forEach((c, i) => {
+    const b = el('button', { class: i === selectedChapter ? 'selected' : '', style: `left:${StillTrim.position(c.time, duration) * 100}%`, title: `${c.title} · ${StillTrim.clock(c.time)}`, 'aria-label': `Chapter ${c.title}` });
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => { e.stopPropagation(); selectedChapter = i === selectedChapter ? -1 : i; if (selectedChapter >= 0) jump(c.time); renderChapters(); });
+    holder.append(b);
+  });
+  const c = chapters[selectedChapter];
+  $('#chapterTools').hidden = !c;
+  if (c && document.activeElement !== $('#chapterTitle')) $('#chapterTitle').value = c.title;
+  $('#copyChapters').disabled = !chapters.length;
+  if (save) saveProject();
+}
+$('#addChapter').onclick = () => {
+  const before = new Set(chapters); chapters = StillChapters.add(chapters, video.currentTime);
+  selectedChapter = chapters.findIndex((c) => !before.has(c)); renderChapters(); $('#chapterTitle').focus(); $('#chapterTitle').select();
+};
+$('#chapterTitle').addEventListener('input', (e) => { chapters = chapters.map((c, i) => (i === selectedChapter ? { ...c, title: e.target.value } : c)); renderChapters(); });
+$('#chapterTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+$('#chapterHere').onclick = () => { const moved = { ...chapters[selectedChapter], time: video.currentTime }; chapters = chapters.map((c, i) => (i === selectedChapter ? moved : c)).sort((a, b) => a.time - b.time); selectedChapter = chapters.indexOf(moved); renderChapters(); };
+$('#chapterRemove').onclick = () => { chapters = chapters.filter((_, i) => i !== selectedChapter); selectedChapter = -1; renderChapters(); };
+$('#copyChapters').onclick = async () => {
+  const speed = Number(exportChoice.speed) || 1, text = StillChapters.list(chapters, trim, cuts, speed);
+  if (!text) return toast('No chapters in the part you keep');
+  try { await navigator.clipboard.writeText(text); toast(`Chapters copied${speed > 1 ? ` (timed for ${speed}× export)` : ''}`); }
+  catch { toast('Couldn’t copy the chapters'); }
+};
 
 // ---- Blur ---------------------------------------------------------------------------------------
 
@@ -527,6 +561,8 @@ addEventListener('keydown', (e) => {
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
   else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedChapter >= 0) $('#chapterRemove').click();
+  else if ((e.key === 'm' || e.key === 'M') && !$('#addChapter').disabled) { e.preventDefault(); $('#addChapter').click(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlur >= 0) $('#blurRemove').click();
   else if ((e.key === 'b' || e.key === 'B') && !$('#addBlur').disabled) $('#addBlur').click();
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaption >= 0) $('#captionRemove').click();
@@ -762,6 +798,8 @@ async function open() {
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
   captions = (Array.isArray(project.captions) ? project.captions : []).filter((c) => c && c.end > c.start && typeof c.text === 'string');
+  chapters = (Array.isArray(project.chapters) ? project.chapters : []).filter((c) => c && Number.isFinite(c.time)).map((c) => ({ time: c.time, title: String(c.title || 'Chapter') })).sort((a, b) => a.time - b.time);
+  renderChapters(false);
   blurs = (Array.isArray(project.blurs) ? project.blurs : []).filter((b) => b && b.end > b.start).map((b) => ({ start: b.start, end: b.end, ...StillBlurs.fit(b) }));
   renderBlurs();
   opening = StillTransitions.STYLES.includes(project.opening) ? project.opening : 'none'; closing = StillTransitions.STYLES.includes(project.closing) ? project.closing : 'none';
@@ -770,7 +808,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

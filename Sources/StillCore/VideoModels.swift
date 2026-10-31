@@ -88,6 +88,8 @@ public struct VideoSettings: Codable, Equatable {
     /// How the video opens and closes: "fade" or "rise"; nil for neither.
     /// Parts of the picture blurred for a stretch; nil for none.
     public var blurs: [VideoBlur]?
+    /// Named markers for a chapter list; nil for none.
+    public var chapters: [VideoChapter]?
     public var opening: String?
     public var closing: String?
     /// The stretches of the recording that make the finished video.

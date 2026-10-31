@@ -254,7 +254,7 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
@@ -312,6 +312,23 @@ struct VideoEditorView: View {
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
             }
             if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Chapters":
+            HStack {
+                Button("Add Chapter at Playhead") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
+                Button("Copy Chapters") {
+                    let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed)
+                    if text.isEmpty { model.library.toast("No chapters in the part you keep") } else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string); model.library.toast(model.exportSpeed > 1 ? "Chapters copied (timed for \(model.exportSpeed.formatted())× export)" : "Chapters copied") }
+                }.disabled((model.settings.chapters ?? []).isEmpty).help("Copy a chapter list for a video description, timed to the finished video")
+            }
+            ForEach(Binding(get: { model.settings.chapters ?? [] }, set: { model.settings.chapters = $0.isEmpty ? nil : $0 })) { $chapter in
+                HStack {
+                    Button(time(chapter.time)) { model.seek(chapter.time) }.buttonStyle(.plain).monospacedDigit().foregroundStyle(.secondary).help("Go to this chapter")
+                    TextField("Name", text: $chapter.title)
+                    Button { chapter.time = model.playhead } label: { Image(systemName: "scope") }.buttonStyle(.plain).help("Move this chapter to the playhead")
+                    Button { model.settings.chapters?.removeAll { $0.id == chapter.id }; if model.settings.chapters?.isEmpty == true { model.settings.chapters = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove chapter")
+                }.padding(9).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.chapters ?? []).isEmpty { Text("Mark chapters (M), then Copy Chapters for a list to paste into a video description. Times follow the finished video, after cuts and export speed.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
@@ -391,6 +408,8 @@ struct VideoEditorView: View {
                             .frame(width: max(4, x(cut.end)-x(cut.start)), height: 52).offset(x: x(cut.start))
                             .onTapGesture { model.removeCut(cut) }.help("Cut \(time(cut.start)) to \(time(cut.end)): click to put it back")
                     }
+                    // Chapter markers along the top.
+                    ForEach(model.settings.chapters ?? []) { chapter in Circle().fill(.yellow).overlay(Circle().strokeBorder(.black.opacity(0.5), lineWidth: 1)).frame(width: 12, height: 12).offset(x: x(chapter.time)-6, y: -26).help(chapter.title).onTapGesture { model.seek(chapter.time) } }
                     if let from = model.cutStart { Rectangle().fill(.red).frame(width: 2, height: 64).offset(x: x(from)-1).allowsHitTesting(false) }
                     Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(model.playhead)-1).allowsHitTesting(false)
                     // Handles move by how far you drag from where you grabbed them.

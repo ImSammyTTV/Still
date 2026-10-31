@@ -178,3 +178,35 @@ public struct VideoBlur: Codable, Equatable, Hashable, Identifiable {
         VideoBlur(start: max(start, time), end: min(end, time+3), x: (box.minX-pad)/width, y: (box.minY-pad)/height, w: (box.width+pad*2)/width, h: (box.height+pad*2)/height)
     }
 }
+
+/// A named marker on a recording, at a moment of its own time.
+public struct VideoChapter: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var time: Double
+    public var title: String
+    public init(time: Double, title: String) { self.time = time; self.title = title }
+}
+
+/// Chapters and the list they make for a video's description ("0:00 Intro", "1:23 Setting up"), timed to the finished
+/// video after trimming, cuts and export speed, and starting at 0:00 as video sites expect. Windows and Linux follow
+/// the same rules (shared/chapters.js) and share the test cases.
+public enum VideoChapters {
+    public static func stamp(_ seconds: Double) -> String {
+        let s = max(0, Int((seconds + 1e-6).rounded(.down))), h = s/3600, m = s/60 % 60, r = s % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, r) : String(format: "%d:%02d", m, r)
+    }
+    public static func list(_ chapters: [VideoChapter], start: Double, end: Double, cuts: [VideoCut], speed: Double = 1) -> String {
+        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts)
+        var rows: [(at: Int, title: String)] = []
+        for chapter in chapters.sorted(by: { $0.time < $1.time }) {
+            guard chapter.time >= start, chapter.time <= end, !cuts.contains(where: { chapter.time >= $0.start && chapter.time < $0.end }) else { continue }
+            let at = Int((VideoTimeline.outputTime(at: chapter.time, kept: kept) / max(1, speed) + 1e-6).rounded(.down))
+            let words = chapter.title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let title = words.isEmpty ? "Chapter" : words
+            if let last = rows.last, last.at == at { rows[rows.count-1].title = title } else { rows.append((at, title)) }
+        }
+        guard !rows.isEmpty else { return "" }
+        if rows[0].at > 0 { rows.insert((0, "Intro"), at: 0) }
+        return rows.map { "\(stamp(Double($0.at))) \($0.title)" }.joined(separator: "\n")
+    }
+}

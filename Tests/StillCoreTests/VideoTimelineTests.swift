@@ -94,4 +94,13 @@ final class VideoTimelineTests: XCTestCase {
         let p = VideoBlur.fromPixels(CGRect(x: 104, y: 54, width: 192, height: 12), width: 400, height: 200, at: 0, start: 0, end: 5)
         XCTAssertEqual(p.x, 0.25, accuracy: 1e-9); XCTAssertEqual(p.y, 0.25, accuracy: 1e-9); XCTAssertEqual(p.w, 0.5, accuracy: 1e-9); XCTAssertEqual(p.h, 0.1, accuracy: 1e-9)
     }
+
+    /// The same cases as Desktop/test/chapters.test.js.
+    func testChaptersListInTheFinishedVideosTime() {
+        let chapters = [VideoChapter(time: 75, title: "Setting up"), VideoChapter(time: 10, title: "Welcome"), VideoChapter(time: 200, title: "  Sharing   it ")]
+        XCTAssertEqual(VideoChapters.list(chapters, start: 0, end: 300, cuts: []), "0:00 Intro\n0:10 Welcome\n1:15 Setting up\n3:20 Sharing it")
+        XCTAssertEqual(VideoChapters.list(chapters, start: 10, end: 300, cuts: [VideoCut(start: 30, end: 50)], speed: 2), "0:00 Welcome\n0:22 Setting up\n1:25 Sharing it")
+        XCTAssertEqual(VideoChapters.list([VideoChapter(time: 40, title: "Gone")], start: 0, end: 100, cuts: [VideoCut(start: 30, end: 50)]), "")
+        XCTAssertEqual(VideoChapters.list([VideoChapter(time: 3725, title: "Late")], start: 0, end: 4000, cuts: []), "0:00 Intro\n1:02:05 Late")
+    }
 }
