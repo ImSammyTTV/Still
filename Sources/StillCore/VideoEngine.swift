@@ -213,6 +213,14 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
         var background = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: 0, y: i.size.height), "inputPoint1": CIVector(x: i.size.width, y: 0), "inputColor0": CIColor(cgColor: colors[0].cgColor), "inputColor1": CIColor(cgColor: colors[1].cgColor)])!.outputImage!.cropped(to: bounds)
         var screen = CIImage(cvPixelBuffer: source).transformed(by: i.transform)
         screen = screen.transformed(by: CGAffineTransform(translationX: -screen.extent.minX, y: -screen.extent.minY))
+        // Blur boxes, on the recording's own picture so they follow it through zooms. Core Image counts from the bottom.
+        for blur in s.blurs ?? [] where time >= blur.start && time <= blur.end {
+            let w = screen.extent.width, h = screen.extent.height
+            let rect = CGRect(x: blur.x*w, y: (1-blur.y-blur.h)*h, width: blur.w*w, height: blur.h*h).integral
+            let radius = max(6, min(rect.width, rect.height)/5)
+            let soft = screen.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius]).cropped(to: rect)
+            screen = soft.composited(over: screen)
+        }
         let padding = style == .none ? 0 : s.padding
         let scale = min((i.size.width-padding*2)/screen.extent.width, (i.size.height-padding*2)/screen.extent.height)
         let contentSize = CGSize(width: screen.extent.width*scale, height: screen.extent.height*scale)

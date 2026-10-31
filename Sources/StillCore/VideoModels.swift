@@ -86,6 +86,8 @@ public struct VideoSettings: Codable, Equatable {
     /// Text shown over the video; nil for none, so older saved edits load unchanged.
     public var captions: [VideoCaption]?
     /// How the video opens and closes: "fade" or "rise"; nil for neither.
+    /// Parts of the picture blurred for a stretch; nil for none.
+    public var blurs: [VideoBlur]?
     public var opening: String?
     public var closing: String?
     /// The stretches of the recording that make the finished video.

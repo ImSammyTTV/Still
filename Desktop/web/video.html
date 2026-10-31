@@ -57,6 +57,9 @@
   .lane { position: relative; height: 16px; margin-top: -4px; }
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane.captions button { background: var(--text); opacity: .4; }
+  .lane.blurs button { background: var(--red); opacity: .45; }
+  .lane.blurs button.selected { opacity: .95; }
+  .clip.placing { cursor: crosshair; }
   .lane.captions button.selected { opacity: .9; }
   .lane button.selected { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
   .zoom-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
@@ -139,6 +142,18 @@
     </span>
   </div>
   <div class="trim-head">
+    <b>Blur</b>
+    <button class="btn" id="addBlur" title="Blur part of the video from the playhead (B)" disabled><i data-lucide="eye-off"></i>Add Blur</button>
+    <button class="btn" id="findPrivate" title="Read the frame on screen and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds" disabled><i data-lucide="shield-check"></i>Find Private Info</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="blurTools" hidden>
+      <span class="dim">Drag on the video to place it.</span>
+      <button class="btn" id="blurIn" title="Start this blur at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="blurOut" title="End this blur at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="blurRemove" title="Remove this blur (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="trim-head">
     <b>Ends</b>
     <label class="zoom-tools">Opening <select class="field" id="opening" disabled><option value="none">None</option><option value="fade">Fade in</option><option value="rise">Rise</option></select></label>
     <label class="zoom-tools">Closing <select class="field" id="closing" disabled><option value="none">None</option><option value="fade">Fade out</option><option value="rise">Rise</option></select></label>
@@ -176,6 +191,7 @@
   </div>
   <div class="lane" id="lane" aria-label="Zooms"></div>
   <div class="lane captions" id="captionLane" aria-label="Text"></div>
+  <div class="lane blurs" id="blurLane" aria-label="Blurs"></div>
   <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
@@ -215,6 +231,10 @@
 <script src="shared/cursor.js"></script>
 <script src="shared/captions.js"></script>
 <script src="shared/transitions.js"></script>
+<script src="shared/blurs.js"></script>
+<script src="shared/private.js"></script>
+<script src="vendor/ocr/tesseract.min.js"></script>
+<script src="ocr.js"></script>
 <script src="shared/gif.js"></script>
 <script src="common.js"></script>
 <script src="video.js"></script>

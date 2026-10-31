@@ -153,3 +153,28 @@ public enum AudioPauses {
         }
     }
 }
+
+/// A part of a video's picture blurred for a stretch of the recording (in its own time). The box is kept as shares of
+/// the video (0 to 1, from the top left) so it fits any export size and follows the picture through zooms. Windows
+/// and Linux follow the same rules (shared/blurs.js) and share the test cases.
+public struct VideoBlur: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var start: Double
+    public var end: Double
+    public var x: Double, y: Double, w: Double, h: Double
+    public init(start: Double, end: Double, x: Double = 0.35, y: Double = 0.42, w: Double = 0.3, h: Double = 0.16) {
+        self.start = start; self.end = end
+        let fitted = Self.fit(x: x, y: y, w: w, h: h); self.x = fitted.x; self.y = fitted.y; self.w = fitted.w; self.h = fitted.h
+    }
+    /// A box kept inside the picture and at least 1% each way.
+    public static func fit(x: Double, y: Double, w: Double, h: Double) -> (x: Double, y: Double, w: Double, h: Double) {
+        let fw = min(1, max(0.01, abs(w))), fh = min(1, max(0.01, abs(h)))
+        return (min(1-fw, max(0, w < 0 ? x+w : x)), min(1-fh, max(0, h < 0 ? y+h : y)), fw, fh)
+    }
+    /// A new box at `time`, three seconds long and kept inside the clip.
+    public static func new(at time: Double, start: Double, end: Double) -> VideoBlur { VideoBlur(start: max(start, time), end: min(end, time+3)) }
+    /// A box in the video's pixels (from the top left), as shares, with a little room around it.
+    public static func fromPixels(_ box: CGRect, width: Double, height: Double, at time: Double, start: Double, end: Double, pad: Double = 4) -> VideoBlur {
+        VideoBlur(start: max(start, time), end: min(end, time+3), x: (box.minX-pad)/width, y: (box.minY-pad)/height, w: (box.width+pad*2)/width, h: (box.height+pad*2)/height)
+    }
+}

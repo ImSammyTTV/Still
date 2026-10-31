@@ -84,4 +84,14 @@ final class VideoTimelineTests: XCTestCase {
     func testLoudnessLevelsFromSamples() {
         XCTAssertEqual(AudioPauses.levels([1, -1, 1, -1, 0, 0, 0, 0], rate: 40, step: 0.1).map { $0.rounded() }, [0, -120])
     }
+
+    /// The same cases as Desktop/test/blurs.test.js.
+    func testBlursStartInTheMiddleAndStayInsideThePicture() {
+        let b = VideoBlur.new(at: 2, start: 0, end: 4)
+        XCTAssertEqual([b.start, b.end, b.x, b.y, b.w, b.h], [2, 4, 0.35, 0.42, 0.3, 0.16])
+        let f = VideoBlur.fit(x: 0.9, y: 0.9, w: 0.5, h: 0.5); XCTAssertEqual([f.x, f.y, f.w, f.h], [0.5, 0.5, 0.5, 0.5])
+        let g = VideoBlur.fit(x: 0.2, y: 0.2, w: 0, h: 0.001); XCTAssertEqual([g.x, g.y, g.w, g.h], [0.2, 0.2, 0.01, 0.01])
+        let p = VideoBlur.fromPixels(CGRect(x: 104, y: 54, width: 192, height: 12), width: 400, height: 200, at: 0, start: 0, end: 5)
+        XCTAssertEqual(p.x, 0.25, accuracy: 1e-9); XCTAssertEqual(p.y, 0.25, accuracy: 1e-9); XCTAssertEqual(p.w, 0.5, accuracy: 1e-9); XCTAssertEqual(p.h, 0.1, accuracy: 1e-9)
+    }
 }

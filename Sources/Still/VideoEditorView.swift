@@ -113,6 +113,25 @@ import StillCore
             } catch { self.error = "Couldn’t listen to this recording: \(error.localizedDescription)" }
         }
     }
+    /// Find Private Info: reads the frame at the playhead and blurs each private detail it finds for three seconds.
+    func findPrivateInfo() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), time = playhead, start = settings.start, end = settings.end
+        Task {
+            defer { listening = false }
+            do {
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url)); generator.appliesPreferredTrackTransform = true
+                generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+                let frame = try await generator.image(at: CMTime(seconds: time, preferredTimescale: 600)).image
+                let boxes = try await Task.detached(priority: .userInitiated) { try PrivateInfo.boxes(in: frame) }.value
+                guard !boxes.isEmpty else { library.toast("No private details found in this frame"); return }
+                let found = boxes.map { VideoBlur.fromPixels($0, width: Double(frame.width), height: Double(frame.height), at: time, start: start, end: end) }
+                settings.blurs = ((settings.blurs ?? []) + found).sorted { $0.start < $1.start }
+                library.toast("Blurred \(found.count) private detail\(found.count == 1 ? "" : "s") for 3 seconds")
+            } catch { self.error = "Couldn’t read this frame: \(error.localizedDescription)" }
+        }
+    }
     func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
@@ -235,7 +254,7 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
@@ -279,6 +298,20 @@ struct VideoEditorView: View {
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
             }
             if (model.settings.captions ?? []).isEmpty { Text("Add a title, a step or a note that shows over the video for a few seconds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Blur":
+            HStack {
+                Button("Add Blur") { var blurs = model.settings.blurs ?? []; blurs.append(VideoBlur.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.blurs = blurs.sorted { $0.start < $1.start } }
+                Button(model.listening ? "Reading…" : "Find Private Info") { model.findPrivateInfo() }.disabled(model.listening).help("Read the frame at the playhead and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds")
+            }
+            ForEach(Binding(get: { model.settings.blurs ?? [] }, set: { model.settings.blurs = $0.isEmpty ? nil : $0 })) { $blur in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack { Text("Blur").fontWeight(.medium); Spacer(); Button { model.settings.blurs?.removeAll { $0.id == blur.id }; if model.settings.blurs?.isEmpty == true { model.settings.blurs = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove blur") }
+                    HStack { TextField("Start", value: $blur.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $blur.end, format: .number.precision(.fractionLength(2))) }
+                    HStack { Text("X"); Slider(value: $blur.x, in: 0...1); Text("Y"); Slider(value: $blur.y, in: 0...1) }
+                    HStack { Text("W"); Slider(value: $blur.w, in: 0.01...1); Text("H"); Slider(value: $blur.h, in: 0.01...1) }
+                }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
