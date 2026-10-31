@@ -19,7 +19,9 @@ function discardWritten() { written = 0; writes = writes.then(() => still.invoke
 // Without a handler that failure was silent: the stop produced no data and the HUD quietly cancelled.
 function startRecorder(type) {
   ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
-  recorder = new MediaRecorder(media, { mimeType: type || undefined, videoBitsPerSecond: 12_000_000 });
+  const settings = media.getVideoTracks()[0].getSettings(), o = opts.options || {};
+  const bits = StillGeometry.videoBitrate(settings.width || 1920, settings.height || 1080, o.fps || 30, o.quality);
+  recorder = new MediaRecorder(media, { mimeType: type || undefined, videoBitsPerSecond: bits });
   recorder.ondataavailable = (e) => { if (e.data.size) queueChunk(e.data); };
   recorder.onstop = finish;
   recorder.onerror = (e) => {

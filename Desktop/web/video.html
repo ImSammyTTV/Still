@@ -5,7 +5,7 @@
 <title>Trim Video</title>
 <link rel="stylesheet" href="style.css">
 <style>
-  body { display: grid; grid-template-rows: 52px minmax(0, 1fr) auto auto; }
+  body { display: grid; grid-template-rows: 52px minmax(0, 1fr) auto auto auto; }
   .titlebar { height: 52px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border); }
   h1 { font-size: 15px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .grow { flex: 1; min-width: 8px; }
@@ -13,13 +13,21 @@
   .dim { color: var(--text-2); }
 
   .stage { position: relative; min-height: 0; background: var(--canvas); display: grid; place-items: center; overflow: hidden; }
-  .stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* The preview: the video inside its background, laid out by video.js to fit the stage. */
+  .frame { position: absolute; }
+  .frame video { position: absolute; display: block; object-fit: fill; }
   .status { position: relative; color: var(--text-2); }
 
   .transport { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; flex-wrap: wrap; }
   .transport label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
   .transport select { height: 26px; }
   #gifHint { font-size: 11px; color: var(--text-2); max-width: 240px; }
+
+  .backdrop { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .backdrop label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 5px; }
+  .swatches button { width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: grid; place-items: center; color: var(--text-2); }
+  .swatches button.active { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   .trim { padding: 12px 16px 14px; border-top: 1px solid var(--border); background: var(--surface); display: grid; gap: 10px; }
   .trim-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -56,11 +64,12 @@
 <div class="titlebar">
   <h1 id="title">Trim Video</h1>
   <span class="grow"></span>
+  <button class="btn" id="background" title="Put the video on a background" aria-expanded="false" disabled><i data-lucide="image"></i>Background</button>
   <button class="btn" id="exportGif" disabled><i data-lucide="film"></i>Export GIF…</button>
   <button class="btn primary" id="exportVideo" disabled><i data-lucide="download"></i>Export Video…</button>
 </div>
 <div class="stage" id="stage">
-  <video id="video" playsinline preload="auto"></video>
+  <div class="frame" id="frame"><video id="video" playsinline preload="auto"></video></div>
   <div class="status" id="status">Loading video…</div>
 </div>
 <div class="transport">
@@ -76,6 +85,12 @@
   </label>
   <span id="gifHint" aria-live="polite"></span>
 </div>
+<section class="backdrop" id="backdrop" hidden>
+  <div class="swatches" id="swatches" role="group" aria-label="Background"></div>
+  <label>Padding <input type="range" id="bgPadding" min="2" max="20" step="1"></label>
+  <label>Corners <input type="range" id="bgRadius" min="0" max="8" step="0.5"></label>
+  <label><input type="checkbox" id="bgShadow"> Shadow</label>
+</section>
 <section class="trim">
   <div class="trim-head">
     <b>Trim</b>
@@ -94,7 +109,7 @@
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
-  <p class="note">Your original is never changed. A trimmed video is re-encoded in real time, so it takes as long as the part you keep. An untrimmed export is an exact copy.</p>
+  <p class="note">Your original is never changed. A trimmed video, or one with a background, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
   <i class="mark" data-lucide="circle-alert"></i>
@@ -115,6 +130,7 @@
 <script src="vendor/lucide.min.js"></script>
 <script src="shared/geometry.js"></script>
 <script src="shared/trim.js"></script>
+<script src="shared/backdrop.js"></script>
 <script src="shared/gif.js"></script>
 <script src="common.js"></script>
 <script src="video.js"></script>

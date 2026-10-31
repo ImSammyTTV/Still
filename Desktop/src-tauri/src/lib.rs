@@ -1242,6 +1242,7 @@ async fn recording_begin(app: AppHandle) -> Result<(), String> {
     let options = record::Options {
         monitor: (place.display.x as i32 + 1, place.display.y as i32 + 1), crop,
         fps: params["options"]["fps"].as_u64().unwrap_or(30) as u32,
+        quality: params["options"]["quality"].as_str().unwrap_or("high").to_string(),
         cursor: params["options"]["cursor"].as_bool().unwrap_or(true),
         system_audio: params["options"]["systemAudio"].as_bool().unwrap_or(false),
         microphone: params["options"]["microphone"].as_bool().unwrap_or(false),
@@ -1406,6 +1407,12 @@ async fn video_export_save(app: AppHandle, window: tauri::Window, request: tauri
     let target = take_export_target(&app, &window)?;
     video::save_bytes(&private_temp(), bytes, &target)?;
     Ok(target.to_string_lossy().to_string())
+}
+/// The video editor's settings for a recording (trim points, background), kept beside it so they come back.
+#[tauri::command]
+async fn video_project_save(app: AppHandle, window: tauri::Window, project: Value) -> Result<(), String> {
+    let (item, _) = video_source(&app, &window)?;
+    st(&app).library.lock().unwrap().save_project(&item.id, &project)
 }
 #[tauri::command]
 async fn video_export_copy(app: AppHandle, window: tauri::Window) -> Result<String, String> {
@@ -1655,7 +1662,7 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             Ok(()) => {
                 let origin = capture::grab_all().ok().and_then(|g| g.first().map(|g| (g.x + 1, g.y + 1))).unwrap_or((1, 1));
                 let path = dir.join("native-recording.mp4");
-                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, cursor: true, system_audio: true, microphone: false, path: path.clone() };
+                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, quality: "high".into(), cursor: true, system_audio: true, microphone: false, path: path.clone() };
                 match record::start(options) {
                     Err(e) => log("nativeRecorder", json!(format!("didn’t start: {e}"))),
                     Ok(recorder) => {
@@ -1758,7 +1765,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save,
             update_status, update_check, update_install,
             cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop
         ])

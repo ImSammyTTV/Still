@@ -18,7 +18,7 @@ pub fn defaults() -> Value {
         "magnifier": true,
         "rememberSelection": false,
         "hideDesktopIcons": false,
-        "recording": { "engine": "auto", "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3, "camera": false, "cameraSize": 180, "cameraShape": "circle",
+        "recording": { "engine": "auto", "quality": "high", "fps": 30, "format": "mp4", "microphone": false, "systemAudio": false, "countdown": 3, "camera": false, "cameraSize": 180, "cameraShape": "circle",
             "clicks": false, "keys": false, "keysShortcutsOnly": true },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
         "cloud": { "provider": "still", "endpoint": "", "expiryDays": 7, "visibility": "link", "autoUpload": false, "driveAccess": "link", "driveEmail": "", "driveFolder": "" },

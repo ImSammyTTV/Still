@@ -11,6 +11,14 @@
   const setIn = (trim, time, duration) => ({ ...trim, start: clamp(time, 0, Math.max(0, Math.min(duration, trim.end) - MIN_LENGTH)) });
   const setOut = (trim, time, duration) => ({ ...trim, end: clamp(time, Math.min(duration, trim.start + MIN_LENGTH), duration) });
   const isFull = (trim, duration) => trim.start <= 0.01 && trim.end >= duration - 0.01;
+  // Saved trim points, checked against the file as it is now: anything missing, out of range or too short to
+  // keep means the whole recording.
+  const restore = (saved, duration) => {
+    const start = Number(saved && saved.start), end = Number(saved && saved.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return full(duration);
+    const trim = { start: clamp(start, 0, duration), end: clamp(end, 0, duration) };
+    return trim.end - trim.start >= MIN_LENGTH ? trim : full(duration);
+  };
   const length = (trim) => Math.max(0, trim.end - trim.start);
   const position = (time, duration) => duration > 0 ? clamp(time / duration, 0, 1) : 0;
   const timeAt = (x, width, duration) => width > 0 ? clamp(x / width, 0, 1) * duration : 0;
@@ -30,5 +38,5 @@
     return { type, ext: type.startsWith('video/mp4') ? 'mp4' : 'webm' };
   };
 
-  return { MIN_LENGTH, full, setIn, setOut, isFull, length, position, timeAt, clock, recorderType };
+  return { MIN_LENGTH, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType };
 });

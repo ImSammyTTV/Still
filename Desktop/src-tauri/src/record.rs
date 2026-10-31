@@ -20,6 +20,8 @@ pub struct Options {
     /// The area to keep, in physical pixels within that display. Rounded to even sizes, which H.264 needs.
     pub crop: (u32, u32, u32, u32),
     pub fps: u32,
+    /// "high", "balanced" or "compact"; see `bitrate`.
+    pub quality: String,
     pub cursor: bool,
     /// Record what the computer plays.
     pub system_audio: bool,
@@ -63,9 +65,11 @@ pub fn even_crop(x: f64, y: f64, w: f64, h: f64, display_w: u32, display_h: u32)
     (x, y, (w / 2 * 2).max(2), (h / 2 * 2).max(2))
 }
 
-/// The same quality the Mac app records at: bits per pixel per frame, kept within sensible bounds.
-pub fn bitrate(width: u32, height: u32, fps: u32) -> u32 {
-    let bits = width as f64 * height as f64 * fps.max(1) as f64 * 0.18;
+/// The Mac app's qualities, in bits per pixel per frame: "high", "balanced" or "compact" (Smaller File), kept within
+/// sensible bounds.
+pub fn bitrate(width: u32, height: u32, fps: u32, quality: &str) -> u32 {
+    let factor = match quality { "compact" => 0.045, "balanced" => 0.09, _ => 0.18 };
+    let bits = width as f64 * height as f64 * fps.max(1) as f64 * factor;
     bits.clamp(400_000.0, 100_000_000.0) as u32
 }
 
@@ -361,7 +365,7 @@ mod imp {
                 let output = media_type(mf)?;
                 output.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(|e| err("Encoder output", e))?;
                 output.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264).map_err(|e| err("Encoder output", e))?;
-                output.SetUINT32(&MF_MT_AVG_BITRATE, bitrate(width, height, options.fps)).map_err(|e| err("Encoder output", e))?;
+                output.SetUINT32(&MF_MT_AVG_BITRATE, bitrate(width, height, options.fps, &options.quality)).map_err(|e| err("Encoder output", e))?;
                 output.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32).map_err(|e| err("Encoder output", e))?;
                 output.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32).map_err(|e| err("Encoder output", e))?;
                 output.SetUINT64(&MF_MT_FRAME_SIZE, frame_size).map_err(|e| err("Encoder output", e))?;
@@ -681,9 +685,12 @@ mod tests {
 
     #[test]
     fn bitrate_matches_the_mac_and_stays_in_bounds() {
-        assert_eq!(bitrate(1920, 1080, 30), 11_197_440);
-        assert_eq!(bitrate(10, 10, 1), 400_000);
-        assert_eq!(bitrate(7680, 4320, 60), 100_000_000);
+        assert_eq!(bitrate(1920, 1080, 30, "high"), 11_197_440);
+        assert_eq!(bitrate(1920, 1080, 30, "balanced"), 5_598_720);
+        assert_eq!(bitrate(1920, 1080, 30, "compact"), 2_799_360);
+        assert_eq!(bitrate(1920, 1080, 30, "anything else"), 11_197_440);
+        assert_eq!(bitrate(10, 10, 1, "high"), 400_000);
+        assert_eq!(bitrate(7680, 4320, 60, "high"), 100_000_000);
     }
 
     #[test]

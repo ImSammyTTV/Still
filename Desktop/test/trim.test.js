@@ -48,3 +48,11 @@ test('the recorder keeps the source format when it can', () => {
   assert.deepEqual(T.recorderType('mp4', only('video/webm')), { type: 'video/webm', ext: 'webm' });
   assert.equal(T.recorderType('mp4', () => false).type, '');
 });
+
+test('saved trim points come back only when they still fit the recording', () => {
+  assert.deepEqual(T.restore({ start: 1.5, end: 4 }, 10), { start: 1.5, end: 4 });
+  assert.deepEqual(T.restore({ start: 2, end: 99 }, 10), { start: 2, end: 10 }); // The file got shorter.
+  assert.deepEqual(T.restore(null, 10), { start: 0, end: 10 });
+  assert.deepEqual(T.restore({ start: 'x', end: 4 }, 10), { start: 0, end: 10 });
+  assert.deepEqual(T.restore({ start: 9.95, end: 12 }, 10), { start: 0, end: 10 }); // Too short to keep.
+});

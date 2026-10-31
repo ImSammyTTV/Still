@@ -7,12 +7,16 @@
 // In Chromium, In and Out land within a frame or two. The canvas route for engines without captureStream is
 // looser: on WebKit a 1.5 second clip came out about 0.6 seconds too long. It pauses while the window is hidden,
 // because the page's timers slow down then. An untrimmed export skips all this and copies the file exactly.
-// Trim points aren't saved with the recording; only the exported file keeps them.
+// The trim points and background are saved beside the recording (its project.json), so the editor opens where it
+// was left. A background is drawn into every exported frame, so it always means re-encoding.
 const id = params.get('id');
 const video = $('#video');
 const BITRATE = 12_000_000; // Matches the recording HUD.
 const THUMBNAILS = 9;
-let item, source, duration = 0, trim = { start: 0, end: 0 }, job = null;
+let item, source, duration = 0, trim = { start: 0, end: 0 }, job = null, project = {}, saveTimer = 0;
+const NO_BG = { style: 'none', padding: 8, radius: 2, shadow: true };
+let bg = { ...NO_BG };
+const hasBg = () => bg.style !== 'none';
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -90,6 +94,17 @@ function render() {
   $('#range').textContent = `${StillTrim.clock(trim.start)} — ${StillTrim.clock(trim.end)}  ·  ${StillTrim.clock(StillTrim.length(trim))}`;
   $('#reset').disabled = StillTrim.isFull(trim, duration);
   renderGifHint();
+  saveProject();
+}
+
+// Saved a moment after the last change, so dragging a handle doesn't write the file on every step.
+function saveProject() {
+  if (!duration) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, bg: hasBg() ? bg : null };
+    still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
+  }, 400);
 }
 
 function renderPlayhead() {
@@ -98,7 +113,8 @@ function renderPlayhead() {
 }
 
 function gifPlan() {
-  return StillGIF.plan({ duration: StillTrim.length(trim), fps: Number($('#gifFps').value), width: Number($('#gifWidth').value), sourceWidth: video.videoWidth, sourceHeight: video.videoHeight });
+  const F = StillBackdrop.videoFrame(video.videoWidth, video.videoHeight, bg);
+  return StillGIF.plan({ duration: StillTrim.length(trim), fps: Number($('#gifFps').value), width: Number($('#gifWidth').value), sourceWidth: F.w, sourceHeight: F.h });
 }
 function renderGifHint() {
   const plan = gifPlan();
@@ -137,6 +153,50 @@ $('#bar').addEventListener('pointerdown', (down) => {
   const up = () => { bar.removeEventListener('pointermove', scrub); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up); };
   bar.addEventListener('pointermove', scrub); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
 });
+
+// ---- Background ---------------------------------------------------------------------------------
+
+// The preview is laid out by hand so it shows exactly the frame an export will have.
+function layoutPreview() {
+  const stage = $('#stage'), vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return;
+  const F = StillBackdrop.videoFrame(vw, vh, bg), s = Math.min(stage.clientWidth / F.w, stage.clientHeight / F.h);
+  const frame = $('#frame');
+  Object.assign(frame.style, { width: `${F.w * s}px`, height: `${F.h * s}px`, left: `${(stage.clientWidth - F.w * s) / 2}px`, top: `${(stage.clientHeight - F.h * s) / 2}px` });
+  const [a, b] = StillBackdrop.GRADIENTS[bg.style] || [];
+  frame.style.background = hasBg() ? `linear-gradient(135deg, ${a}, ${b})` : 'none';
+  Object.assign(video.style, { left: `${F.x * s}px`, top: `${F.y * s}px`, width: `${vw * s}px`, height: `${vh * s}px`, borderRadius: `${F.radius * s}px`,
+    boxShadow: hasBg() && bg.shadow ? `0 ${Math.max(6, vw / 120) * s}px ${Math.max(20, vw / 30) * s}px rgba(0,0,0,.35)` : 'none' });
+}
+new ResizeObserver(layoutPreview).observe($('#stage'));
+video.addEventListener('loadedmetadata', layoutPreview);
+
+$('#swatches').append(el('button', { title: 'None', 'data-bg': 'none', html: icon('ban', 12), style: 'background:var(--bg-elevated)' }),
+  ...Object.entries(StillBackdrop.GRADIENTS).map(([name, [a, b]]) => el('button', { title: name[0].toUpperCase() + name.slice(1), 'data-bg': name, style: `background:linear-gradient(135deg, ${a}, ${b})` })));
+function renderBackground() {
+  $$('#swatches button').forEach((b) => { b.classList.toggle('active', b.dataset.bg === bg.style); b.setAttribute('aria-pressed', String(b.dataset.bg === bg.style)); });
+  $('#bgPadding').value = bg.padding; $('#bgRadius').value = bg.radius; $('#bgShadow').checked = bg.shadow;
+  $$('#bgPadding, #bgRadius, #bgShadow').forEach((input) => { input.disabled = !hasBg(); });
+  layoutPreview(); renderGifHint(); saveProject();
+}
+$('#swatches').addEventListener('click', (e) => { const b = e.target.closest('[data-bg]'); if (!b) return; bg = { ...bg, style: b.dataset.bg }; renderBackground(); });
+$('#bgPadding').oninput = (e) => { bg = { ...bg, padding: Number(e.target.value) }; renderBackground(); };
+$('#bgRadius').oninput = (e) => { bg = { ...bg, radius: Number(e.target.value) }; renderBackground(); };
+$('#bgShadow').onchange = (e) => { bg = { ...bg, shadow: e.target.checked }; renderBackground(); };
+$('#background').onclick = () => {
+  const panel = $('#backdrop'); panel.hidden = !panel.hidden;
+  $('#background').setAttribute('aria-expanded', String(!panel.hidden));
+  if (!panel.hidden && !hasBg()) bg = { ...bg, style: 'midnight' };
+  renderBackground();
+};
+
+// One exported frame: the background, then the video's current picture inside it.
+function drawFrame(ctx, player, F) {
+  ctx.save();
+  if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg);
+  ctx.drawImage(player, F.x, F.y, F.width, F.height);
+  ctx.restore();
+}
 
 // ---- Playback -----------------------------------------------------------------------------------
 
@@ -209,17 +269,24 @@ const save = (bytes) => { setProgress(1); $('#cancel').disabled = true; return s
 
 // Where the frames come from. Chromium (WebView2) can record a media element directly, audio included.
 // WebKitGTK can't, so there the picture goes through a canvas, as in the HUD, and the sound through Web Audio.
+// A background always goes through the canvas, which draws it into each frame.
 function captureSource(player) {
-  if (player.captureStream) return { stream: player.captureStream(), stop() {} };
-  player.muted = false;
-  const canvas = el('canvas', { width: player.videoWidth, height: player.videoHeight }), ctx = canvas.getContext('2d', { alpha: false });
-  const draw = () => ctx.drawImage(player, 0, 0, canvas.width, canvas.height);
+  if (player.captureStream && !hasBg()) return { stream: player.captureStream(), stop() {} };
+  const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg);
+  const canvas = el('canvas', { width: F.w, height: F.h }), ctx = canvas.getContext('2d', { alpha: false });
+  const draw = () => drawFrame(ctx, player, F);
   draw();
   const timer = setInterval(draw, 1000 / 30);
-  const audio = new AudioContext(), mix = audio.createMediaStreamDestination();
-  audio.createMediaElementSource(player).connect(mix);
-  const tracks = [...canvas.captureStream(30).getVideoTracks(), ...mix.stream.getAudioTracks()];
-  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); audio.close(); } };
+  let audio = null, sound;
+  if (player.captureStream) sound = player.captureStream().getAudioTracks();
+  else {
+    player.muted = false;
+    audio = new AudioContext(); const mix = audio.createMediaStreamDestination();
+    audio.createMediaElementSource(player).connect(mix);
+    sound = mix.stream.getAudioTracks();
+  }
+  const tracks = [...canvas.captureStream(30).getVideoTracks(), ...sound];
+  return { stream: new MediaStream(tracks), stop() { clearInterval(timer); if (audio) audio.close(); } };
 }
 
 async function recordClip(run, type) {
@@ -264,7 +331,7 @@ async function recordClip(run, type) {
 
 $('#exportVideo').onclick = () => {
   const ext = item.path.split('.').pop().toLowerCase();
-  if (StillTrim.isFull(trim, duration)) {
+  if (StillTrim.isFull(trim, duration) && !hasBg()) {
     return runExport('Exporting…', async () => {
       const target = await still.invoke('video:target', ext);
       return target && still.invoke('video:copy');
@@ -272,7 +339,7 @@ $('#exportVideo').onclick = () => {
   }
   const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && MediaRecorder.isTypeSupported(type));
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
-  runExport('Trimming…', async (run) => {
+  runExport(hasBg() ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);
     if (!target || run.cancelled) return null;
     const bytes = await recordClip(run, format.type);
@@ -298,9 +365,11 @@ $('#exportGif').onclick = () => {
       worker.onerror = (e) => reject(new Error(e.message || 'The GIF encoder couldn’t start.'));
       worker.postMessage(data, transfer);
     });
+    const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg);
+    ctx.scale(plan.width / F.w, plan.height / F.h);
     const grab = async (time) => {
       await seek(player, time);
-      ctx.drawImage(player, 0, 0, plan.width, plan.height);
+      drawFrame(ctx, player, F);
       return ctx.getImageData(0, 0, plan.width, plan.height).data;
     };
     run.onAbort = () => { worker.terminate(); failWorker(new Error('Cancelled')); };
@@ -340,10 +409,13 @@ async function open() {
   }
   duration = await realDuration(video, item.duration || 0);
   if (!(duration > 0)) throw new Error('This video has no length.');
-  trim = StillTrim.full(duration);
+  project = item.project && typeof item.project === 'object' ? item.project : {};
+  trim = StillTrim.restore(project.trim, duration);
+  if (project.bg && StillBackdrop.GRADIENTS[project.bg.style]) bg = { ...NO_BG, ...project.bg };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #exportVideo, #exportGif').forEach((button) => { button.disabled = false; });
-  render(); renderPlayhead();
+  $$('#play, #setIn, #setOut, #exportVideo, #exportGif, #background').forEach((button) => { button.disabled = false; });
+  render(); renderPlayhead(); renderBackground();
+  if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.
 }
 
