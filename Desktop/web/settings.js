@@ -121,6 +121,7 @@ const pages = {
     ], 'Still records the screen, the computer’s sound and the microphone itself, with no screen picker and no “sharing your screen” bar. The system web engine records instead if Still’s recorder isn’t available on this computer.') : null,
     group('Video', [
       select('Format', 'recording.format', [['mp4', 'MP4'], ['webm', 'WebM']]),
+      select('Quality', 'recording.quality', [['high', 'High'], ['balanced', 'Balanced'], ['compact', 'Smaller File']]),
       select('Frame rate', 'recording.fps', [[24, '24 fps'], [30, '30 fps'], [60, '60 fps']], true),
       select('Countdown', 'recording.countdown', [[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], true)
     ], prefs.shortcuts.record ? `Press ${StillGeometry.shortcutLabel(prefs.shortcuts.record, prefs.platform)} to stop a recording from anywhere, even when a full-screen app hides the recording controls. If MP4 can’t be encoded on this computer, Still records WebM instead.` : 'Set a Start / Stop Recording shortcut to stop a recording from anywhere, even when a full-screen app hides the recording controls.'),

@@ -80,5 +80,11 @@
     }[part] || part)).join(' + ');
   };
 
-  return { normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
+  // The Mac app's recording qualities in bits per pixel per frame, as Still's own recorder on Windows uses them.
+  const videoBitrate = (width, height, fps, quality) => {
+    const factor = quality === 'compact' ? 0.045 : quality === 'balanced' ? 0.09 : 0.18;
+    return Math.round(Math.min(100_000_000, Math.max(400_000, width * height * Math.max(1, fps) * factor)));
+  };
+
+  return { videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel };
 });

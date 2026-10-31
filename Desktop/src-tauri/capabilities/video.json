@@ -10,6 +10,7 @@
     "allow-library-play",
     "allow-video-export-target",
     "allow-video-export-save",
-    "allow-video-export-copy"
+    "allow-video-export-copy",
+    "allow-video-project-save"
   ]
 }

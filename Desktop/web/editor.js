@@ -13,12 +13,7 @@ const TOOLS = [
 ];
 const COLORS = ['#FF453A', '#FF9F0A', '#FFD60A', '#32D74B', '#64D2FF', '#0A84FF', '#BF5AF2', '#FF375F', '#FFFFFF', '#1D1D1F'];
 const STROKES = [2, 4, 6, 10, 16];
-const GRADIENTS = {
-  paper: ['#F0ECE3', '#DDD5C5'], sage: ['#D9E6C7', '#8DAE91'], midnight: ['#343F53', '#111C2B'], apricot: ['#FFD9AF', '#EAA89D'], ocean: ['#0D5AAA', '#062454'],
-  sky: ['#B9DEFF', '#5E9FE8'], mint: ['#C4F3DC', '#5AADA3'], rose: ['#FFE2E6', '#DF8BB0'], coral: ['#FFB09A', '#EF565C'], lavender: ['#D8D2FA', '#8C87DD'],
-  iris: ['#B59CED', '#4D3596'], dusk: ['#202255', '#C75F84'], sunrise: ['#F5CF8A', '#EE8782'], gold: ['#F5DA97', '#BC833C'], graphite: ['#4B4C50', '#1D1E20'],
-  snow: ['#FFFFFF', '#ECEFF2'], forest: ['#3D8061', '#12362D'], teal: ['#83D9D3', '#1F7C91'], plum: ['#A66AA5', '#3F1B57'], crimson: ['#E58D95', '#9E2045']
-};
+const GRADIENTS = StillBackdrop.GRADIENTS;
 
 // `image` is what's being edited: the original capture, or doc.source once it has been resized, rotated or flipped.
 let image = new Image(), original = image, bgImage = null, prefs = {};
@@ -59,17 +54,7 @@ function render(target = ctx, { handles = true } = {}) {
   target.save();
   target.clearRect(0, 0, L.w, L.h);
   if (L.hasBg) {
-    if (doc.bg.style === 'custom' && bgImage) drawCover(target, bgImage, L.w, L.h);
-    else {
-      const [a, b] = GRADIENTS[doc.bg.style] || GRADIENTS.midnight;
-      const g = target.createLinearGradient(0, 0, L.w, L.h); g.addColorStop(0, a); g.addColorStop(1, b);
-      target.fillStyle = g; target.fillRect(0, 0, L.w, L.h);
-    }
-    if (doc.bg.shadow) {
-      target.save(); target.shadowColor = 'rgba(0,0,0,.35)'; target.shadowBlur = Math.max(20, L.base.w / 30); target.shadowOffsetY = Math.max(6, L.base.w / 120);
-      target.fillStyle = '#000'; target.beginPath(); target.roundRect(L.ox, L.oy, L.base.w, L.base.h, doc.bg.radius); target.fill(); target.restore();
-    }
-    target.beginPath(); target.roundRect(L.ox, L.oy, L.base.w, L.base.h, doc.bg.radius); target.clip();
+    StillBackdrop.paint(target, L, { x: L.ox, y: L.oy, w: L.base.w, h: L.base.h, radius: doc.bg.radius }, doc.bg, bgImage);
   }
   target.translate(L.ox - L.base.x, L.oy - L.base.y);
   if (L.hasBg) { target.beginPath(); target.rect(L.base.x, L.base.y, L.base.w, L.base.h); target.clip(); }
@@ -79,11 +64,6 @@ function render(target = ctx, { handles = true } = {}) {
   if (handles && target === ctx && selected && tool === 'select') drawHandles(target, selected);
   target.restore();
   if (target === ctx) syncStyleButton();
-}
-
-function drawCover(target, img, w, h) {
-  const s = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  target.drawImage(img, (w - img.naturalWidth * s) / 2, (h - img.naturalHeight * s) / 2, img.naturalWidth * s, img.naturalHeight * s);
 }
 
 function drawArrow(t, m) {

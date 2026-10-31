@@ -41,3 +41,12 @@ test('names, durations and shortcut labels', () => {
   assert.equal(G.shortcutLabel('CommandOrControl+Shift+4', 'win32'), 'Ctrl + Shift + 4');
   assert.equal(G.shortcutLabel('Super+Alt+S', 'linux'), 'Super + Alt + S');
 });
+
+test('recording qualities match the Mac and stay within bounds', () => {
+  assert.equal(G.videoBitrate(1920, 1080, 30, 'high'), 11_197_440);
+  assert.equal(G.videoBitrate(1920, 1080, 30, 'balanced'), 5_598_720);
+  assert.equal(G.videoBitrate(1920, 1080, 30, 'compact'), 2_799_360);
+  assert.equal(G.videoBitrate(1920, 1080, 30, undefined), 11_197_440); // Settings from before qualities existed.
+  assert.equal(G.videoBitrate(10, 10, 1, 'high'), 400_000);
+  assert.equal(G.videoBitrate(7680, 4320, 60, 'high'), 100_000_000);
+});

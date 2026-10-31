@@ -68,10 +68,11 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Pause, resume, restart, cancel | ☑️ | ☑️ |
 | MP4 | ✅ export tested | ☑️ (MP4 or WebM, depending on the system) |
 | GIF export | ✅ export tested | ☑️ up to 60 s and 1280 px |
-| Custom bitrate presets | ☑️ | — |
+| Recording quality (High, Balanced, Smaller File) | ☑️ plus custom bitrate presets | ☑️ the three qualities, same bitrates as the Mac |
 | Camera bubble, click and keystroke overlays | ☑️ | ☑️ Windows · ☑️ Linux on X11 (camera also on Wayland; clicks and keys are off there) |
-| Video editor: trim bar with drag handles, Set In/Out | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
-| Video editor: zoom, background, cursor effects | ✅ export tested | — |
+| Video editor: trim bar with drag handles, Set In/Out, trim points kept with the recording | ✅ | ☑️ trimmed exports re-encode in real time; untrimmed exports are exact copies |
+| Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ video and GIF exports checked in Chromium · no own-image backgrounds yet |
+| Video editor: zoom and cursor effects | ✅ export tested | — |
 | Audio transcription | ☑️ | — |
 
 ## Sharing
@@ -99,8 +100,8 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** video editor zoom, background and cursor effects, audio transcription, extra capture options
-  such as horizontal and auto-scrolling, and saved trim points. Linux can't hide desktop icons.
+- **Windows and Linux:** video editor zoom and cursor effects, own-image video backgrounds, custom bitrates, audio
+  transcription, and horizontal and auto-scrolling capture. Linux can't hide desktop icons.
 - **Mac:** Apple notarization (needs a paid Apple Developer account).
 - **Windows:** code-signed downloads.
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
