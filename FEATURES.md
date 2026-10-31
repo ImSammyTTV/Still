@@ -42,6 +42,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Save to an export folder, Save As | ☑️ | ☑️ |
 | Pinned captures (move, resize, opacity, click-through) | ☑️ | ☑️ |
 | Capture History with search, rename, delete | ☑️ | ✅ opens and reopens captures |
+| Combine screenshots: ⌘/Ctrl-click several in History, then join them side by side or top to bottom into a new capture | ☑️ | ☑️ |
 
 ## Editor
 

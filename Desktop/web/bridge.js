@@ -28,7 +28,7 @@
     'recording:tick': ['recording_tick', 'seconds', 'paused'], 'video:target': ['video_export_target', 'ext'], 'video:copy': ['video_export_copy'], 'video:project': ['video_project_save', 'project'],
     'cloud:get': ['cloud_get'], 'cloud:connect': ['cloud_connect', 'endpoint', 'token'], 'cloud:disconnect': ['cloud_disconnect'],
     'drive:get': ['drive_get'], 'drive:connect': ['drive_connect'], 'drive:disconnect': ['drive_disconnect'],
-    'cloud:upload': ['cloud_upload', 'id'], 'library:qr': ['library_qr', 'id'], 'qr:svg': ['qr_svg', 'link'], 'countdown:cancel': ['countdown_cancel'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],
+    'cloud:upload': ['cloud_upload', 'id'], 'library:qr': ['library_qr', 'id'], 'library:combine': ['library_combine', 'ids', 'vertical'], 'qr:svg': ['qr_svg', 'link'], 'countdown:cancel': ['countdown_cancel'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],
     'scroll:stop': ['scroll_stop', 'save'], 'scroll:auto': ['scroll_auto', 'on'],
     'update:status': ['update_status'], 'update:check': ['update_check'], 'update:install': ['update_install']
   };

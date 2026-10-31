@@ -1,5 +1,6 @@
 mod capture;
 mod cloud;
+mod combine;
 mod desktop;
 mod drive;
 mod library;
@@ -1170,6 +1171,25 @@ async fn library_open(app: AppHandle, id: String) {
     let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (i.kind.clone(), lib.file(&i))) };
     match found { Some((kind, _)) if kind == "recording" => open_video(&app, &id), Some(_) => open_editor(&app, Some(&id), false), None => {} }
 }
+/// History's Combine: the chosen screenshots joined into one new capture, in the order they were picked, which opens
+/// in the editor.
+#[tauri::command]
+async fn library_combine(app: AppHandle, ids: Vec<String>, vertical: bool) -> Result<(), String> {
+    if ids.len() < 2 { return Err("Choose two or more screenshots to combine.".into()); }
+    let files: Vec<PathBuf> = {
+        let lib = st(&app).library.lock().unwrap();
+        ids.iter().map(|id| lib.get(id).filter(|i| i.kind != "recording").map(|i| lib.file(&i)).ok_or("Only screenshots can be combined.")).collect::<Result<_, _>>()?
+    };
+    let images: Vec<image::RgbaImage> = files.iter().map(|f| std::fs::read(f).ok().and_then(|b| capture::decode(&b)).ok_or("Couldn’t read one of the screenshots")).collect::<Result<_, _>>()?;
+    let joined = combine::combine(&images, vertical);
+    let (w, h) = joined.dimensions();
+    let title = format!("Combined {} screenshots", images.len());
+    let item = st(&app).library.lock().unwrap().add(&capture::png(&joined), "screenshot", "png", Some(title), w, h)?;
+    broadcast(&app, "library:changed", Value::Null);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || open_editor(&a, Some(&item.id), false));
+    Ok(())
+}
 #[tauri::command]
 async fn library_play(app: AppHandle, id: String) {
     let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
@@ -1896,7 +1916,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

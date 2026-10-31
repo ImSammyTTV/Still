@@ -6,6 +6,16 @@ struct HistoryView: View {
     let dismiss: () -> Void
     @State private var filter = "All"
     @State private var selected: UUID?
+    /// Screenshots picked with ⌘-click (or ⇧-click) to combine, in the order they were picked.
+    @State private var picks: [UUID] = []
+    private func togglePick(_ item: CaptureItem) {
+        if item.isVideo { library.toast("Only screenshots can be combined"); return }
+        if let index = picks.firstIndex(of: item.id) { picks.remove(at: index) } else { picks.append(item.id) }
+    }
+    private func combine(vertical: Bool) {
+        let chosen = picks.compactMap { id in library.items.first { $0.id == id } }
+        picks = []; AppController.shared.combine(chosen, vertical: vertical); dismiss()
+    }
     @State private var query = ""
     @State private var pendingDelete: CaptureItem?
     @State private var renaming: CaptureItem?
@@ -29,22 +39,36 @@ struct HistoryView: View {
                     ScrollView(.vertical) {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 245))], spacing: 22) {
                             ForEach(items) { item in
-                                Button { selected = item.id } label: {
+                                Button { if !NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty { togglePick(item) } else { selected = item.id } } label: {
                                     VStack(spacing: 12) {
                                         ZStack {
                                             RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.07))
                                             if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).padding(3) }
                                             if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 35)).shadow(radius: 5) }
-                                        }.frame(width: 250, height: 190).overlay(RoundedRectangle(cornerRadius: 4).stroke(current?.id == item.id ? Color.accentColor : .clear, lineWidth: 4))
+                                            if let n = picks.firstIndex(of: item.id) {
+                                                Text("\(n + 1)").font(.system(size: 12, weight: .bold)).foregroundStyle(.white).frame(minWidth: 24, minHeight: 24).background(Color.accentColor, in: Capsule())
+                                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(10).accessibilityLabel("Picked \(n + 1) to combine")
+                                            }
+                                        }.frame(width: 250, height: 190).overlay(RoundedRectangle(cornerRadius: 4).stroke(current?.id == item.id || picks.contains(item.id) ? Color.accentColor : .clear, lineWidth: 4))
                                         Text(item.title).lineLimit(1).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 245)
                                     }
                                 }.buttonStyle(.plain).id(item.id).simultaneousGesture(TapGesture(count: 2).onEnded { AppController.shared.openItem(item); dismiss() })
-                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; Button("Upload to Cloud") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
+                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; Button("Upload to Cloud") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
                                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
                             }
                         }.padding(.horizontal, 10).padding(.vertical, 8)
                     }.scrollIndicators(.hidden)
                     .onChange(of: selected) { _, value in if let value { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(value, anchor: .center) } } }
+                }
+                if !picks.isEmpty {
+                    HStack(spacing: 10) {
+                        Spacer()
+                        Text(picks.count == 1 ? "1 screenshot · ⌘-click one more" : "\(picks.count) screenshots").foregroundStyle(.secondary)
+                        Button { combine(vertical: false) } label: { Label("Side by Side", systemImage: "rectangle.split.2x1") }.disabled(picks.count < 2)
+                        Button { combine(vertical: true) } label: { Label("Top to Bottom", systemImage: "rectangle.split.1x2") }.disabled(picks.count < 2)
+                        Button("Clear") { picks = [] }
+                        Spacer()
+                    }.controlSize(.large)
                 }
                 HStack { Spacer(); Button { if let current { AppController.shared.showPreview(current); dismiss() } } label: { Label("Restore", systemImage: "return.left").font(.system(size: 16, weight: .semibold)) }.buttonStyle(.borderedProminent).clipShape(Capsule()).keyboardShortcut(.defaultAction); Spacer() }
             }

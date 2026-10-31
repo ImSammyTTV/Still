@@ -29,6 +29,16 @@
   .sub { font-size: var(--text-xs); color: var(--text-2); }
   .empty { grid-column: 1 / -1; display: grid; place-items: center; gap: 10px; padding: 80px 0; color: var(--text-2); text-align: center; }
   .empty svg { width: 40px; height: 40px; opacity: .5; }
+  /* Screenshots picked with Ctrl/⌘-click, numbered in the order they'll be joined. */
+  .tile.picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .pick-number { position: absolute; left: 7px; bottom: 7px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: var(--radius-pill); display: none; place-items: center;
+    background: var(--accent); color: var(--accent-text); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+  .tile.picked .pick-number { display: grid; }
+  .pickbar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; align-items: center; gap: var(--space-2); padding: 6px 6px 6px 16px;
+    border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: var(--text-sm); z-index: 20; }
+  .pickbar.show { display: flex; }
+  .pickbar .btn { height: 30px; }
+  .pickbar .btn svg { width: 14px; height: 14px; }
 
 </style>
 </head>
@@ -43,6 +53,12 @@
   <input class="field search" id="search" aria-label="Search captures" placeholder="Search titles and text">
 </div>
 <div class="grid" id="grid"></div>
+<div class="pickbar" id="pickbar" role="toolbar" aria-label="Combine screenshots">
+  <span id="pickCount"></span>
+  <button class="btn" id="combineSide" title="Join them left to right"><i data-lucide="columns-2"></i>Side by Side</button>
+  <button class="btn" id="combineStack" title="Join them top to bottom"><i data-lucide="rows-2"></i>Top to Bottom</button>
+  <button class="btn icon plain" id="pickClear" title="Clear the selection (Esc)"><i data-lucide="x"></i></button>
+</div>
 <script src="bridge.js"></script>
 <script src="vendor/lucide.min.js"></script>
 <script src="shared/geometry.js"></script>

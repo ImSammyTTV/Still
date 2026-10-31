@@ -432,6 +432,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hideForCapture(); lastExternalApp?.activate()
         showRecordingSetup()
     }
+    /// History's Combine: the chosen screenshots joined into one new capture, in the order they were picked, which
+    /// opens in the editor.
+    func combine(_ items: [CaptureItem], vertical: Bool) {
+        let images = items.filter { !$0.isVideo }.compactMap { ImageRenderer.load(library.url($0)) }
+        guard images.count >= 2, images.count == items.count else { library.toast("Choose two or more screenshots to combine"); return }
+        Task {
+            do {
+                let (joined, png) = try await Task.detached(priority: .userInitiated) { () -> (CGImage, Data) in
+                    guard let joined = CaptureCombine.combine(images, vertical: vertical) else { throw CocoaError(.fileWriteUnknown) }
+                    return (joined, try ImageRenderer.libraryData(joined))
+                }.value
+                let item = try library.add(png: png, width: joined.width, height: joined.height, title: "Combined \(images.count) screenshots")
+                openEditor(image: joined, item: item)
+            } catch { showError("Couldn’t combine the screenshots", error.localizedDescription) }
+        }
+    }
     func openItem(_ item: CaptureItem) {
         if item.isVideo { openVideoEditor(item) }
         else if let image = ImageRenderer.load(library.url(item)) { openEditor(image: image, item: item) }
