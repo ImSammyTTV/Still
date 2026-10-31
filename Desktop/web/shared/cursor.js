@@ -42,5 +42,15 @@
     ctx.restore();
   }
 
-  return { SMOOTHING, raw, at, draw };
+  // The Mac's Dot style: a soft white disc centred on the point, `size` across, that shows where the pointer is
+  // without covering what's under it.
+  function dot(ctx, x, y, size) {
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fill();
+    ctx.lineWidth = Math.max(1, size / 24); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.stroke();
+    ctx.restore();
+  }
+
+  return { SMOOTHING, raw, at, draw, dot };
 });
