@@ -46,7 +46,7 @@ OIDC requires discovery, authorization-code with PKCE, and userinfo with verifie
 
 ## Sharing behavior
 
-Links support expiration, passwords, view limits and team/private visibility. A public visit counts when the share page API is opened; subsequent range requests use its visit cookie. Downloads enforce access and expiration. Owners can still access their own expired captures through the dashboard. Trash is recoverable and continues to consume disk space. Passwords are salted and hashed. Transport security depends on HTTPS hosting.
+Links support expiration, passwords, view limits and team/private visibility. A public visit counts when the share page API is opened; subsequent range requests use its visit cookie. Downloads enforce access and expiration. Owners can still access their own expired captures through the dashboard. Trash is recoverable and keeps using disk space until it's emptied: **Empty Trash** in the dashboard (`DELETE /api/trash`) or **Delete Forever** on one capture in Trash (`POST /api/uploads/<id>/purge`) removes the file, its comments and its view records for good, and records it in the audit log. The owner's Trash holds every account's captures, so the owner empties all of it; a member empties only their own. A capture must be in Trash before it can be deleted for good. Passwords are salted and hashed. Transport security depends on HTTPS hosting.
 
 Comments accept image positions, video timestamps, replies and owner resolution. OCR, tags, transcripts and caption metadata are searchable. The server does not transcribe audio. API tokens are account-wide credentials: protect them like passwords.
 
@@ -56,4 +56,4 @@ Comments accept image positions, video timestamps, replies and owner resolution.
 python3 -m unittest discover -s tests -v
 ```
 
-The suite uses temporary synthetic files and tests authentication, upload validation, byte ranges, passwords, expiry, view limits, access isolation, token rotation, CSRF, comments, search, trash and provisioning. Tests do not contact a remote identity provider.
+The suite uses temporary synthetic files and tests authentication, upload validation, byte ranges, passwords, expiry, view limits, access isolation, token rotation, CSRF, comments, search, trash (including emptying it) and provisioning. Tests do not contact a remote identity provider.

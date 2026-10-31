@@ -48,6 +48,12 @@ if (page === 'dashboard') {
   $('sort').addEventListener('change', renderCaptures);
   $('load-more').addEventListener('click', async () => { if (state.shown < state.items.length) { state.shown += 50; renderCaptures(); } else if (state.nextOffset !== null) { await loadCaptures(true); state.shown += 50; renderCaptures(); } });
   $('upload-button').addEventListener('click', () => { $('upload-form').reset(); $('upload-error').textContent = ''; showDialog('upload-dialog'); });
+  $('empty-trash').addEventListener('click', async () => {
+    const count = new Intl.NumberFormat().format(state.total);
+    if (!confirm(`Delete ${count} ${state.total === 1 ? 'capture' : 'captures'} in Trash for good? Their links stop working and they can’t be restored.`)) return;
+    try { const result = await api('/api/trash', { method: 'DELETE' }); toast(`Trash emptied: ${result.deleted} deleted, ${size(result.freed)} freed`); loadCaptures(); }
+    catch (error) { toast(error.message); }
+  });
   $('upload-file').addEventListener('change', () => { const file = $('upload-file').files[0]; if (file && !$('upload-title').value) $('upload-title').value = file.name.replace(/\.[^.]+$/, ''); });
   $('upload-form').addEventListener('submit', uploadFile);
   $('edit-form').addEventListener('submit', saveEdit);
@@ -69,6 +75,7 @@ async function loadCaptures(append = false) {
     node.setAttribute('aria-pressed', String(active));
   });
   $('library-title').textContent = state.filter === 'All' ? 'All Captures' : state.filter === 'Images' ? 'Screenshots' : state.filter === 'Videos' ? 'Recordings' : 'Trash';
+  $('empty-trash').hidden = state.filter !== 'Trash'; $('upload-button').hidden = state.filter === 'Trash';
   const query = new URLSearchParams({ q: state.query, trash: state.filter === 'Trash' ? '1' : '0', offset: append ? String(state.nextOffset || 0) : '0', count: '100', type: state.filter });
   try { const result = await api(`/api/uploads?${query}`); if (request !== state.request) return; state.items = append ? state.items.concat(result.items) : result.items; state.total = result.total ?? state.items.length; state.nextOffset = result.nextOffset ?? null; renderCaptures(); }
   catch (error) { $('dashboard-error').textContent = error.message; }
@@ -89,7 +96,13 @@ function renderCaptures() {
     if (item.tags.length) { const tags = el('div', 'tags'); item.tags.forEach((tag) => { const button = el('button', 'tag', tag); button.addEventListener('click', () => { state.query = tag; $('search').value = tag; updateURL(); loadCaptures(); }); tags.append(button); }); info.append(tags); }
     const actions = el('div', 'card-actions');
     const add = (title, perform) => { const button = el('button', '', title); button.setAttribute('aria-label', `${title}: ${item.title}`); button.addEventListener('click', perform); actions.append(button); };
-    if (state.filter === 'Trash') { add('Restore', async () => { await api(`/api/uploads/${item.id}/restore`, { method: 'POST', body: {} }); toast('Capture restored'); loadCaptures(); }); }
+    if (state.filter === 'Trash') {
+      add('Restore', async () => { await api(`/api/uploads/${item.id}/restore`, { method: 'POST', body: {} }); toast('Capture restored'); loadCaptures(); });
+      add('Delete Forever', async () => {
+        if (!confirm(`Delete “${item.title}” for good? Its link stops working and it can’t be restored.`)) return;
+        try { await api(`/api/uploads/${item.id}/purge`, { method: 'POST', body: {} }); toast('Deleted for good'); loadCaptures(); } catch (error) { toast(error.message); }
+      });
+    }
     else {
       add('Copy Link', () => copy(item.url)); add('Settings', () => editCapture(item));
       add('Trash', async () => { if (!confirm(`Move “${item.title}” to Trash? You can restore it later.`)) return; await api(`/api/uploads/${item.id}`, { method: 'DELETE' }); toast('Moved to Trash'); loadCaptures(); });
@@ -97,6 +110,7 @@ function renderCaptures() {
     info.append(actions); card.append(link, info); fragment.append(card);
   }
   $('captures').replaceChildren(fragment); $('capture-count').textContent = `${new Intl.NumberFormat().format(state.total)} captures`;
+  $('empty-trash').disabled = state.filter === 'Trash' && state.total === 0;
   $('empty').hidden = state.total !== 0; $('load-more').hidden = state.shown >= items.length && state.nextOffset === null;
 }
 async function uploadFile(event) {

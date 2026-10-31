@@ -179,6 +179,31 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(self.call('POST',f"/api/uploads/{a['id']}/restore",{})[0],200)
         self.assertEqual(self.call('GET',a['media'],auth=None)[0],200)
         self.assertGreater(len(self.call('GET','/api/audit')[1]['events']),4)
+    def test_emptying_trash_deletes_for_good(self):
+        _, user, _=self.call('POST','/api/users',dict(username='trash@example.test',name='Trash'))
+        member=user['token']
+        kept=self.create(title='Kept'); gone=self.create(title='Gone'); single=self.create(title='Single')
+        # A capture still in the library can't be deleted for good; it goes to Trash first.
+        self.assertEqual(self.call('POST',f"/api/uploads/{single['id']}/purge",{})[0],409)
+        for item in (gone, single): self.assertEqual(self.call('DELETE',f"/api/uploads/{item['id']}")[0],200)
+        # Delete Forever: one capture from Trash, file and all.
+        status, result, _=self.call('POST',f"/api/uploads/{single['id']}/purge",{})
+        self.assertEqual(status,200); self.assertEqual(result['freed'],len(PNG))
+        self.assertFalse((self.store.files/(single['id']+'.blob')).exists())
+        self.assertEqual(self.call('GET',f"/api/uploads/{single['id']}")[0],404)
+        # Another account's Empty Trash leaves the owner's Trash alone.
+        self.assertEqual(self.call('DELETE','/api/trash',auth=member)[1]['deleted'],0)
+        self.assertEqual(self.call('GET','/api/uploads?trash=1')[1]['total'],1)
+        # Empty Trash: the rest of Trash, and nothing outside it.
+        status, result, _=self.call('DELETE','/api/trash')
+        self.assertEqual(status,200); self.assertEqual(result, {'deleted':1,'freed':len(PNG)})
+        self.assertEqual(self.call('GET','/api/uploads?trash=1')[1]['total'],0)
+        self.assertEqual(self.call('GET',gone['media'],auth=None)[0],404)
+        self.assertFalse((self.store.files/(gone['id']+'.blob')).exists())
+        self.assertEqual(self.call('GET',kept['media'],auth=None)[0],200)
+        actions=[event['action'] for event in self.call('GET','/api/audit')[1]['events']]
+        self.assertIn('trash.empty',actions); self.assertIn('upload.purge',actions)
+        self.assertEqual(self.call('GET','/api/trash')[0],405)
     def test_scim_provision_update_deactivate_and_owner_protection(self):
         self.store.scim_token='unit-test-scim'
         headers={'Authorization':'Bearer unit-test-scim'}

@@ -167,6 +167,19 @@ class Store:
     def audit(db, actor, action, object_id):
         db.execute("INSERT INTO audit(time,actor,action,object_id) VALUES(?,?,?,?)", (time.time(), actor, action, object_id))
 
+    def purge(self, db, upload_ids):
+        """Deletes captures for good: their rows, comments and view records now, inside `db`'s transaction. Returns the
+        files to remove once that transaction has committed, so a failed delete never leaves rows without files."""
+        for upload_id in upload_ids:
+            db.execute("DELETE FROM comments WHERE upload_id=?", (upload_id,))
+            db.execute("DELETE FROM visits WHERE upload_id=?", (upload_id,))
+            db.execute("DELETE FROM uploads WHERE id=?", (upload_id,))
+        return [self.files/(upload_id+suffix) for upload_id in upload_ids for suffix in (".blob", ".part")]
+
+    @staticmethod
+    def remove_files(paths):
+        for path in paths: path.unlink(missing_ok=True)
+
 class CloudHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -348,7 +361,8 @@ class Handler(BaseHTTPRequestHandler):
                     token_path.write_text(token + "\n"); token_path.chmod(0o600)
                 return self.respond(200, {"token": token})
             if path == "/api/uploads": return self.uploads(query)
-            match = re.fullmatch(r"/api/uploads/([a-f0-9]{32})(?:/(content|restore))?", path)
+            if path == "/api/trash": return self.empty_trash()
+            match = re.fullmatch(r"/api/uploads/([a-f0-9]{32})(?:/(content|restore|purge))?", path)
             if match: return self.upload_action(*match.groups())
             if path == "/api/users": return self.users()
             match = re.fullmatch(r"/api/users/([a-f0-9]{32})(?:/(token))?", path)
@@ -451,6 +465,13 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute("UPDATE uploads SET status='ready',sha256=? WHERE id=?", (hasher.hexdigest(), upload_id)); self.store.audit(db, user["id"], "upload.complete", upload_id)
                 updated = db.execute("SELECT * FROM uploads WHERE id=?", (upload_id,)).fetchone()
             return self.respond(200, self.public_upload(updated))
+        if action == "purge" and self.command == "POST":
+            # Only from Trash, so a capture can't skip the step that lets it be restored.
+            if row["deleted"] is None: raise HTTPError(409, "Move this capture to Trash first.")
+            with self.store.db() as db:
+                files = self.store.purge(db, [upload_id]); self.store.audit(db, user["id"], "upload.purge", upload_id)
+            self.store.remove_files(files)
+            return self.respond(200, {"ok": True, "freed": row["size"]})
         if action == "restore" and self.command == "POST":
             with self.store.db() as db: db.execute("UPDATE uploads SET deleted=NULL WHERE id=?", (upload_id,)); self.store.audit(db, user["id"], "upload.restore", upload_id)
             return self.respond(200, {"ok": True})
@@ -476,6 +497,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, {"ok": True})
         if self.command in ("GET", "HEAD"): return self.respond(200, self.public_upload(row))
         raise HTTPError(405, "Method not allowed.")
+    def empty_trash(self):
+        """Deletes everything in the caller's Trash for good. The owner's Trash shows every account's captures, so the
+        owner empties all of it; anyone else empties only their own."""
+        user = self.user()
+        if self.command != "DELETE": raise HTTPError(405, "Method not allowed.")
+        with self.store.db() as db:
+            rows = db.execute("SELECT id,size FROM uploads WHERE deleted IS NOT NULL AND (owner=? OR ?='admin')", (user["id"], user["role"])).fetchall()
+            files = self.store.purge(db, [row["id"] for row in rows])
+            self.store.audit(db, user["id"], "trash.empty", str(len(rows)))
+        self.store.remove_files(files)
+        return self.respond(200, {"deleted": len(rows), "freed": sum(row["size"] for row in rows)})
     @staticmethod
     def valid_magic(data, mime):
         if mime == "image/png": return data.startswith(b"\x89PNG\r\n\x1a\n")
