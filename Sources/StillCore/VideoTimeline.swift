@@ -65,3 +65,35 @@ public enum VideoExportSize {
         return CGSize(width: max(2, floor(width * k / 2) * 2), height: max(2, floor(height * k / 2) * 2))
     }
 }
+
+/// Text shown over a video for a stretch of the recording (in its own time), in a dark rounded pill near the top,
+/// middle or bottom, fading in and out over a quarter of a second. Windows and Linux follow the same rules
+/// (shared/captions.js) and share the test cases.
+public struct VideoCaption: Codable, Equatable, Hashable, Identifiable {
+    public var id = UUID()
+    public var start: Double
+    public var end: Double
+    public var text: String
+    public var position: String
+    public var size: String
+    public init(start: Double, end: Double, text: String = "Your text", position: String = "bottom", size: String = "medium") {
+        self.start = start; self.end = end; self.text = text; self.position = position; self.size = size
+    }
+    public static let sizes: [String: Double] = ["small": 0.045, "medium": 0.06, "large": 0.08]
+    public static let places: [String: Double] = ["top": 0.1, "middle": 0.5, "bottom": 0.88]
+
+    /// A new caption at `time`, three seconds long and kept inside the clip.
+    public static func new(at time: Double, start: Double, end: Double) -> VideoCaption { VideoCaption(start: max(start, time), end: min(end, time + 3)) }
+
+    /// How opaque it is at `time` (0 to 1), or nil when it isn't showing.
+    public func alpha(at time: Double) -> Double? {
+        guard !text.isEmpty, time >= start, time <= end else { return nil }
+        let ramp = min(0.25, (end - start) / 3)
+        return ramp > 0 ? min(1, (time - start) / ramp, (end - time) / ramp) : 1
+    }
+
+    /// Font size and the point the pill is centred on (from the top left) in a video area `width` × `height`.
+    public func layout(width: Double, height: Double) -> (fontSize: Double, x: Double, y: Double) {
+        ((max(12, min(width, height) * (Self.sizes[size] ?? 0.06))).rounded(), width / 2, height * (Self.places[position] ?? 0.88))
+    }
+}

@@ -32,7 +32,9 @@ const drawsClicks = () => showClicks && clicks().length > 0;
 let cursorFx = { show: true, size: 1, smooth: true, style: 'arrow' };
 const separateCursor = () => project.cursor === 'separate';
 const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
-const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor();
+// Text shown over the video for a stretch of it, and the one being edited.
+let captions = [], selectedCaption = -1;
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text);
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -141,7 +143,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, captions: captions.length ? captions : null, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -225,6 +227,8 @@ function renderView() {
 // What's drawn over the picture: click rings, then the pointer on top. Same arguments as drawRings.
 function drawOverlays(ctx, t, src, scale, k, ox, oy, vw, vh) {
   if (drawsClicks()) drawRings(ctx, t, src, scale, k, ox, oy, vw, vh);
+  // Captions sit over the video area, steady through zooms.
+  StillCaptions.draw(ctx, captions, t, ox, oy, vw * k, vh * k, getComputedStyle(document.body).fontFamily);
   if (!drawsCursor()) return;
   const p = StillCursor.at(project.pointer, t, cursorFx.smooth);
   if (!p) return;
@@ -290,6 +294,34 @@ function drawFrame(ctx, player, F) {
   drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
+
+// ---- Text ---------------------------------------------------------------------------------------
+
+function renderCaptions() {
+  if (selectedCaption >= captions.length) selectedCaption = -1;
+  const lane = $('#captionLane'); lane.replaceChildren();
+  captions.forEach((c, i) => {
+    const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
+    lane.append(el('button', { class: i === selectedCaption ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `“${c.text}” ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}`, 'aria-pressed': String(i === selectedCaption),
+      onclick: () => { selectedCaption = i === selectedCaption ? -1 : i; if (selectedCaption >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); renderCaptions(); } }));
+  });
+  const c = captions[selectedCaption];
+  $('#captionTools').hidden = !c;
+  if (c) { if (document.activeElement !== $('#captionText')) $('#captionText').value = c.text; $('#captionPlace').value = c.position; $('#captionSize').value = c.size; }
+  renderView(); saveProject();
+}
+const changeCaption = (patch) => { let changed = null; captions = captions.map((c, i) => (i === selectedCaption ? (changed = { ...c, ...patch }) : c)).sort((a, b) => a.start - b.start); if (changed) selectedCaption = captions.indexOf(changed); renderCaptions(); };
+$('#addCaption').onclick = () => {
+  captions = StillCaptions.add(captions, video.currentTime, trim);
+  selectedCaption = captions.findIndex((c) => c.start <= video.currentTime + 0.01 && c.end >= video.currentTime && c.text === 'Your text');
+  renderCaptions(); $('#captionText').focus(); $('#captionText').select();
+};
+$('#captionText').addEventListener('input', (e) => changeCaption({ text: e.target.value }));
+$('#captionPlace').onchange = (e) => changeCaption({ position: e.target.value });
+$('#captionSize').onchange = (e) => changeCaption({ size: e.target.value });
+$('#captionIn').onclick = () => { const c = captions[selectedCaption]; if (c && video.currentTime < c.end - 0.2) changeCaption({ start: video.currentTime }); };
+$('#captionOut').onclick = () => { const c = captions[selectedCaption]; if (c && video.currentTime > c.start + 0.2) changeCaption({ end: video.currentTime }); };
+$('#captionRemove').onclick = () => { captions = captions.filter((_, i) => i !== selectedCaption); selectedCaption = -1; renderCaptions(); };
 
 // ---- Zooms --------------------------------------------------------------------------------------
 
@@ -391,7 +423,9 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'o' || e.key === 'O') $('#setOut').click();
   else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
+  else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaption >= 0) $('#captionRemove').click();
   else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedZooms.size) $('#zoomRemove').click();
 });
 
@@ -621,10 +655,12 @@ async function open() {
   if (project.bg && (StillBackdrop.GRADIENTS[project.bg.style] || (project.bg.style === 'custom' && project.bg.custom))) bg = { ...NO_BG, ...project.bg };
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
+  captions = (Array.isArray(project.captions) ? project.captions : []).filter((c) => c && c.end > c.start && typeof c.text === 'string');
+  renderCaptions();
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

@@ -244,6 +244,17 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
                 result = overlay.composited(over: result)
             }
         }
+        // Captions sit over the video area, steady through zooms.
+        for caption in s.captions ?? [] {
+            guard let alpha = caption.alpha(at: time) else { continue }
+            let at = caption.layout(width: contentRect.width, height: contentRect.height)
+            let pill = captionImage(caption.text, fontSize: at.fontSize, maxWidth: contentRect.width*0.9)
+            let x = contentRect.minX+at.x-pill.extent.width/2
+            let centre = min(contentRect.height-pill.extent.height/2-4, max(pill.extent.height/2+4, at.y))
+            let y = contentRect.maxY-centre-pill.extent.height/2
+            result = pill.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
+                .transformed(by: CGAffineTransform(translationX: x, y: y)).composited(over: result)
+        }
         if s.showKeystrokes, let key = i.metadata.keys.last(where: { $0.time <= time && time-$0.time < 1.7 }) {
             let factor = max(0.5, min(3, s.keysSize ?? 1))
             let overlay = textImage(key.text, light: s.keysStyle == "light").transformed(by: CGAffineTransform(scaleX: factor, y: factor))
@@ -291,6 +302,26 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
         ctx.setStrokeColor(color.cgColor); ctx.setFillColor(color.withAlphaComponent(0.4).cgColor); ctx.setLineWidth(3)
         ctx.addEllipse(in: CGRect(x: 10, y: 10, width: 44, height: 44)); ctx.drawPath(using: filled ? .fill : .stroke)
         return CIImage(cgImage: ctx.makeImage()!)
+    }
+    /// A caption's pill: white semibold text, up to three lines, on a dark rounded box.
+    private func captionImage(_ text: String, fontSize: Double, maxWidth: Double) -> CIImage {
+        let cacheKey = "caption:\(Int(fontSize)):\(Int(maxWidth)):\(text)"
+        if let image = textImages[cacheKey] { return image }
+        let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil) ?? CTFontCreateWithName("HelveticaNeue-Medium" as CFString, fontSize, nil)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).prefix(3).map { CTLineCreateWithAttributedString(NSAttributedString(string: String($0), attributes: [kCTFontAttributeName as NSAttributedString.Key: font, kCTForegroundColorAttributeName as NSAttributedString.Key: NSColor.white.cgColor])) }
+        let lineHeight = fontSize*1.25, padX = fontSize*0.8, padY = fontSize*0.45
+        let textWidth = min(maxWidth, lines.map { CTLineGetTypographicBounds($0, nil, nil, nil) }.max() ?? 0)
+        let width = Int(textWidth+padX*2), height = Int(lineHeight*Double(lines.count)+padY*2)
+        guard width > 0, height > 0, let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return CIImage.empty() }
+        let radius = min(Double(height)/2, fontSize*0.6)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.72).cgColor); ctx.addPath(CGPath(roundedRect: CGRect(x: 0, y: 0, width: width, height: height), cornerWidth: radius, cornerHeight: radius, transform: nil)); ctx.fillPath()
+        for (index, line) in lines.enumerated() {
+            let lineWidth = min(textWidth, CTLineGetTypographicBounds(line, nil, nil, nil))
+            // Lines from the top; Core Graphics counts from the bottom.
+            let baseline = Double(height)-padY-lineHeight*Double(index+1)+lineHeight*0.3
+            ctx.textPosition = CGPoint(x: (Double(width)-lineWidth)/2, y: baseline); CTLineDraw(line, ctx)
+        }
+        let image = CIImage(cgImage: ctx.makeImage()!); if textImages.count > 200 { textImages.removeAll() }; textImages[cacheKey] = image; return image
     }
     private func textImage(_ text: String, light: Bool = false) -> CIImage {
         let cacheKey = "\(light):\(text)"

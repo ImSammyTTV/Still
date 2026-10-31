@@ -202,7 +202,7 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
@@ -233,6 +233,19 @@ struct VideoEditorView: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.accentColor, lineWidth: model.pickedZooms.contains(zoom.id) ? 2 : 0))
             }
             if model.settings.zooms.isEmpty { Text("Add a zoom at the playhead, or generate zooms from recorded clicks.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        case "Text":
+            Button("Add Text at Playhead") { var captions = model.settings.captions ?? []; captions.append(VideoCaption.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.captions = captions.sorted { $0.start < $1.start } }
+            ForEach(Binding(get: { model.settings.captions ?? [] }, set: { model.settings.captions = $0.isEmpty ? nil : $0 })) { $caption in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack { TextField("Text", text: $caption.text, axis: .vertical).lineLimit(1...3); Button { model.settings.captions?.removeAll { $0.id == caption.id }; if model.settings.captions?.isEmpty == true { model.settings.captions = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove text") }
+                    HStack { TextField("Start", value: $caption.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $caption.end, format: .number.precision(.fractionLength(2))) }
+                    HStack {
+                        Picker("Place", selection: $caption.position) { Text("Top").tag("top"); Text("Middle").tag("middle"); Text("Bottom").tag("bottom") }.labelsHidden()
+                        Picker("Size", selection: $caption.size) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.labelsHidden()
+                    }
+                }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if (model.settings.captions ?? []).isEmpty { Text("Add a title, a step or a note that shows over the video for a few seconds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)

@@ -34,4 +34,25 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoExportSize.size(width: 1280, height: 720, limit: 1080), CGSize(width: 1280, height: 720))
         XCTAssertEqual(VideoExportSize.size(width: 1001, height: 563, limit: 0), CGSize(width: 1000, height: 562))
     }
+
+    /// The same cases as Desktop/test/captions.test.js.
+    func testCaptionsStartThreeSecondsLongInsideTheClip() {
+        let c = VideoCaption.new(at: 2, start: 0, end: 10)
+        XCTAssertEqual([c.start, c.end], [2, 5]); XCTAssertEqual(c.text, "Your text"); XCTAssertEqual(c.position, "bottom")
+        XCTAssertEqual(VideoCaption.new(at: 9, start: 0, end: 10).end, 10)
+    }
+
+    func testCaptionsFadeInAndOut() {
+        let c = VideoCaption(start: 1, end: 4, text: "Hi")
+        XCTAssertNil(c.alpha(at: 0.5)); XCTAssertEqual(c.alpha(at: 1.125), 0.5); XCTAssertEqual(c.alpha(at: 2.5), 1)
+        XCTAssertNil(VideoCaption(start: 2, end: 3, text: "").alpha(at: 2.5))
+    }
+
+    func testCaptionSizeAndPlaceFollowTheVideoArea() {
+        let a = VideoCaption(start: 0, end: 1).layout(width: 1920, height: 1080)
+        XCTAssertEqual(a.fontSize, 65); XCTAssertEqual(a.x, 960); XCTAssertEqual(a.y, 950.4, accuracy: 0.001)
+        let b = VideoCaption(start: 0, end: 1, position: "top", size: "small").layout(width: 640, height: 360)
+        XCTAssertEqual(b.fontSize, 16); XCTAssertEqual(b.y, 36, accuracy: 0.001)
+        XCTAssertEqual(VideoCaption(start: 0, end: 1, position: "middle", size: "large").layout(width: 100, height: 100).fontSize, 12)
+    }
 }
