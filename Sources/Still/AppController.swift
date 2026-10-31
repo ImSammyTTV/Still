@@ -384,7 +384,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hideForCapture(); lastExternalApp?.activate()
         DesktopCover.shared.beginCapture()
         Task {
-            try? await Task.sleep(nanoseconds: UInt64(max(0, delay))*1_000_000_000 + 350_000_000)
+            guard await CaptureCountdown.run(seconds: delay) else { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays(); return }
+            try? await Task.sleep(nanoseconds: 350_000_000)
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("Still-\(UUID()).png")
             defer {
                 library.busy = false; captureProcess = nil; try? FileManager.default.removeItem(at: file)
@@ -430,6 +431,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !library.busy, !recorder.stopping, !recorder.choosing else { return }
         hideForCapture(); lastExternalApp?.activate()
         showRecordingSetup()
+    }
+    /// History's Combine: the chosen screenshots joined into one new capture, in the order they were picked, which
+    /// opens in the editor.
+    func combine(_ items: [CaptureItem], vertical: Bool) {
+        let images = items.filter { !$0.isVideo }.compactMap { ImageRenderer.load(library.url($0)) }
+        guard images.count >= 2, images.count == items.count else { library.toast("Choose two or more screenshots to combine"); return }
+        Task {
+            do {
+                let (joined, png) = try await Task.detached(priority: .userInitiated) { () -> (CGImage, Data) in
+                    guard let joined = CaptureCombine.combine(images, vertical: vertical) else { throw CocoaError(.fileWriteUnknown) }
+                    return (joined, try ImageRenderer.libraryData(joined))
+                }.value
+                let item = try library.add(png: png, width: joined.width, height: joined.height, title: "Combined \(images.count) screenshots")
+                openEditor(image: joined, item: item)
+            } catch { showError("Couldn’t combine the screenshots", error.localizedDescription) }
+        }
     }
     func openItem(_ item: CaptureItem) {
         if item.isVideo { openVideoEditor(item) }
@@ -701,8 +718,7 @@ extension AppController {
         // Don't activate anything before the screen is grabbed: that would close open menus and Spotlight.
         DesktopCover.shared.beginCapture()
         Task {
-            if delay > 0 { library.toast("Capture starts in \(delay) seconds") }
-            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay)*1_000_000_000) }
+            guard await CaptureCountdown.run(seconds: delay) else { library.busy = false; DesktopCover.shared.endCapture(); return }
             selection.begin(purpose)
         }
     }

@@ -5,7 +5,7 @@ struct EditorView: View {
     @ObservedObject var model: EditorModel
     @ObservedObject private var palette = ColorPalette.shared
     @FocusState private var textFocused: Bool
-    private let tools: [MarkTool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text, .pixelate, .spotlight, .loupe, .number, .pen, .highlight, .blur]
+    private let tools: [MarkTool] = [.select, .rectangle, .filledRectangle, .ellipse, .line, .arrow, .text, .pixelate, .spotlight, .loupe, .measure, .stamp, .number, .pen, .highlight, .blur]
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -89,13 +89,15 @@ struct EditorView: View {
             Menu {
                 if model.tool == .text || model.selectedMark?.tool == .text {
                     ForEach(["plain", "bold", "outline", "shadow", "label", "border", "bubble"], id: \.self) { style in Button(style.capitalized) { model.setStyle(style) } }
+                } else if model.tool == .stamp || model.selectedMark?.tool == .stamp {
+                    ForEach(Mark.stamps, id: \.self) { emoji in Button(emoji == model.stamp ? "\(emoji)  ✓" : emoji) { model.setStamp(emoji) } }
                 } else if model.tool == .blur || model.selectedMark?.tool == .blur {
                     Button("Strong Blur") { model.setStyle("strong") }; Button("Smooth Blur") { model.setStyle("smooth") }
                 } else {
                     ForEach(["plain", "filled", "double", "curved"], id: \.self) { style in Button(style.capitalized) { model.setStyle(style) } }
                     Divider(); Button("Solid Redaction") { model.tool = .redact }
                 }
-            } label: { Image(systemName: model.tool == .text ? "textformat" : "arrow.up.right").padding(5) }.menuStyle(.borderlessButton).fixedSize().help("Tool style")
+            } label: { Image(systemName: model.tool == .text ? "textformat" : model.tool == .stamp ? "face.smiling" : "arrow.up.right").padding(5) }.menuStyle(.borderlessButton).fixedSize().help("Tool style")
             Spacer(minLength: 0)
             Menu("Save as…") {
                 Button("Image…") { model.export() }.keyboardShortcut("e", modifiers: .command)
@@ -135,6 +137,11 @@ struct EditorView: View {
             Spacer()
             EditorStatus(library: model.library).frame(maxWidth: 170)
             roundButton("text.viewfinder", model.isRecognizing ? "Recognizing text…" : "Recognize Text") { model.recognize() }.disabled(model.isRecognizing)
+            Menu {
+                Button("Hide Private Info") { model.hidePrivate() }
+                Button("Blur All Text") { model.blurAllText() }
+            } label: { Image(systemName: "checkmark.shield") }.menuStyle(.borderlessButton).fixedSize().disabled(model.isRecognizing).help("Hide private info or blur all text")
+            if Preferences.shared.watermark != nil { roundButton(model.watermarkOn ? "seal.fill" : "seal", model.watermarkOn ? "Watermark On (click to leave it off this picture)" : "Watermark Off for This Picture") { model.watermarkOn.toggle() } }
             roundButton("square.and.arrow.up", "Share") { model.share() }
             roundButton("pin.fill", "Pin to Screen") { do { AppController.shared.pin(try model.flattened()) } catch { model.error = error.localizedDescription } }
             roundButton("doc.on.doc.fill", "Copy") { model.copy() }.keyboardShortcut("c", modifiers: [.command, .shift])

@@ -12,8 +12,10 @@
   .bar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: none; align-items: center; gap: 4px; height: 44px; padding: 0 6px;
     border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); border: 1px solid var(--chrome-border); box-shadow: 0 10px 34px rgba(0,0,0,.45); cursor: default; }
   body.primary .bar { display: flex; }
-  .brand { color: var(--accent); display: grid; place-items: center; padding: 0 6px 0 8px; }
-  .brand svg { width: 15px; height: 15px; }
+  /* The Still mark, in the accent colour, doubles as the bar's handle. */
+  .brand { display: grid; place-items: center; padding: 0 6px 0 8px; height: 100%; cursor: grab; touch-action: none; }
+  .brand .mark { width: 17px; height: 17px; background: var(--accent); -webkit-mask: url(mark.png) center / contain no-repeat; mask: url(mark.png) center / contain no-repeat; }
+  body.moving-bar, body.moving-bar .brand { cursor: grabbing; }
   .mode { height: 32px; padding: 0 11px; border: 0; border-radius: var(--radius-pill); background: transparent; display: inline-flex; align-items: center; gap: 6px; color: var(--on-chrome); font-size: var(--text-sm); font-weight: var(--weight-medium); }
   .mode:hover { background: var(--chrome-surface); }
   .mode.active { background: var(--accent); color: var(--accent-text); }
@@ -34,7 +36,7 @@
 <canvas id="canvas"></canvas>
 <div class="camera" id="camera"><i data-lucide="camera" style="width:24px;height:24px"></i></div>
 <div class="bar" id="bar">
-  <span class="brand"><i data-lucide="scan"></i></span>
+  <span class="brand" id="barHandle" title="Drag to move the Capture Bar" aria-label="Move the Capture Bar" role="button"><span class="mark"></span></span>
   <button class="mode active" data-mode="area" title="Area (A)"><i data-lucide="square-dashed"></i>Area</button>
   <button class="mode" data-mode="window" title="Window (hold Space)"><i data-lucide="app-window"></i>Window</button>
   <button class="mode" data-mode="fullscreen" title="Screen (F)"><i data-lucide="monitor"></i>Screen</button>

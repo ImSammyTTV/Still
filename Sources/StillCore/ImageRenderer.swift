@@ -191,6 +191,32 @@ public enum ImageRenderer {
                     text.draw(at: point)
                 }
                 NSGraphicsContext.restoreGraphicsState()
+            case .stamp:
+                // The emoji fills the box's shorter side, centred in it.
+                let box = r(mark.rect), size = min(box.width, box.height)
+                guard size >= 4 else { break }
+                let text = NSAttributedString(string: mark.text.isEmpty ? "✅" : mark.text, attributes: [.font: NSFont.systemFont(ofSize: size*0.8)])
+                let s = text.size()
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+                text.draw(at: CGPoint(x: box.midX-s.width/2, y: box.midY-s.height/2))
+                NSGraphicsContext.restoreGraphicsState()
+            case .measure:
+                // A line with a short bar across each end and its length in a pill at the middle.
+                let start = p(first), end = p(last), angle = atan2(end.y-start.y, end.x-start.x), bar = max(8, mark.width*3)
+                let n = CGPoint(x: -sin(angle)*bar, y: cos(angle)*bar)
+                ctx.move(to: start); ctx.addLine(to: end)
+                ctx.move(to: CGPoint(x: start.x-n.x, y: start.y-n.y)); ctx.addLine(to: CGPoint(x: start.x+n.x, y: start.y+n.y))
+                ctx.move(to: CGPoint(x: end.x-n.x, y: end.y-n.y)); ctx.addLine(to: CGPoint(x: end.x+n.x, y: end.y+n.y)); ctx.strokePath()
+                let size = max(13, mark.width*3.5)
+                let text = NSAttributedString(string: mark.measureLabel, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .semibold), .foregroundColor: NSColor.white])
+                let s = text.size(), w = s.width+size, h = size*1.7, mid = CGPoint(x: (start.x+end.x)/2, y: (start.y+end.y)/2)
+                ctx.setFillColor(NSColor.black.withAlphaComponent(0.78).cgColor)
+                ctx.addPath(CGPath(roundedRect: CGRect(x: mid.x-w/2, y: mid.y-h/2, width: w, height: h), cornerWidth: h/2, cornerHeight: h/2, transform: nil)); ctx.fillPath()
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+                text.draw(at: CGPoint(x: mid.x-s.width/2, y: mid.y-s.height/2))
+                NSGraphicsContext.restoreGraphicsState()
             case .loupe:
                 // A round lens over the box: what's at its centre, enlarged, with a rim in the mark's colour.
                 let box = r(mark.rect), radius = min(box.width, box.height)/2

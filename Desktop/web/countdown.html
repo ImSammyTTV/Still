@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Capture Countdown</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { background: transparent; overflow: hidden; margin: 0; cursor: pointer; user-select: none; }
+  /* Dark in either theme: it sits over whatever is about to be captured and has to stand out from it. */
+  .card { position: absolute; inset: 6px; border-radius: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    background: var(--hud); color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.12); }
+  #n { font-size: 84px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; transition: transform .25s ease-out, opacity .25s ease-out; }
+  #n.tick { transform: scale(.82); opacity: .55; }
+  small { font-size: 11px; color: rgba(255,255,255,.65); }
+</style>
+</head>
+<body>
+<div class="card" role="timer" aria-live="assertive"><span id="n"></span><small>Click to cancel</small></div>
+<script src="bridge.js"></script>
+<script>
+  // Counts down on its own; Still keeps the real time and closes this window when it's up.
+  let left = Math.max(1, Number((window.__STILL_PARAMS__ || {}).seconds) || 5);
+  const n = document.getElementById('n');
+  const show = () => { n.textContent = left; n.classList.add('tick'); requestAnimationFrame(() => requestAnimationFrame(() => n.classList.remove('tick'))); };
+  show();
+  const timer = setInterval(() => { if (left > 1) { left--; show(); } else clearInterval(timer); }, 1000);
+  addEventListener('mousedown', () => { still.invoke('countdown:cancel'); });
+</script>
+</body>
+</html>

@@ -18,7 +18,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Scroll wheel zooms the magnifier (2× to 16×, remembered) | ☑️ | ☑️ |
 | Hold Space to capture a window | ✅ | ✅ Windows · ☑️ Linux (X11 only) |
 | Whole-screen capture, per display | ✅ | ✅ |
-| Capture Bar (modes, exact size, aspect lock, timer) | ✅ | ✅ |
+| Capture Bar (modes, exact size, aspect lock, timer with an on-screen countdown; drag the Still mark to move it, and each capture puts it back) | ✅ | ✅ |
 | Open menus and Spotlight stay in the capture | ✅ | ☑️ |
 | Timed capture (3, 5, 10 s) | ☑️ | ☑️ |
 | Arrow-key nudging and resizing of the selection | ☑️ | ☑️ |
@@ -42,12 +42,18 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Save to an export folder, Save As | ☑️ | ☑️ |
 | Pinned captures (move, resize, opacity, click-through) | ☑️ | ☑️ |
 | Capture History with search, rename, delete | ☑️ | ✅ opens and reopens captures |
+| Keep history for 1 day to 3 months, or forever; starred captures are always kept | ☑️ | ☑️ Rust test |
+| Star captures in History, with a Starred filter; starred captures outlast the history clean-up (Mac) | ☑️ | ☑️ checked in Chromium |
+| Combine screenshots: ⌘/Ctrl-click several in History, then join them side by side or top to bottom into a new capture | ☑️ | ☑️ |
 
 ## Editor
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, loupe, crop | ✅ | ✅ |
+| Tool rail: select, arrow, rectangle, filled rectangle, ellipse, line, pen, highlight, text, counter, redact, blur, pixelate, spotlight, loupe, measure (length in pixels), emoji stamp, crop | ✅ | ✅ |
+| Hide Private Info: finds email addresses, card numbers, keys, IP addresses and phone numbers in the picture and covers them, undoable in one step | ☑️ | ✅ checked on a sample picture |
+| Blur All Text: every recognised line blurred in one undoable step, so the layout shows and the words don't | ☑️ | ☑️ |
+| Watermark: your own text (position, size, opacity) on pictures copied, saved or shared from the editor, with a button to leave it off one picture | ☑️ | ☑️ checked in Chromium |
 | Move, resize, duplicate, delete marks; undo and redo | ✅ | ✅ |
 | Solid redaction that survives export | ✅ | ☑️ |
 | Arrow styles (plain, filled, double, curved) and text styles | ☑️ | ☑️ |
@@ -86,6 +92,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
 | Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
 | Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
+| Copy the link as a plain link, Markdown or HTML (pictures embed as images) | ☑️ | ☑️ |
 | Show a share link as a QR code to open it on a phone (History, and the menu bar / tray for the last link) | ☑️ | ☑️ code checked by reading it back |
 | Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM, Trash with Empty Trash and Delete Forever | ✅ 15 server tests | (same server) |
 

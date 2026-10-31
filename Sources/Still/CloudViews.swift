@@ -36,6 +36,7 @@ struct CloudSettingsView: View {
             }
             card("Upload") {
                 Toggle("Ask for name & show advanced options", isOn: $prefs.askUploadOptions)
+                HStack { Text("Copy link as"); Spacer(); Picker("Copy link as", selection: $prefs.linkFormat) { Text("Link").tag("url"); Text("Markdown").tag("markdown"); Text("HTML").tag("html") }.labelsHidden().fixedSize() }
                 HStack { Text("Default link expiration"); Spacer(); Picker("Default link expiration", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }.labelsHidden().fixedSize() }
                 Text("Use Option while clicking Upload to set a password, access level, tags or view limit for a capture. Uploads include any text Still recognised in the capture and a recording’s transcript, so your server can search them.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
@@ -98,7 +99,7 @@ struct CloudSettingsView: View {
                     let result = try await GoogleDrive.upload(file, title: title, public: prefs.driveAccess == "link", folder: prefs.driveFolder, progress: { [weak self] value in Task { @MainActor in self?.progress = value } })
                     prefs.driveFolder = result.folder
                     if let item { library.setCloudURL(item, url: result.link) }; library.lastLink = result.link.absoluteString
-                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result.link.absoluteString, forType: .string); library.toast("Uploaded to Google Drive. Link copied to clipboard.")
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(copiedText(result.link), forType: .string); library.toast("Uploaded to Google Drive. Link copied to clipboard.")
                     if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?(); return
                 }
                 let client = try CloudClient(endpoint: Preferences.shared.cloudEndpoint)
@@ -106,7 +107,7 @@ struct CloudSettingsView: View {
                 if let item { options.ocr = item.recognizedText ?? ""; let metadata = library.recordingMetadata(item); options.transcript = metadata.transcript ?? ""; options.captions = metadata.captions ?? "" }
                 let url = try await client.upload(file, options: options, progress: { [weak self] value in Task { @MainActor in self?.progress = value } })
                 if let item { library.setCloudURL(item, url: url) }; library.lastLink = url.absoluteString
-                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string); library.toast("Uploaded. Link copied to clipboard.")
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(copiedText(url), forType: .string); library.toast("Uploaded. Link copied to clipboard.")
                 if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?()
             } catch is CancellationError { if temporary { try? FileManager.default.removeItem(at: file) }; uploading = false; completed?() }
             catch {
@@ -115,6 +116,11 @@ struct CloudSettingsView: View {
                 else { self.error = error.localizedDescription }
             }
         }
+    }
+    /// The link as Cloud settings → Copy link as asks: plain, Markdown or HTML.
+    private func copiedText(_ link: URL) -> String {
+        let image = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff"].contains(file.pathExtension.lowercased())
+        return ShareLink.text(link.absoluteString, title: title, image: image, format: Preferences.shared.linkFormat)
     }
     func cancel() { task?.cancel(); if !uploading { if temporary { try? FileManager.default.removeItem(at: file) }; completed?() } }
 }

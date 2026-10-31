@@ -117,6 +117,12 @@ final class EditorModel: ObservableObject {
     }
     func setColor(_ value: String) { color = value; if var mark = selectedMark, tool == .select { snapshot(); mark.color = value; replace(mark) } }
     func setWidth(_ value: Double) { lineWidth = value; if var mark = selectedMark, tool == .select { snapshot(); mark.width = value; replace(mark) } }
+    /// The emoji the Stamp tool drops, remembered between pictures.
+    @Published var stamp = UserDefaults.standard.string(forKey: "stampEmoji").flatMap { Mark.stamps.contains($0) ? $0 : nil } ?? "✅"
+    func setStamp(_ emoji: String) {
+        stamp = emoji; UserDefaults.standard.set(emoji, forKey: "stampEmoji")
+        if var mark = selectedMark, mark.tool == .stamp { snapshot(); mark.text = emoji; replace(mark) }
+    }
     func setStyle(_ value: String) { markStyle = value; if var mark = selectedMark, tool == .select { snapshot(); mark.style = value; replace(mark) } }
     func undo() {
         guard let state = undoStack.popLast() else { return }
@@ -133,9 +139,20 @@ final class EditorModel: ObservableObject {
             snapshot(); source = cropped; marks = []; selectedID = nil; dirty = true
         } catch { self.error = error.localizedDescription }
     }
-    func flattened() throws -> CGImage { try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
+    /// The picture as it leaves the editor, with the watermark from Settings unless it's left off this one.
+    func flattened(watermarked: Bool = true) throws -> CGImage {
+        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
+        guard watermarked, watermarkOn, let watermark = Preferences.shared.watermark else { return image }
+        return watermark.apply(to: image)
+    }
+    /// Whether this picture gets the watermark; the stamp button in the toolbar turns it off for just this one.
+    @Published var watermarkOn = true
     /// The flattened picture at the size the Background sheet shows it, quick enough to follow a slider.
-    func flattenedPreview() throws -> CGImage { try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: previewCache) }
+    func flattenedPreview() throws -> CGImage {
+        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: previewCache)
+        guard watermarkOn, let watermark = Preferences.shared.watermark else { return image }
+        return watermark.apply(to: image)
+    }
     func document() throws -> ProjectDocument { try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
     var canvasLayout: (size: CGSize, origin: CGPoint) { ImageRenderer.canvasLayout(source: CGSize(width: source.width, height: source.height), framed: frame != .none || customBackground != nil, padding: Int(padding), aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY) }
     func autoBalance() {
@@ -223,11 +240,56 @@ final class EditorModel: ObservableObject {
         do { library.export(try flattened(), title: item?.title ?? "Still capture") }
         catch { self.error = error.localizedDescription }
     }
+    /// Covers every email address, card number, key, IP address and phone number found in the picture with a redact
+    /// box, as one step that a single undo takes back.
+    func hidePrivate() {
+        guard !isRecognizing else { return }
+        isRecognizing = true
+        let image = source
+        Task {
+            do {
+                let found = try await Task.detached(priority: .userInitiated) { try PrivateInfo.boxes(in: image) }.value
+                let fresh = found.filter { box in !marks.contains { $0.tool == .redact && $0.rect.insetBy(dx: -1, dy: -1).contains(box) } }
+                if fresh.isEmpty { library.toast(found.isEmpty ? "No private details found" : "Everything private is already hidden") }
+                else {
+                    snapshot()
+                    for box in fresh { marks.append(Mark(tool: .redact, points: [PixelPoint(x: box.minX, y: box.minY), PixelPoint(x: box.maxX, y: box.maxY)], color: color, width: lineWidth)) }
+                    selectedID = nil; dirty = true
+                    library.toast("Hid \(fresh.count) private detail\(fresh.count == 1 ? "" : "s"). Undo brings them back.")
+                }
+            } catch { self.error = "Couldn’t look for private details: \(error.localizedDescription)" }
+            isRecognizing = false
+        }
+    }
+    /// Blurs every line of text found in the picture, as one step that a single undo takes back: the layout stays
+    /// readable while the words don't.
+    func blurAllText() {
+        guard !isRecognizing else { return }
+        isRecognizing = true
+        let image = source
+        Task {
+            do {
+                let lines = try await Task.detached(priority: .userInitiated) { try TextRecognition.lineBounds(image) }.value
+                if lines.isEmpty { library.toast("No text found") }
+                else {
+                    snapshot()
+                    for line in lines {
+                        let box = line.insetBy(dx: -3, dy: -3)
+                        var mark = Mark(tool: .blur, points: [PixelPoint(x: box.minX, y: box.minY), PixelPoint(x: box.maxX, y: box.maxY)], color: color, width: lineWidth)
+                        mark.style = "smooth"; marks.append(mark)
+                    }
+                    selectedID = nil; dirty = true
+                    library.toast("Blurred \(lines.count) line\(lines.count == 1 ? "" : "s") of text. Undo brings them back.")
+                }
+            } catch { self.error = "Couldn’t look for text: \(error.localizedDescription)" }
+            isRecognizing = false
+        }
+    }
     func recognize() {
         guard !isRecognizing else { return }
         isRecognizing = true
         let image: CGImage
-        do { image = try flattened() } catch { self.error = error.localizedDescription; isRecognizing = false; return }
+        do { image = try flattened(watermarked: false) } catch { self.error = error.localizedDescription; isRecognizing = false; return }
         Task {
             do {
                 let text = try await Task.detached(priority: .userInitiated) {

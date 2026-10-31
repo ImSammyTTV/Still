@@ -1,5 +1,6 @@
 mod capture;
 mod cloud;
+mod combine;
 mod desktop;
 mod drive;
 mod library;
@@ -323,7 +324,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
     let app = app.clone();
     let purpose = purpose.to_string();
     std::thread::spawn(move || {
-        if delay > 0 { notify(&app, "Still", &format!("Capture starts in {delay} seconds")); std::thread::sleep(Duration::from_secs(delay)); }
+        if delay > 0 && !countdown(&app, delay) { end_selection(&app); return; }
         let floating = hide_floating(&app, true);
         // The overlay shows a frozen picture, so the icons only need to be gone for the grab itself.
         let _icons = desktop::hide(&app);
@@ -380,6 +381,41 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         s.grabs = grabs; s.overlays = labels;
     });
 }
+
+/// Set by a click on the countdown, which calls the timed capture off.
+static COUNTDOWN_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The countdown before a timed capture: a large number in the middle of the screen the pointer is on, so it's clear
+/// the capture is coming and when. Runs on the capture's own thread and answers whether it ran to the end. The window
+/// is gone before the screen is grabbed, so it is never in the picture.
+fn countdown(app: &AppHandle, seconds: u64) -> bool {
+    use std::sync::atomic::Ordering;
+    COUNTDOWN_CANCELLED.store(false, Ordering::SeqCst);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = a.get_webview_window("countdown") { let _ = w.destroy(); }
+        let Ok(win) = builder(&a, "countdown", "countdown.html", json!({ "seconds": seconds })).title("Capture Countdown").inner_size(180.0, 180.0)
+            .decorations(false).transparent(true).shadow(false).resizable(false).always_on_top(true).skip_taskbar(true).focused(false).visible_on_all_workspaces(true).build() else { return };
+        let monitor = a.cursor_position().ok().and_then(|p| a.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| a.primary_monitor().ok().flatten());
+        if let Some(m) = monitor {
+            let side = (180.0 * m.scale_factor()) as i32;
+            let _ = win.set_position(PhysicalPosition::new(m.position().x + (m.size().width as i32 - side) / 2, m.position().y + (m.size().height as i32 - side) / 2));
+        }
+        let _ = win.show();
+    });
+    for _ in 0..seconds * 10 {
+        if COUNTDOWN_CANCELLED.load(Ordering::SeqCst) { break; }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || { if let Some(w) = a.get_webview_window("countdown") { let _ = w.destroy(); } });
+    if COUNTDOWN_CANCELLED.load(Ordering::SeqCst) { return false; }
+    // A moment for the window to leave the screen before it's grabbed.
+    std::thread::sleep(Duration::from_millis(150));
+    true
+}
+#[tauri::command]
+async fn countdown_cancel() { COUNTDOWN_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst); }
 
 fn end_selection(app: &AppHandle) {
     let _ = app.global_shortcut().unregister("Escape");
@@ -986,8 +1022,16 @@ fn apply_name_pattern(app: &AppHandle) {
     let pattern = setting(app, "fileName").as_str().filter(|p| !p.trim().is_empty()).unwrap_or(library::DEFAULT_NAME).to_string();
     st(app).library.lock().unwrap().name_pattern = pattern;
 }
+/// Settings → General → Keep history: applied now, and again after every new capture.
+fn apply_history_days(app: &AppHandle) {
+    let days = setting(app, "historyDays").as_u64().unwrap_or(0).min(3650) as u32;
+    let removed = { let mut lib = st(app).library.lock().unwrap(); lib.keep_days = days; lib.prune(library::now_ms()) };
+    for id in &removed { close_preview(app, id); }
+    if !removed.is_empty() { broadcast(app, "library:changed", Value::Null); }
+}
 fn after_settings(app: &AppHandle, patch: &Value) {
     if patch.get("fileName").is_some() { apply_name_pattern(app); }
+    if patch.get("historyDays").is_some() { apply_history_days(app); }
     if patch.get("shortcuts").is_some() { register_shortcuts(app); }
     if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
     if patch.get("quickAccess").is_some() { layout_previews(app); }
@@ -1096,6 +1140,9 @@ async fn library_get(app: AppHandle, id: String) -> Value {
 }
 #[tauri::command]
 async fn library_rename(app: AppHandle, id: String, title: String) { st(&app).library.lock().unwrap().update(&id, |i| i.title = title); broadcast(&app, "library:changed", Value::Null); }
+/// Stars a capture in History, or takes the star off.
+#[tauri::command]
+async fn library_star(app: AppHandle, id: String, starred: bool) { st(&app).library.lock().unwrap().update(&id, |i| i.starred = starred); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
 async fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
@@ -1134,6 +1181,25 @@ fn open_path(file: &Path) {
 async fn library_open(app: AppHandle, id: String) {
     let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (i.kind.clone(), lib.file(&i))) };
     match found { Some((kind, _)) if kind == "recording" => open_video(&app, &id), Some(_) => open_editor(&app, Some(&id), false), None => {} }
+}
+/// History's Combine: the chosen screenshots joined into one new capture, in the order they were picked, which opens
+/// in the editor.
+#[tauri::command]
+async fn library_combine(app: AppHandle, ids: Vec<String>, vertical: bool) -> Result<(), String> {
+    if ids.len() < 2 { return Err("Choose two or more screenshots to combine.".into()); }
+    let files: Vec<PathBuf> = {
+        let lib = st(&app).library.lock().unwrap();
+        ids.iter().map(|id| lib.get(id).filter(|i| i.kind != "recording").map(|i| lib.file(&i)).ok_or("Only screenshots can be combined.")).collect::<Result<_, _>>()?
+    };
+    let images: Vec<image::RgbaImage> = files.iter().map(|f| std::fs::read(f).ok().and_then(|b| capture::decode(&b)).ok_or("Couldn’t read one of the screenshots")).collect::<Result<_, _>>()?;
+    let joined = combine::combine(&images, vertical);
+    let (w, h) = joined.dimensions();
+    let title = format!("Combined {} screenshots", images.len());
+    let item = st(&app).library.lock().unwrap().add(&capture::png(&joined), "screenshot", "png", Some(title), w, h)?;
+    broadcast(&app, "library:changed", Value::Null);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || open_editor(&a, Some(&item.id), false));
+    Ok(())
 }
 #[tauri::command]
 async fn library_play(app: AppHandle, id: String) {
@@ -1562,10 +1628,13 @@ async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> R
         return saved;
     }
     let result = if setting(app, "cloud.provider").as_str() == Some("drive") { drive_share(app, &file, &title).await }
-        else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title, text)).await, Err(e) => Err(e) } };
+        else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title.clone(), text)).await, Err(e) => Err(e) } };
     match &result {
         Ok(link) => {
-            let _ = app.clipboard().write_text(link.clone()); notify(app, "Link copied", link);
+            let image = matches!(file.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp"));
+            let format = setting(app, "cloud.linkFormat").as_str().unwrap_or("url").to_string();
+            let copied = if link.starts_with("http") { cloud::link_text(link, &title, image, &format) } else { link.clone() };
+            let _ = app.clipboard().write_text(copied); notify(app, "Link copied", link);
             if link.starts_with("http") { st(app).session.lock().unwrap().last_link = Some(link.clone()); build_tray_menu(app); }
         }
         Err(e) => notify(app, "Upload failed", e),
@@ -1825,6 +1894,7 @@ pub fn run() {
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
             apply_name_pattern(&handle);
+            apply_history_days(&handle);
             let menu = tray_menu(&handle)?;
             TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))
@@ -1860,8 +1930,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
-            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_pin, library_drag,
+            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

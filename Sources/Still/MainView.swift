@@ -170,6 +170,13 @@ struct MainView: View {
                 Text("Next: \(CaptureNaming.name(pattern: prefs.filenamePattern, width: 1440, height: 900)).\(prefs.exportFormat) · tokens {type} {date} {time} {n} {width} {height}").font(.system(size: 10)).foregroundStyle(.secondary)
                 Toggle("Capture mouse cursor", isOn: $prefs.includeCursor)
             }
+            section("Watermark") {
+                TextField("Text", text: $prefs.watermarkText, prompt: Text("e.g. © Your Name"))
+                choice("Position", selection: $prefs.watermarkPosition) { Text("Bottom right").tag("bottomRight"); Text("Bottom left").tag("bottomLeft"); Text("Top right").tag("topRight"); Text("Top left").tag("topLeft"); Text("Centre").tag("center") }.disabled(prefs.watermark == nil)
+                choice("Size", selection: $prefs.watermarkSize) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.disabled(prefs.watermark == nil)
+                choice("Opacity", selection: $prefs.watermarkOpacity) { Text("100%").tag(1.0); Text("70%").tag(0.7); Text("50%").tag(0.5); Text("30%").tag(0.3) }.disabled(prefs.watermark == nil)
+                Text(prefs.watermark == nil ? "Type some text to add it to pictures you copy, save or share from the editor." : "Added to pictures you copy, save or share from the editor. The stamp button in the editor leaves it off one picture.").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
             section("Window Screenshots") {
                 Toggle("Include background", isOn: $prefs.windowBackground)
                 HStack { Text("Padding"); Slider(value: $prefs.windowPadding, in: 0...160, step: 4) }
@@ -239,7 +246,7 @@ struct MainView: View {
     }
     private var advanced: some View {
         Group {
-            section("Capture History") { choice("Keep history", selection: $prefs.retentionDays) { Text("Forever").tag(0); Text("1 day").tag(1); Text("3 days").tag(3); Text("1 week").tag(7); Text("1 month").tag(30) }; Button("Open Capture History") { AppController.shared.showHistory() }; Button("Open Storage Folder") { NSWorkspace.shared.open(library.root) } }
+            section("Capture History") { choice("Keep history", selection: $prefs.retentionDays) { Text("Forever").tag(0); Text("1 day").tag(1); Text("3 days").tag(3); Text("1 week").tag(7); Text("1 month").tag(30); Text("3 months").tag(90) }; Button("Open Capture History") { AppController.shared.showHistory() }; Button("Open Storage Folder") { NSWorkspace.shared.open(library.root) } }
             section("Text Recognition") {
                 choice("Language", selection: $prefs.ocrLanguage) { Text("Automatically Detect Language").tag("auto"); Text("English").tag("en-US"); Text("Chinese, Simplified").tag("zh-Hans"); Text("Chinese, Traditional").tag("zh-Hant"); Text("French").tag("fr-FR"); Text("German").tag("de-DE"); Text("Japanese").tag("ja-JP"); Text("Korean").tag("ko-KR"); Text("Spanish").tag("es-ES"); Text("Portuguese").tag("pt-BR") }
                 Toggle("Keep line breaks", isOn: $prefs.ocrLineBreaks)
