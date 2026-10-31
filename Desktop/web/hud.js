@@ -53,8 +53,10 @@ function pickType(format) {
 }
 
 // Still's own recorder (Windows): Still captures and encodes by itself, so there is no system picker and no
-// "sharing your screen" bar, and this page is only the controls. If it can't start, the web engine records instead.
+// "sharing your screen" bar, and this page is only the controls. If it can't start, the HUD says why.
 let native = false, nativeLive = false;
+// On Windows, an error from the system recorder also says why Still's own recorder wasn't the one recording.
+const withWhy = (message) => (still.platform === 'win32' && opts.nativeWhy ? `${message} (Still’s own recorder wasn’t used: ${opts.nativeWhy})` : message);
 async function beginNative() {
   native = true;
   const o = opts.options || {};
@@ -64,17 +66,15 @@ async function beginNative() {
   try {
     await still.invoke('recording:begin');
   } catch (error) {
-    native = false;
-    toast('Still’s recorder couldn’t start here, so the system recorder is used');
-    console.warn('Still’s recorder:', error);
-    return begin(false);
+    // Say why, rather than quietly opening the system picker this recorder exists to avoid.
+    return still.invoke('recording:error', `Still’s recorder couldn’t start: ${error && error.message ? error.message : String(error)}`);
   }
   nativeLive = true; start = performance.now(); $('#time').textContent = '0:00';
   still.invoke('recording:started');
 }
 
-async function begin(tryNative = true) {
-  if (tryNative && opts.native) return beginNative();
+async function begin() {
+  if (opts.native) return beginNative();
   if (reloadForMedia()) return;
   const o = opts.options || {};
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder) throw new Error('Screen recording isn’t supported by this system’s web engine yet.');
@@ -144,12 +144,12 @@ async function finish() {
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
   await writes; // The last second is usually still on its way.
   // No data is a failure to report, never something to drop quietly.
-  if (!written) return still.invoke('recording:error', failure || 'No video was captured. Try the WebM format in Settings → Recording.', 'save');
+  if (!written) return still.invoke('recording:error', withWhy(failure || 'No video was captured. Try the WebM format in Settings → Recording.'), 'save');
   try {
     await still.invoke('recording:save', ext, duration);
   } catch (error) {
     // The HUD would otherwise sit on "Saving…" for good with nothing to show for the recording.
-    await still.invoke('recording:error', `${failure ? failure + ' ' : ''}${error && error.message ? error.message : String(error)}`, 'save');
+    await still.invoke('recording:error', withWhy(`${failure ? failure + ' ' : ''}${error && error.message ? error.message : String(error)}`), 'save');
   }
 }
 
@@ -185,4 +185,4 @@ $('#restart').onclick = () => {
   if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
 if (opts.stopShortcut) still.invoke('shortcut:label', opts.stopShortcut).then((label) => { const stop = $('#stop'); stop.title = `Stop and save (${label})`; stop.setAttribute('aria-label', stop.title); }).catch(() => {});
-begin().catch((error) => still.invoke('recording:error', error.message || String(error)));
+begin().catch((error) => still.invoke('recording:error', withWhy(error.message || String(error))));

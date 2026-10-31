@@ -492,8 +492,9 @@ fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<Pat
 fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64, selected_window: bool) {
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
+    let native = native_engine(&rec);
     let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
-        "stopShortcut": setting(app, "shortcuts")["record"], "native": native_engine(&rec) });
+        "stopShortcut": setting(app, "shortcuts")["record"], "native": native.is_ok(), "nativeWhy": native.err() });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
     {
         let mut s = st(app).session.lock().unwrap();
@@ -540,10 +541,12 @@ fn window_gone(app: &AppHandle, label: &str) {
 }
 /// Whether Still records by itself rather than through the web engine: on Windows, when the computer supports it,
 /// the user hasn't chosen the web engine, and no audio is wanted (Still's recorder doesn't record sound yet).
-fn native_engine(rec: &Value) -> bool {
-    cfg!(windows) && rec["engine"].as_str() != Some("webview")
-        && !rec["microphone"].as_bool().unwrap_or(false) && !rec["systemAudio"].as_bool().unwrap_or(false)
-        && record::available().is_ok()
+/// Whether Still's own recorder makes this recording, and if not, why: the reason goes into any error the web
+/// engine reports, so a failed recording says which recorder failed.
+fn native_engine(rec: &Value) -> Result<(), String> {
+    if !cfg!(windows) { return Err("Still’s own recorder is Windows-only.".into()) }
+    if rec["engine"].as_str() == Some("webview") { return Err("Settings → Recording → Record with is set to the system recorder.".into()) }
+    record::available()
 }
 
 fn stop_recording_state(app: &AppHandle) {
@@ -1240,9 +1243,12 @@ async fn recording_begin(app: AppHandle) -> Result<(), String> {
         monitor: (place.display.x as i32 + 1, place.display.y as i32 + 1), crop,
         fps: params["options"]["fps"].as_u64().unwrap_or(30) as u32,
         cursor: params["options"]["cursor"].as_bool().unwrap_or(true),
+        system_audio: params["options"]["systemAudio"].as_bool().unwrap_or(false),
+        microphone: params["options"]["microphone"].as_bool().unwrap_or(false),
         path: native_part(),
     };
     let handle = record::start(options)?;
+    if !handle.warnings.is_empty() { notify(&app, "Recording without some sound", &handle.warnings.join(" ")); }
     st(&app).session.lock().unwrap().recorder = Some(Arc::new(handle));
     Ok(())
 }
@@ -1649,10 +1655,11 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             Ok(()) => {
                 let origin = capture::grab_all().ok().and_then(|g| g.first().map(|g| (g.x + 1, g.y + 1))).unwrap_or((1, 1));
                 let path = dir.join("native-recording.mp4");
-                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, cursor: true, path: path.clone() };
+                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, cursor: true, system_audio: true, microphone: false, path: path.clone() };
                 match record::start(options) {
                     Err(e) => log("nativeRecorder", json!(format!("didn’t start: {e}"))),
                     Ok(recorder) => {
+                        log("nativeSoundWarnings", json!(recorder.warnings));
                         wait(3000);
                         match recorder.stop() {
                             Ok(f) => {
@@ -1661,6 +1668,7 @@ fn self_test(app: AppHandle, dir: PathBuf) {
                                 log("nativeFrames", json!(f.frames));
                                 log("nativeHardwareEncoder", json!(f.hardware));
                                 log("nativeLitShare", json!((f.lit * 100.0).round() / 100.0));
+                                log("nativeAudioTrack", json!(f.audio));
                                 log("nativeBytes", json!(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)));
                             }
                             Err(e) => log("nativeRecorder", json!(format!("didn’t finish: {e}"))),
