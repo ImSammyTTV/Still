@@ -124,6 +124,12 @@
       <button class="btn plain" id="zoomRemove" title="Remove this zoom (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
+  <div class="trim-head" id="cursorRow" hidden>
+    <b>Cursor</b>
+    <label class="zoom-tools"><input type="checkbox" id="cursorShow"> Show cursor</label>
+    <label class="zoom-tools">Size <select class="field" id="cursorSize"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select></label>
+    <label class="zoom-tools"><input type="checkbox" id="cursorSmooth"> Smooth movement</label>
+  </div>
   <div class="bar" id="bar">
     <div class="strip" id="strip"></div>
     <div class="shade" id="shadeIn"></div>
@@ -157,6 +163,7 @@
 <script src="shared/trim.js"></script>
 <script src="shared/backdrop.js"></script>
 <script src="shared/zoom.js"></script>
+<script src="shared/cursor.js"></script>
 <script src="shared/gif.js"></script>
 <script src="common.js"></script>
 <script src="video.js"></script>

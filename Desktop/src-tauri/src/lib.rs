@@ -60,6 +60,8 @@ struct Session {
     listener: Option<marks::Listener>,
     /// The pointer's path and clicks for the video editor's zooms, kept with the recording when it's saved.
     trail: Option<marks::Trail>,
+    /// Still's own recorder is leaving the pointer out, for the video editor to draw from the trail.
+    cursor_separate: bool,
     failed_shortcuts: Vec<String>,
     update: Value,
     pending_update: Option<Arc<tauri_plugin_updater::Update>>,
@@ -553,7 +555,7 @@ fn native_engine(rec: &Value) -> Result<(), String> {
 
 fn stop_recording_state(app: &AppHandle) {
     end_recording_extras(app);
-    let (recorder, trail) = { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; (s.recorder.take(), s.trail.take()) };
+    let (recorder, trail) = { let mut s = st(app).session.lock().unwrap(); s.recording = None; s.icons = None; s.cursor_separate = false; (s.recorder.take(), s.trail.take()) };
     drop(trail);
     if let Some(recorder) = recorder { recorder.cancel(); } // Only reached by a recording that ended without being saved.
     if let Some(h) = app.get_webview_window("hud") { let _ = h.close(); }
@@ -1253,12 +1255,15 @@ async fn recording_begin(app: AppHandle) -> Result<(), String> {
         monitor: (place.display.x as i32 + 1, place.display.y as i32 + 1), crop,
         fps: params["options"]["fps"].as_u64().unwrap_or(30) as u32,
         quality: params["options"]["quality"].as_str().unwrap_or("high").to_string(),
-        cursor: params["options"]["cursor"].as_bool().unwrap_or(true),
+        // Cursor effects: the pointer stays out of the picture and the video editor draws it from the trail.
+        cursor: params["options"]["cursor"].as_bool().unwrap_or(true) && !params["options"]["cursorEffects"].as_bool().unwrap_or(false),
         system_audio: params["options"]["systemAudio"].as_bool().unwrap_or(false),
         microphone: params["options"]["microphone"].as_bool().unwrap_or(false),
         path: native_part(),
     };
+    let separate = !options.cursor && params["options"]["cursorEffects"].as_bool().unwrap_or(false);
     let handle = record::start(options)?;
+    st(&app).session.lock().unwrap().cursor_separate = separate;
     if !handle.warnings.is_empty() { notify(&app, "Recording without some sound", &handle.warnings.join(" ")); }
     st(&app).session.lock().unwrap().recorder = Some(Arc::new(handle));
     Ok(())
@@ -1349,7 +1354,7 @@ fn salvage_recording(app: &AppHandle) -> bool {
 }
 /// Puts a finished recording in the library and does what the After Recording settings ask.
 fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> Result<(), String> {
-    let trail = st(app).session.lock().unwrap().trail.take().map(marks::Trail::finish);
+    let (trail, separate) = { let mut s = st(app).session.lock().unwrap(); (s.trail.take().map(marks::Trail::finish), std::mem::take(&mut s.cursor_separate)) };
     stop_recording_state(app);
     let added = st(app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
     let item = match added {
@@ -1365,7 +1370,9 @@ fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> R
     };
     st(app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
     // The video editor reads the path and clicks from here, and keeps its own settings beside them.
-    if let Some(trail) = trail.filter(|t| t["pointer"].as_array().is_some_and(|p| !p.is_empty())) { let _ = st(app).library.lock().unwrap().save_project(&item.id, &trail); }
+    let mut project = trail.filter(|t| t["pointer"].as_array().is_some_and(|p| !p.is_empty())).unwrap_or(Value::Null);
+    if separate { if project.is_null() { project = json!({}); } project["cursor"] = json!("separate"); }
+    if !project.is_null() { let _ = st(app).library.lock().unwrap().save_project(&item.id, &project); }
     if setting(app, "afterRecording.save").as_bool().unwrap_or(true) { if let Err(e) = export_item(app, &item.id, None) { notify(app, "Couldn’t save to your folder", &e); } }
     if setting(app, "afterRecording.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, false); }
     broadcast(app, "library:changed", Value::Null);

@@ -147,8 +147,9 @@ const pages = {
   ],
   Recording: () => [
     prefs.platform === 'win32' ? group('Recorder', [
-      select('Record with', 'recording.engine', [['auto', 'Still (recommended)'], ['webview', 'System web engine']])
-    ], 'Still records the screen, the computer’s sound and the microphone itself, with no screen picker and no “sharing your screen” bar. The system web engine records instead if Still’s recorder isn’t available on this computer.') : null,
+      select('Record with', 'recording.engine', [['auto', 'Still (recommended)'], ['webview', 'System web engine']]),
+      toggle('Cursor effects in the video editor', 'recording.cursorEffects')
+    ], 'Still records the screen, the computer’s sound and the microphone itself, with no screen picker and no “sharing your screen” bar. The system web engine records instead if Still’s recorder isn’t available on this computer. With Cursor effects on, the pointer is left out of the recording and drawn by the video editor, where you can make it bigger or smooth its movement.') : null,
     group('Video', [
       select('Format', 'recording.format', [['mp4', 'MP4'], ['webm', 'WebM']]),
       qualityRow(),

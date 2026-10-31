@@ -21,7 +21,11 @@ const hasBg = () => bg.style !== 'none';
 let zooms = [], selectedZoom = -1, showClicks = false, bgPicture = null;
 const clicks = () => (Array.isArray(project.clicks) ? project.clicks : []);
 const drawsClicks = () => showClicks && clicks().length > 0;
-const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks();
+// Recordings made with Cursor effects on leave the pointer out of the picture; it's drawn here from the path.
+let cursorFx = { show: true, size: 1, smooth: true };
+const separateCursor = () => project.cursor === 'separate';
+const drawsCursor = () => separateCursor() && cursorFx.show && Array.isArray(project.pointer) && project.pointer.length > 0;
+const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor();
 
 const message = (error) => (error && error.message) || String(error);
 
@@ -107,7 +111,7 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, bg: hasBg() ? bg : null, zooms, showClicks };
+    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
     still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
@@ -185,7 +189,18 @@ function renderView() {
   video.style.transform = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
   const fx = $('#fx'), ctx = fx.getContext('2d');
   ctx.clearRect(0, 0, fx.width, fx.height);
-  if (drawsClicks()) drawRings(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
+  drawOverlays(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
+}
+
+// What's drawn over the picture: click rings, then the pointer on top. Same arguments as drawRings.
+function drawOverlays(ctx, t, src, scale, k, ox, oy, vw, vh) {
+  if (drawsClicks()) drawRings(ctx, t, src, scale, k, ox, oy, vw, vh);
+  if (!drawsCursor()) return;
+  const p = StillCursor.at(project.pointer, t, cursorFx.smooth);
+  if (!p) return;
+  // As on the Mac: about a real pointer's size for the recording's width, times the chosen size and the zoom.
+  const size = 24 * cursorFx.size * Math.max(0.7, vw / 1920) * scale * k;
+  StillCursor.draw(ctx, ox + (p.x * vw - src.x) * scale * k, oy + (p.y * vh - src.y) * scale * k, size);
 }
 
 // Rings where the pointer clicked, growing and fading. `k` turns video pixels into the target's pixels.
@@ -240,7 +255,7 @@ function drawFrame(ctx, player, F) {
   if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg, bgPicture);
   else { ctx.beginPath(); ctx.rect(F.x, F.y, F.width, F.height); ctx.clip(); }
   ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
-  if (drawsClicks()) drawRings(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
+  drawOverlays(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
   ctx.restore();
 }
 
@@ -261,6 +276,9 @@ function renderZooms() {
   $('#autoZoom').disabled = !duration || !clicks().length;
   $('#autoZoom').title = clicks().length ? 'A zoom wherever you clicked while recording' : 'Auto Zoom needs a recording made with Still 1.2.15 or later on Windows, or on Linux with X11';
   $('#clicksToggle').hidden = !clicks().length; $('#showClicks').checked = showClicks;
+  $('#cursorRow').hidden = !separateCursor();
+  $('#cursorShow').checked = cursorFx.show; $('#cursorSize').value = String(cursorFx.size); $('#cursorSmooth').checked = cursorFx.smooth;
+  $$('#cursorSize, #cursorSmooth').forEach((input) => { input.disabled = !cursorFx.show; });
   renderView(); saveProject();
 }
 const changeZoom = (patch) => { zooms = zooms.map((z, i) => (i === selectedZoom ? { ...z, ...patch } : z)).sort((a, b) => a.start - b.start); renderZooms(); };
@@ -276,6 +294,9 @@ $('#zoomScale').onchange = (e) => changeZoom({ scale: Number(e.target.value) });
 $('#zoomIn').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime < z.end - 0.2) changeZoom({ start: video.currentTime }); };
 $('#zoomOut').onclick = () => { const z = zooms[selectedZoom]; if (z && video.currentTime > z.start + 0.2) changeZoom({ end: video.currentTime }); };
 $('#showClicks').onchange = (e) => { showClicks = e.target.checked; renderZooms(); };
+$('#cursorShow').onchange = (e) => { cursorFx = { ...cursorFx, show: e.target.checked }; renderZooms(); };
+$('#cursorSize').onchange = (e) => { cursorFx = { ...cursorFx, size: Number(e.target.value) }; renderZooms(); };
+$('#cursorSmooth').onchange = (e) => { cursorFx = { ...cursorFx, smooth: e.target.checked }; renderZooms(); };
 // With a zoom selected, a click on the video picks the point it zooms to, wherever the view is zoomed right now.
 $('#clip').addEventListener('click', (e) => {
   if (selectedZoom < 0) return;
@@ -505,6 +526,7 @@ async function open() {
   await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
   showClicks = !!project.showClicks;
+  if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
   $$('#play, #setIn, #setOut, #exportVideo, #exportGif, #background, #addZoom').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
