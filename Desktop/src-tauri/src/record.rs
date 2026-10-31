@@ -68,6 +68,10 @@ pub fn even_crop(x: f64, y: f64, w: f64, h: f64, display_w: u32, display_h: u32)
 /// The Mac app's qualities, in bits per pixel per frame: "high", "balanced" or "compact" (Smaller File), kept within
 /// sensible bounds.
 pub fn bitrate(width: u32, height: u32, fps: u32, quality: &str) -> u32 {
+    // A bitrate chosen in Settings, stored as the Mac stores it: "bitrate:12000000", 1 to 100 Mbit/s.
+    if let Some(chosen) = quality.strip_prefix("bitrate:").and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0) {
+        return chosen.clamp(1_000_000, 100_000_000) as u32;
+    }
     let factor = match quality { "compact" => 0.045, "balanced" => 0.09, _ => 0.18 };
     let bits = width as f64 * height as f64 * fps.max(1) as f64 * factor;
     bits.clamp(400_000.0, 100_000_000.0) as u32
@@ -690,6 +694,9 @@ mod tests {
         assert_eq!(bitrate(1920, 1080, 30, "compact"), 2_799_360);
         assert_eq!(bitrate(1920, 1080, 30, "anything else"), 11_197_440);
         assert_eq!(bitrate(10, 10, 1, "high"), 400_000);
+        assert_eq!(bitrate(1920, 1080, 30, "bitrate:8000000"), 8_000_000);
+        assert_eq!(bitrate(1920, 1080, 30, "bitrate:500"), 1_000_000);
+        assert_eq!(bitrate(1920, 1080, 30, "bitrate:x"), 11_197_440);
         assert_eq!(bitrate(7680, 4320, 60, "high"), 100_000_000);
     }
 

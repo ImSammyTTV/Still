@@ -11,6 +11,7 @@
     "allow-video-export-target",
     "allow-video-export-save",
     "allow-video-export-copy",
-    "allow-video-project-save"
+    "allow-video-project-save",
+    "allow-editor-open-image"
   ]
 }

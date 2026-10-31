@@ -18,7 +18,7 @@ let item, source, duration = 0, trim = { start: 0, end: 0 }, job = null, project
 const NO_BG = { style: 'none', padding: 8, radius: 2, shadow: true };
 let bg = { ...NO_BG };
 const hasBg = () => bg.style !== 'none';
-let zooms = [], selectedZoom = -1, showClicks = false;
+let zooms = [], selectedZoom = -1, showClicks = false, bgPicture = null;
 const clicks = () => (Array.isArray(project.clicks) ? project.clicks : []);
 const drawsClicks = () => showClicks && clicks().length > 0;
 const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks();
@@ -170,7 +170,7 @@ function layoutPreview() {
   const frame = $('#frame');
   Object.assign(frame.style, { width: `${F.w * s}px`, height: `${F.h * s}px`, left: `${(stage.clientWidth - F.w * s) / 2}px`, top: `${(stage.clientHeight - F.h * s) / 2}px` });
   const [a, b] = StillBackdrop.GRADIENTS[bg.style] || [];
-  frame.style.background = hasBg() ? `linear-gradient(135deg, ${a}, ${b})` : 'none';
+  frame.style.background = !hasBg() ? 'none' : bg.style === 'custom' ? `center / cover no-repeat url("${bg.custom}")` : `linear-gradient(135deg, ${a}, ${b})`;
   Object.assign($('#clip').style, { left: `${F.x * s}px`, top: `${F.y * s}px`, width: `${vw * s}px`, height: `${vh * s}px`, borderRadius: `${F.radius * s}px`,
     boxShadow: hasBg() && bg.shadow ? `0 ${Math.max(6, vw / 120) * s}px ${Math.max(20, vw / 30) * s}px rgba(0,0,0,.35)` : 'none' });
   const fx = $('#fx'); fx.width = Math.round(vw * s * devicePixelRatio); fx.height = Math.round(vh * s * devicePixelRatio);
@@ -212,6 +212,20 @@ $('#swatches').addEventListener('click', (e) => { const b = e.target.closest('[d
 $('#bgPadding').oninput = (e) => { bg = { ...bg, padding: Number(e.target.value) }; renderBackground(); };
 $('#bgRadius').oninput = (e) => { bg = { ...bg, radius: Number(e.target.value) }; renderBackground(); };
 $('#bgShadow').onchange = (e) => { bg = { ...bg, shadow: e.target.checked }; renderBackground(); };
+// Your own picture, as in the image editor. It's kept in the project, so the background comes back with the recording.
+async function loadPicture() {
+  bgPicture = null;
+  if (!bg.custom) return;
+  const picture = new Image(); picture.src = bg.custom;
+  await picture.decode().catch(() => {});
+  if (picture.naturalWidth) bgPicture = picture;
+}
+$('#bgImage').onclick = async () => {
+  const data = await still.invoke('editor:openImage').catch(() => null);
+  if (!data) return;
+  bg = { ...bg, style: 'custom', custom: data };
+  await loadPicture(); renderBackground();
+};
 $('#background').onclick = () => {
   const panel = $('#backdrop'); panel.hidden = !panel.hidden;
   $('#background').setAttribute('aria-expanded', String(!panel.hidden));
@@ -223,7 +237,7 @@ $('#background').onclick = () => {
 function drawFrame(ctx, player, F) {
   const t = player.currentTime, z = StillZoom.at(zooms, t), src = StillZoom.source(F.width, F.height, z);
   ctx.save();
-  if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg);
+  if (hasBg()) StillBackdrop.paint(ctx, F, { x: F.x, y: F.y, w: F.width, h: F.height, radius: F.radius }, bg, bgPicture);
   else { ctx.beginPath(); ctx.rect(F.x, F.y, F.width, F.height); ctx.clip(); }
   ctx.drawImage(player, src.x, src.y, src.w, src.h, F.x, F.y, F.width, F.height);
   if (drawsClicks()) drawRings(ctx, t, src, z.scale, 1, F.x, F.y, F.width, F.height);
@@ -487,7 +501,8 @@ async function open() {
   if (!(duration > 0)) throw new Error('This video has no length.');
   project = item.project && typeof item.project === 'object' ? item.project : {};
   trim = StillTrim.restore(project.trim, duration);
-  if (project.bg && StillBackdrop.GRADIENTS[project.bg.style]) bg = { ...NO_BG, ...project.bg };
+  if (project.bg && (StillBackdrop.GRADIENTS[project.bg.style] || (project.bg.style === 'custom' && project.bg.custom))) bg = { ...NO_BG, ...project.bg };
+  await loadPicture();
   zooms = (Array.isArray(project.zooms) ? project.zooms : []).filter((z) => z && z.end > z.start && z.scale >= 1);
   showClicks = !!project.showClicks;
   $('#status').hidden = true;
