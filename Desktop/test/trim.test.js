@@ -134,3 +134,13 @@ test('fast-forwards split the kept stretches and shorten the finished video', ()
   assert.equal(T.sourceAt(4.5, kept), 8); assert.ok(Math.abs(T.sourceAt(4.1, kept) - 4.4) < 1e-9); assert.equal(T.sourceAt(7, kept), 12);
   assert.deepEqual(T.kept(clip, cuts, []), T.kept(clip, cuts));
 });
+
+test('waits: still, silent stretches of four seconds or more become fast-forwards', () => {
+  const changes = Array(40).fill(0.1);
+  for (let i = 4; i < 20; i++) changes[i] = 0.005;  // 2 s to 10 s still
+  for (let i = 24; i < 30; i++) changes[i] = 0.001; // 12 s to 15 s: too short
+  assert.deepEqual(T.waits(changes, 0.5, []), [{ start: 2.5, end: 9.5, rate: 4 }]);
+  assert.deepEqual(T.waits(changes, 0.5, [{ start: 5, end: 6 }]), [{ start: 6.5, end: 9.5, rate: 4 }]);
+  assert.deepEqual(T.waits(changes, 0.5, [], { start: 10, rate: 8 }), [{ start: 12.5, end: 19.5, rate: 8 }]);
+  assert.deepEqual(T.waits(Array(20).fill(0), 0.5, []), [{ start: 0.5, end: 9.5, rate: 4 }]);
+});

@@ -159,6 +159,76 @@ import StillCore
             } catch { self.error = "Couldn’t read this frame: \(error.localizedDescription)" }
         }
     }
+    /// How much the picture changes from start to end: a tiny greyscale copy every `step` seconds (half a second, or
+    /// longer on long recordings) and the difference between each and the next.
+    static func scanChanges(url: URL, start: Double, end: Double) async throws -> (changes: [Double], step: Double, generator: AVAssetImageGenerator) {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url)); generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 160, height: 160)
+        let span = end - start, step = max(0.5, span / 400), count = max(1, Int(span / step))
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = CMTime(seconds: step / 4, preferredTimescale: 600)
+        var changes: [Double] = [], last: [Double]?
+        for i in 0...count {
+            let g = ChapterFinder.grey(try await generator.image(at: CMTime(seconds: min(end, start + Double(i) * step), preferredTimescale: 600)).image)
+            if let last { changes.append(VideoChapters.difference(last, g)) }; last = g
+        }
+        return (changes, step, generator)
+    }
+    /// Speed Up Waits: stretches where the picture barely moves and nobody speaks (a progress bar, an install, a page
+    /// loading) become fast-forwards, leaving half a second at each end.
+    func speedUpWaits() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), start = settings.start, end = settings.end > 0 ? settings.end : duration, rate = skimRate
+        Task {
+            defer { listening = false }
+            do {
+                let levels = (try? await Self.levels(of: url)) ?? []
+                let speech = levels.isEmpty ? [] : AudioPauses.speech(levels: levels, step: 0.05)
+                let (changes, step, _) = try await Self.scanChanges(url: url, start: start, end: end)
+                let cuts = settings.cuts ?? []
+                let found = VideoTimeline.waits(changes: changes, step: step, speech: speech, start: start, rate: rate).filter { w in !cuts.contains { $0.start < w.end && $0.end > w.start } }
+                let before = VideoTimeline.length(settings.kept)
+                let merged = VideoTimeline.normalizedSkims((settings.skims ?? []) + found, start: settings.start, end: settings.end > 0 ? settings.end : duration)
+                settings.skims = merged.isEmpty ? nil : merged
+                let saved = before - VideoTimeline.length(settings.kept)
+                library.toast(!found.isEmpty && saved > 0.05 ? "Sped up \(found.count) wait\(found.count == 1 ? "" : "s"), \(String(format: "%.1f", saved)) s shorter" : "No long waits found")
+            } catch { self.error = "Couldn’t look for waits: \(error.localizedDescription)" }
+        }
+    }
+    /// Find Chapters: watches the kept part for big changes in the picture (another app, a new page, a new slide) and
+    /// marks a chapter at each, named from the largest text on screen just after the change.
+    func findChapters() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), start = settings.start, end = settings.end > 0 ? settings.end : duration, cuts = settings.cuts ?? []
+        Task {
+            defer { listening = false }
+            do {
+                let (changes, step, generator) = try await Self.scanChanges(url: url, start: start, end: end)
+                let grey = { (t: Double) async throws -> [Double] in ChapterFinder.grey(try await generator.image(at: CMTime(seconds: t, preferredTimescale: 600)).image) }
+                let existing = settings.chapters ?? []
+                let rough = VideoChapters.scenes(changes, step: step, start: start)
+                    .filter { t in !cuts.contains { t >= $0.start && t < $0.end } && !existing.contains { abs($0.time - t) < 3 } }.prefix(24)
+                guard !rough.isEmpty else { library.toast("No clear changes of scene found"); return }
+                // Each change is somewhere in the step before; halving it five times finds the moment to a few hundredths.
+                generator.requestedTimeToleranceAfter = .zero
+                let full = AVAssetImageGenerator(asset: AVURLAsset(url: url)); full.appliesPreferredTrackTransform = true
+                full.requestedTimeToleranceBefore = .zero; full.requestedTimeToleranceAfter = .zero
+                var found: [VideoChapter] = [], named = 0
+                for (n, t) in rough.enumerated() {
+                    var lo = t - step, hi = t
+                    let before = try await grey(lo), after = try await grey(hi)
+                    for _ in 0..<5 { let mid = (lo + hi) / 2, g = try await grey(mid); if VideoChapters.difference(g, after) < VideoChapters.difference(g, before) { hi = mid } else { lo = mid } }
+                    let frame = try await full.image(at: CMTime(seconds: min(end - 0.05, hi + 0.4), preferredTimescale: 600)).image
+                    let title = (try? await Task.detached(priority: .userInitiated) { try ChapterFinder.title(in: frame) }.value) ?? ""
+                    if !title.isEmpty { named += 1 }
+                    found.append(VideoChapter(time: hi, title: title.isEmpty ? "Chapter \(existing.count + n + 1)" : title))
+                }
+                settings.chapters = (existing + found).sorted { $0.time < $1.time }
+                library.toast("Found \(found.count) chapter\(found.count == 1 ? "" : "s")\(named > 0 ? ", \(named == found.count ? "all" : "\(named)") named from the screen" : "")")
+            } catch { self.error = "Couldn’t look for chapters: \(error.localizedDescription)" }
+        }
+    }
     /// The picture at a moment of the recording, as exported (background, blurs, callouts, captions and the rest).
     private func pictures(at times: [Double], width: Double? = nil) async throws -> [CGImage] {
         let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
@@ -409,7 +479,8 @@ struct VideoEditorView: View {
             }
             if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Chapters":
-            HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                Button(model.listening ? "Looking…" : "Find Chapters") { model.findChapters() }.disabled(model.listening).help("Look for big changes on screen (another app, a new page) and mark a chapter at each, named from the screen")
                 Button("Add Chapter at Playhead") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
                 Button("Copy Chapters") {
                     let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed, skims: model.settings.skims ?? [])
@@ -500,6 +571,7 @@ struct VideoEditorView: View {
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
                 Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
                 Button { model.fastForward() } label: { Label("Fast-Forward", systemImage: "forward.fill") }.help("Fast-forward a dull stretch from the playhead, with a badge so viewers know (S)").keyboardShortcut("s", modifiers: [])
+                Button { model.speedUpWaits() } label: { Label(model.listening ? "Looking…" : "Speed Up Waits", systemImage: "hourglass") }.disabled(model.listening).help("Fast-forward stretches where the screen barely moves and nobody speaks: a progress bar, an install, a page loading")
                 Button { model.tightenPauses() } label: { Label(model.listening ? "Listening…" : "Tighten Pauses", systemImage: "waveform") }.disabled(model.listening).help("Find long silences and cut them down to a short beat")
                 Menu { Picker("Opening", selection: Binding(get: { model.settings.opening ?? "none" }, set: { model.settings.opening = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade In").tag("fade"); Text("Rise").tag("rise") }
                     Picker("Closing", selection: Binding(get: { model.settings.closing ?? "none" }, set: { model.settings.closing = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade Out").tag("fade"); Text("Rise").tag("rise") }
