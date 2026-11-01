@@ -7,8 +7,8 @@
   else root.StillStoryboard = factory(root.StillTrim, root.StillChapters);
 })(typeof self !== 'undefined' ? self : this, function (Trim, Chapters) {
   // The frames to show: [{ time (the recording's), label }], at most `max`.
-  function frames(clip, cuts, chapters, { count = 12, max = 24, speed = 1 } = {}) {
-    const kept = Trim.kept(clip, cuts || []), total = Trim.keptLength(clip, cuts || []);
+  function frames(clip, cuts, chapters, { count = 12, max = 24, speed = 1, skims = [] } = {}) {
+    const kept = Trim.kept(clip, cuts || [], skims), total = Trim.keptLength(clip, cuts || [], skims);
     if (total <= 0) return [];
     const inside = (chapters || []).filter((c) => c.time >= clip.start && c.time <= clip.end && !(cuts || []).some((x) => c.time >= x.start && c.time < x.end))
       .sort((a, b) => a.time - b.time);

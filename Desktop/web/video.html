@@ -78,6 +78,9 @@
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane.captions button { background: var(--text); opacity: .4; }
   .lane.blurs button { background: var(--red); opacity: .45; }
+  /* Fast-forwards: dashes, like motion lines. */
+  .lane.skims button { background: repeating-linear-gradient(90deg, var(--text) 0 5px, transparent 5px 9px); opacity: .45; }
+  .lane.skims button.selected { opacity: .95; }
   .lane.callouts button { background: var(--yellow); opacity: .45; }
   .lane.callouts button.selected { opacity: .95; }
   .lane.blurs button.selected { opacity: .95; }
@@ -110,6 +113,8 @@
 <div class="titlebar">
   <h1 id="title">Trim Video</h1>
   <span class="grow"></span>
+  <button class="btn icon plain" id="undo" title="Undo (Ctrl+Z)" disabled><i data-lucide="undo-2"></i></button>
+  <button class="btn icon plain" id="redo" title="Redo (Ctrl+Shift+Z)" disabled><i data-lucide="redo-2"></i></button>
   <button class="btn" id="background" title="Put the video on a background" aria-expanded="false" disabled><i data-lucide="image"></i>Background</button>
   <button class="btn icon" id="saveFrame" title="Save this frame to History and copy it (F)" disabled><i data-lucide="camera"></i></button>
   <button class="btn" id="storyboard" title="One picture of the whole video: a grid of frames with their times, or one per chapter" disabled><i data-lucide="layout-grid"></i>Storyboard</button>
@@ -152,8 +157,16 @@
     <button class="btn" id="setIn" title="Start the video at the playhead (I)" disabled><i data-lucide="arrow-right-to-line"></i>Set In</button>
     <button class="btn" id="setOut" title="End the video at the playhead (O)" disabled><i data-lucide="arrow-left-to-line"></i>Set Out</button>
     <button class="btn" id="cut" title="Cut out a stretch: press at its start, then at its end (X)" disabled><i data-lucide="scissors"></i>Cut</button>
+    <button class="btn" id="addSkim" title="Fast-forward a dull stretch from the playhead, with a badge so viewers know (S)" disabled><i data-lucide="fast-forward"></i>Fast-Forward</button>
     <button class="btn" id="tighten" title="Find long silences and cut them down to a short beat" disabled><i data-lucide="audio-lines"></i>Tighten Pauses</button>
     <button class="btn plain" id="reset" disabled>Reset</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="skimTools" hidden>
+      <label>Speed <select class="field" id="skimRate"><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+      <button class="btn" id="skimIn" title="Start this fast-forward at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="skimOut" title="End this fast-forward at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="skimRemove" title="Play this stretch at normal speed again (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
   </div>
   <div class="panel" role="tabpanel" data-panel="zoom" hidden>
     <button class="btn" id="addZoom" title="Zoom in at the playhead (Z)" disabled><i data-lucide="zoom-in"></i>Add Zoom</button>
@@ -247,6 +260,7 @@
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
+  <div class="lane skims" id="skimLane" data-tab="trim" aria-label="Fast-forwards"></div>
   <div class="lane" id="lane" data-tab="zoom" aria-label="Zooms"></div>
   <div class="lane captions" id="captionLane" data-tab="text" aria-label="Text"></div>
   <div class="lane blurs" id="blurLane" data-tab="blur" aria-label="Blurs"></div>

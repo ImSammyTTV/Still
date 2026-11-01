@@ -26,7 +26,7 @@ public enum VideoEngine {
         let start = max(0, min(settings.start, duration)), end = settings.end > 0 ? min(settings.end, duration) : duration
         guard end-start > 0.025 else { throw VideoError.invalidRange }
         // The stretches that stay, laid end to end: cuts drop out and the rest closes up.
-        let kept = VideoTimeline.kept(start: start, end: end, cuts: settings.cuts ?? [])
+        let kept = VideoTimeline.kept(start: start, end: end, cuts: settings.cuts ?? [], skims: settings.skims ?? [])
         guard VideoTimeline.length(kept) > 0.025 else { throw VideoError.invalidRange }
         let cm = { (t: Double) in CMTime(seconds: t, preferredTimescale: 600) }
         let pieces = kept.map { CMTimeRange(start: cm($0.start), duration: cm($0.end-$0.start)) }
@@ -63,12 +63,28 @@ public enum VideoEngine {
         mix.inputParameters = mixInputs
         // A faster export squeezes every track into less time; each frame still maps back to the recording's moment.
         let speed = min(4, max(1, settings.speed ?? 1))
+        // Fast-forwards squeeze their own stretches first (from the end, so earlier places stay put), then the export
+        // speed squeezes the lot. Both happen before the music goes in, which is laid to the finished length.
+        var placed = 0.0, places: [(VideoCut, Double)] = []
+        for k in kept { places.append((k, placed)); placed += k.end - k.start }
+        for (k, at) in places.reversed() where (k.rate ?? 1) > 1.001 { asset.scaleTimeRange(CMTimeRange(start: cm(at), duration: cm(k.end-k.start)), toDuration: cm(k.played)) }
+        if speed > 1.001 { asset.scaleTimeRange(CMTimeRange(start: .zero, duration: cm(total)), toDuration: cm(total/speed)) }
+        let squeezed = speed > 1.001 || kept.contains { ($0.rate ?? 1) > 1.001 }
         // The opening and closing fade the sound with the picture.
         let fade = VideoTransition.length(start: start, end: end)
         for input in mixInputs where fade > 0 {
             let full: Float = settings.muted ? 0 : 1
             if (settings.opening ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: 0, toEndVolume: full, timeRange: CMTimeRange(start: .zero, duration: cm(fade/speed))) }
             if (settings.closing ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: full, toEndVolume: 0, timeRange: CMTimeRange(start: cm(max(0, total-fade)/speed), duration: cm(fade/speed))) }
+        }
+        // While fast-forwarding the voice drops to a murmur, so it's there without chattering. Kept clear of the fades.
+        if !settings.muted {
+            let from = (settings.opening ?? "none") != "none" ? fade/speed : 0, to = (settings.closing ?? "none") != "none" ? max(0, total-fade)/speed : total/speed
+            for k in kept where (k.rate ?? 1) > 1.001 {
+                let a = max(from, VideoTimeline.outputTime(at: k.start, kept: kept)/speed), b = min(to, a + k.played/speed)
+                guard b - a > 0.05 else { continue }
+                for input in mixInputs { input.setVolumeRamp(fromStartVolume: 0.35, toEndVolume: 0.35, timeRange: CMTimeRange(start: cm(a), duration: cm(b-a))); if b < to - 0.001 { input.setVolume(1, at: cm(b)) } }
+            }
         }
         // Background music: looped to the finished length at its own speed, dipping while someone speaks.
         if let music = settings.music, let musicURL, FileManager.default.fileExists(atPath: musicURL.path),
@@ -100,7 +116,7 @@ public enum VideoEngine {
         }
         // The mix keeps copies of its inputs, so they go back in after the speed and fades are set.
         mix.inputParameters = mixInputs
-        if speed > 1.001 { asset.scaleTimeRange(CMTimeRange(start: .zero, duration: cm(total)), toDuration: cm(total/speed)); for input in mixInputs { input.audioTimePitchAlgorithm = .spectral } }
+        if squeezed { for input in mixInputs { input.audioTimePitchAlgorithm = .spectral } }
         let padding = settings.frame == "none" ? 0 : settings.padding
         var width = oriented.width+padding*2, height = oriented.height+padding*2
         if settings.aspect > 0 { if width/height < settings.aspect { width = height*settings.aspect } else { height = width/settings.aspect } }
@@ -325,6 +341,12 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             result = pill.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
                 .transformed(by: CGAffineTransform(translationX: x, y: y)).composited(over: result)
         }
+        // The fast-forward badge, top right of the video, so viewers know time is skipping.
+        let rate = VideoTimeline.skimRate(at: time, skims: s.skims ?? [])
+        if rate > 1 {
+            let unit = max(1, contentRect.width/900), badge = skimBadge(rate, unit: unit)
+            result = badge.transformed(by: CGAffineTransform(translationX: contentRect.maxX-badge.extent.width-14*unit, y: contentRect.maxY-badge.extent.height-14*unit)).composited(over: result)
+        }
         if s.showKeystrokes, let key = i.metadata.keys.last(where: { $0.time <= time && time-$0.time < 1.7 }) {
             let factor = max(0.5, min(3, s.keysSize ?? 1))
             let overlay = textImage(key.text, light: s.keysStyle == "light").transformed(by: CGAffineTransform(scaleX: factor, y: factor))
@@ -403,6 +425,22 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             ctx.textPosition = CGPoint(x: (Double(width)-lineWidth)/2, y: baseline); CTLineDraw(line, ctx)
         }
         let image = CIImage(cgImage: ctx.makeImage()!); if textImages.count > 200 { textImages.removeAll() }; textImages[cacheKey] = image; return image
+    }
+    /// The fast-forward badge: two arrowheads and the rate on a dark pill.
+    private func skimBadge(_ rate: Double, unit: Double) -> CIImage {
+        let cacheKey = "skim:\(Int(rate)):\(Int(unit*10))"
+        if let image = textImages[cacheKey] { return image }
+        let font = CTFontCreateWithName("HelveticaNeue-Medium" as CFString, 15*unit, nil)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "\(Int(rate))×", attributes: [kCTFontAttributeName as NSAttributedString.Key: font, kCTForegroundColorAttributeName as NSAttributedString.Key: NSColor.white.cgColor]))
+        let h = 30*unit, pad = 10*unit, w = 34*unit+CTLineGetTypographicBounds(line, nil, nil, nil)+pad
+        guard let ctx = CGContext(data: nil, width: Int(w.rounded(.up)), height: Int(h.rounded(.up)), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return CIImage.empty() }
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.6).cgColor)
+        ctx.addPath(CGPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerWidth: h/2, cornerHeight: h/2, transform: nil)); ctx.fillPath()
+        ctx.setFillColor(NSColor.white.cgColor)
+        for dx in [0, 9*unit] { let ax = pad+dx; ctx.move(to: CGPoint(x: ax, y: 9*unit)); ctx.addLine(to: CGPoint(x: ax+9*unit, y: h/2)); ctx.addLine(to: CGPoint(x: ax, y: h-9*unit)); ctx.closePath(); ctx.fillPath() }
+        ctx.textPosition = CGPoint(x: pad+22*unit, y: h/2-5*unit); CTLineDraw(line, ctx)
+        guard let made = ctx.makeImage() else { return CIImage.empty() }
+        let image = CIImage(cgImage: made); if textImages.count > 200 { textImages.removeAll() }; textImages[cacheKey] = image; return image
     }
     private func textImage(_ text: String, light: Bool = false) -> CIImage {
         let cacheKey = "\(light):\(text)"
