@@ -177,6 +177,7 @@ function render() {
 
 // Saved a moment after the last change, so dragging a handle doesn't write the file on every step.
 function saveProject() {
+  renderTabs();
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -197,6 +198,7 @@ function gifPlan() {
 }
 function renderGifHint() {
   const plan = gifPlan();
+  $('#gifGo').disabled = !plan.ok;
   $('#gifHint').textContent = !plan.ok ? `Keep ${StillGIF.limits.maxSeconds} seconds or less for a GIF.`
     : `${plan.width} × ${plan.height}, ${plan.frames} frames${plan.lowered ? `, slowed to ${Math.round(plan.fps)} fps for length` : ''}`;
 }
@@ -605,7 +607,7 @@ function renderZooms() {
   $('#autoZoom').disabled = !duration || !clicks().length;
   $('#autoZoom').title = clicks().length ? 'A zoom wherever you clicked while recording' : 'Auto Zoom needs a recording made with Still 1.2.15 or later on Windows, or on Linux with X11';
   $('#clicksToggle').hidden = !clicks().length; $('#showClicks').checked = showClicks;
-  $('#cursorRow').hidden = !separateCursor();
+  $('#tabCursor').hidden = !separateCursor(); if (tab === 'cursor' && !separateCursor()) showTab('trim');
   $('#cursorShow').checked = cursorFx.show; $('#cursorSize').value = String(cursorFx.size); $('#cursorSmooth').checked = cursorFx.smooth;
   $('#cursorStyle').value = cursorFx.style === 'dot' ? 'dot' : 'arrow';
   $$('#cursorSize, #cursorSmooth, #cursorStyle').forEach((input) => { input.disabled = !cursorFx.show; });
@@ -637,6 +639,41 @@ $('#clip').addEventListener('click', (e) => {
   const x = (src.x + (e.clientX - r.left) / r.width * src.w) / vw, y = (src.y + (e.clientY - r.top) / r.height * src.h) / vh;
   changeZoom({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
 }, true);
+
+// ---- Tool tabs ----------------------------------------------------------------------------------
+
+// One group of tools shows at a time. Each tab carries a count of what it holds, so nothing is out of sight for
+// long, and picking anything on the timeline opens its tab.
+let tab = localStorage.getItem('still.videoTab') || 'trim';
+function showTab(name) {
+  if (!name || $(`#tabs [data-tab="${name}"]`)?.hidden) name = 'trim';
+  tab = name; localStorage.setItem('still.videoTab', name);
+  $$('#tabs [data-tab]').forEach((b) => { const on = b.dataset.tab === name; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+  $$('#tools [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+  $$('#tools .lane').forEach((l) => l.classList.toggle('current', l.dataset.tab === name));
+}
+function renderTabs() {
+  const counts = { trim: cuts.length, zoom: zooms.length, text: captions.length, callouts: callouts.length, blur: blurs.length, chapters: chapters.length, sound: music ? 1 : 0, ends: (opening !== 'none') + (closing !== 'none') };
+  for (const [name, n] of Object.entries(counts)) $(`#count${name[0].toUpperCase()}${name.slice(1)}`).textContent = n ? String(n) : '';
+}
+$$('#tabs [data-tab]').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+$('#tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const open = $$('#tabs [data-tab]').filter((b) => !b.hidden), at = open.findIndex((b) => b.dataset.tab === tab);
+  const next = open[(at + (e.key === 'ArrowRight' ? 1 : -1) + open.length) % open.length];
+  showTab(next.dataset.tab); next.focus(); e.preventDefault();
+});
+// Picking something on a lane, a chapter flag or a cut opens the tab it belongs to.
+$$('#tools .lane').forEach((l) => l.addEventListener('click', () => showTab(l.dataset.tab)));
+$('#chapters').addEventListener('click', () => showTab('chapters'));
+$('#cuts').addEventListener('click', () => showTab('trim'));
+// A shortcut works from any tab, and opens the one its tool lives on.
+function press(selector) {
+  const b = $(selector);
+  if (b.disabled) return;
+  showTab(b.closest('[data-panel]')?.dataset.panel || tab); b.click();
+}
+showTab(tab);
 
 // ---- Playback -----------------------------------------------------------------------------------
 
@@ -673,6 +710,9 @@ $('#setIn').onclick = () => setStart(video.currentTime);
 $('#setOut').onclick = () => setEnd(video.currentTime);
 $('#reset').onclick = () => { trim = StillTrim.full(duration); cuts = []; cutStart = null; render(); };
 $('#gifWidth').onchange = $('#gifFps').onchange = renderGifHint;
+$('#exportGif').onclick = () => { renderGifHint(); $('#gifSheet').hidden = false; $('#gifGo').focus(); };
+$('#gifCancel').onclick = () => { $('#gifSheet').hidden = true; };
+$('#gifSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); $('#gifSheet').hidden = true; } });
 $('#errorClose').onclick = () => { $('#error').hidden = true; };
 $('#errorPlayer').onclick = () => still.send('library:play', id);
 $('#cancel').onclick = () => { if (job) job.abort(); };
@@ -680,21 +720,21 @@ $('#cancel').onclick = () => { if (job) job.abort(); };
 addEventListener('keydown', (e) => {
   if (job || e.metaKey || e.ctrlKey || e.altKey || e.target.closest('button, select, input')) return;
   if (e.key === ' ') { e.preventDefault(); togglePlay(); }
-  else if (e.key === 'i' || e.key === 'I') $('#setIn').click();
-  else if (e.key === 'o' || e.key === 'O') $('#setOut').click();
-  else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
-  else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
+  else if (e.key === 'i' || e.key === 'I') press('#setIn');
+  else if (e.key === 'o' || e.key === 'O') press('#setOut');
+  else if (e.key === 'z' || e.key === 'Z') press('#addZoom');
+  else if (e.key === 'x' || e.key === 'X') press('#cut');
   else if ((e.key === 'f' || e.key === 'F') && !$('#saveFrame').disabled) $('#saveFrame').click();
-  else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
+  else if (e.key === 't' || e.key === 'T') { e.preventDefault(); press('#addCaption'); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCallout >= 0) $('#calloutRemove').click();
-  else if ((e.key === 'a' || e.key === 'A') && !$('#addArrow').disabled) $('#addArrow').click();
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedChapter >= 0) $('#chapterRemove').click();
-  else if ((e.key === 'm' || e.key === 'M') && !$('#addChapter').disabled) { e.preventDefault(); $('#addChapter').click(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlur >= 0) $('#blurRemove').click();
-  else if ((e.key === 'b' || e.key === 'B') && !$('#addBlur').disabled) $('#addBlur').click();
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaption >= 0) $('#captionRemove').click();
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedZooms.size) $('#zoomRemove').click();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCallout >= 0) press('#calloutRemove');
+  else if (e.key === 'a' || e.key === 'A') press('#addArrow');
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedChapter >= 0) press('#chapterRemove');
+  else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); press('#addChapter'); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlur >= 0) press('#blurRemove');
+  else if (e.key === 'b' || e.key === 'B') press('#addBlur');
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaption >= 0) press('#captionRemove');
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedZooms.size) press('#zoomRemove');
 });
 
 // ---- Export -------------------------------------------------------------------------------------
@@ -915,8 +955,9 @@ $('#storyboard').onclick = () => runExport('Making storyboard…', async (run) =
   toast('Storyboard saved to History and opened');
   return null;
 });
-$('#exportGif').onclick = () => {
+$('#gifGo').onclick = () => {
   const plan = gifPlan();
+  $('#gifSheet').hidden = true;
   if (!plan.ok) return showError(plan.error);
   runExport('Making GIF…', async (run) => {
     const target = await still.invoke('video:target', 'gif');

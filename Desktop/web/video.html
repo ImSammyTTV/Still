@@ -24,7 +24,6 @@
   .transport { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; flex-wrap: wrap; }
   .transport label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
   .transport select { height: 26px; }
-  #gifHint { font-size: 11px; color: var(--text-2); max-width: 240px; }
 
   .backdrop { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--border); }
   .backdrop label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
@@ -35,6 +34,23 @@
   .trim { padding: 12px 16px 14px; border-top: 1px solid var(--border); background: var(--surface); display: grid; gap: 10px; }
   .trim-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .note { margin: 0; font-size: 11px; color: var(--text-2); }
+  /* One group of tools at a time: a tab per kind of edit, each with the colour of its lane and how many it holds. */
+  .tools-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .tabs button { color: var(--text-2); }
+  .tabs button[aria-selected="true"] { background: var(--surface-strong); color: var(--text); }
+  .tabs .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-2); opacity: .5; }
+  .tabs .dot[data-k="zoom"] { background: var(--accent); opacity: .9; }
+  .tabs .dot[data-k="text"] { background: var(--text); opacity: .7; }
+  .tabs .dot[data-k="callouts"], .tabs .dot[data-k="chapters"] { background: var(--yellow); opacity: .9; }
+  .tabs .dot[data-k="blur"], .tabs .dot[data-k="trim"] { background: var(--red); opacity: .8; }
+  .tabs .count { font-size: 10px; font-variant-numeric: tabular-nums; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--surface-strong); color: var(--text); display: inline-grid; place-items: center; }
+  .tabs .count:empty { display: none; }
+  .panel { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 30px; }
+  .panel[hidden] { display: none; }
+  /* Lanes show only when they hold something; the open tab's lane is bright and the rest step back. */
+  .lane:empty { display: none; }
+  .lane:not(.current) { opacity: .45; }
+  .lane:not(.current):hover { opacity: .8; }
 
   /* The trim bar: a film strip with the cut parts dimmed, the kept part framed and a handle at each end. */
   .bar { position: relative; height: 64px; touch-action: none; }
@@ -108,14 +124,6 @@
   <button class="btn icon plain" id="play" title="Play (Space)" disabled><i data-lucide="play"></i></button>
   <span class="clock" id="now">0:00.0</span>
   <button class="btn icon plain" id="mute" title="Mute"><i data-lucide="volume-2"></i></button>
-  <span class="grow"></span>
-  <label>GIF width
-    <select class="field" id="gifWidth"><option value="480">480</option><option value="640">640</option><option value="800" selected>800</option><option value="1280">1280</option></select>
-  </label>
-  <label>Frame rate
-    <select class="field" id="gifFps"><option value="5">5 fps</option><option value="10">10 fps</option><option value="12" selected>12 fps</option><option value="15">15 fps</option><option value="24">24 fps</option></select>
-  </label>
-  <span id="gifHint" aria-live="polite"></span>
 </div>
 <section class="backdrop" id="backdrop" hidden>
   <div class="swatches" id="swatches" role="group" aria-label="Background"></div>
@@ -124,19 +132,30 @@
   <label>Corners <input type="range" id="bgRadius" min="0" max="8" step="0.5"></label>
   <label><input type="checkbox" id="bgShadow"> Shadow</label>
 </section>
-<section class="trim">
-  <div class="trim-head">
-    <b>Trim</b>
-    <span class="clock dim" id="range"></span>
+<section class="trim" id="tools">
+  <div class="tools-head">
+    <div class="segmented tabs" role="tablist" aria-label="Editing tools" id="tabs">
+    <button role="tab" id="tabTrim" data-tab="trim" aria-selected="false"><i class="dot" data-k="trim"></i>Trim<span class="count" id="countTrim"></span></button>
+    <button role="tab" id="tabZoom" data-tab="zoom" aria-selected="false"><i class="dot" data-k="zoom"></i>Zoom<span class="count" id="countZoom"></span></button>
+    <button role="tab" id="tabText" data-tab="text" aria-selected="false"><i class="dot" data-k="text"></i>Text<span class="count" id="countText"></span></button>
+    <button role="tab" id="tabCallouts" data-tab="callouts" aria-selected="false"><i class="dot" data-k="callouts"></i>Callouts<span class="count" id="countCallouts"></span></button>
+    <button role="tab" id="tabBlur" data-tab="blur" aria-selected="false"><i class="dot" data-k="blur"></i>Blur<span class="count" id="countBlur"></span></button>
+    <button role="tab" id="tabChapters" data-tab="chapters" aria-selected="false"><i class="dot" data-k="chapters"></i>Chapters<span class="count" id="countChapters"></span></button>
+    <button role="tab" id="tabSound" data-tab="sound" aria-selected="false"><i class="dot" data-k="sound"></i>Sound<span class="count" id="countSound"></span></button>
+    <button role="tab" id="tabEnds" data-tab="ends" aria-selected="false"><i class="dot" data-k="ends"></i>Ends<span class="count" id="countEnds"></span></button>
+    <button role="tab" id="tabCursor" data-tab="cursor" aria-selected="false" hidden><i class="dot" data-k="cursor"></i>Cursor<span class="count" id="countCursor"></span></button>
+    </div>
     <span class="grow"></span>
+    <span class="clock dim" id="range"></span>
+  </div>
+  <div class="panel" role="tabpanel" data-panel="trim" hidden>
     <button class="btn" id="setIn" title="Start the video at the playhead (I)" disabled><i data-lucide="arrow-right-to-line"></i>Set In</button>
     <button class="btn" id="setOut" title="End the video at the playhead (O)" disabled><i data-lucide="arrow-left-to-line"></i>Set Out</button>
     <button class="btn" id="cut" title="Cut out a stretch: press at its start, then at its end (X)" disabled><i data-lucide="scissors"></i>Cut</button>
     <button class="btn" id="tighten" title="Find long silences and cut them down to a short beat" disabled><i data-lucide="audio-lines"></i>Tighten Pauses</button>
     <button class="btn plain" id="reset" disabled>Reset</button>
   </div>
-  <div class="trim-head">
-    <b>Zoom</b>
+  <div class="panel" role="tabpanel" data-panel="zoom" hidden>
     <button class="btn" id="addZoom" title="Zoom in at the playhead (Z)" disabled><i data-lucide="zoom-in"></i>Add Zoom</button>
     <button class="btn" id="autoZoom" title="A zoom wherever you clicked while recording" disabled><i data-lucide="sparkles"></i>Auto Zoom</button>
     <label class="zoom-tools" id="clicksToggle" hidden><input type="checkbox" id="showClicks"> Show clicks</label>
@@ -149,30 +168,19 @@
       <button class="btn plain" id="zoomRemove" title="Remove this zoom (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
-  <div class="trim-head">
-    <b>Music</b>
-    <button class="btn" id="chooseMusic" title="Add background music; it dips whenever someone speaks" disabled><i data-lucide="music"></i>Choose Music…</button>
-    <span class="dim" id="musicName">None</span>
+  <div class="panel" role="tabpanel" data-panel="text" hidden>
+    <button class="btn" id="addCaption" title="Show text over the video from the playhead (T)" disabled><i data-lucide="captions"></i>Add Text</button>
     <span class="grow"></span>
-    <span class="zoom-tools" id="musicTools" hidden>
-      <label>Volume <input type="range" id="musicVolume" min="0" max="100" step="1"></label>
-      <label><input type="checkbox" id="musicDuck"> Lower under speech</label>
-      <button class="btn plain" id="musicRemove" title="Remove the music"><i data-lucide="trash-2"></i>Remove</button>
+    <span class="zoom-tools" id="captionTools" hidden>
+      <input class="field" id="captionText" aria-label="Caption text" maxlength="160" style="width:220px">
+      <select class="field" id="captionPlace" aria-label="Where it shows"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
+      <select class="field" id="captionSize" aria-label="Text size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
+      <button class="btn" id="captionIn" title="Start this text at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
+      <button class="btn" id="captionOut" title="End this text at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
+      <button class="btn plain" id="captionRemove" title="Remove this text (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
-  <div class="trim-head">
-    <b>Chapters</b>
-    <button class="btn" id="addChapter" title="Mark a chapter at the playhead (M)" disabled><i data-lucide="bookmark-plus"></i>Add Chapter</button>
-    <button class="btn" id="copyChapters" title="Copy a chapter list for a video description, timed to the finished video" disabled><i data-lucide="list-ordered"></i>Copy Chapters</button>
-    <span class="grow"></span>
-    <span class="zoom-tools" id="chapterTools" hidden>
-      <input class="field" id="chapterTitle" aria-label="Chapter name" maxlength="80" style="width:200px">
-      <button class="btn" id="chapterHere" title="Move this chapter to the playhead"><i data-lucide="locate-fixed"></i>Move Here</button>
-      <button class="btn plain" id="chapterRemove" title="Remove this chapter (Delete)"><i data-lucide="trash-2"></i>Remove</button>
-    </span>
-  </div>
-  <div class="trim-head">
-    <b>Callouts</b>
+  <div class="panel" role="tabpanel" data-panel="callouts" hidden>
     <button class="btn" id="addArrow" title="An arrow from the playhead for 3 seconds (A)" disabled><i data-lucide="move-up-right"></i>Arrow</button>
     <button class="btn" id="addBox" title="A box from the playhead for 3 seconds" disabled><i data-lucide="square"></i>Box</button>
     <button class="btn" id="addSpot" title="Dim everything but one part, from the playhead for 3 seconds" disabled><i data-lucide="sun-dim"></i>Spotlight</button>
@@ -186,8 +194,7 @@
       <button class="btn plain" id="calloutRemove" title="Remove this callout (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
-  <div class="trim-head">
-    <b>Blur</b>
+  <div class="panel" role="tabpanel" data-panel="blur" hidden>
     <button class="btn" id="addBlur" title="Blur part of the video from the playhead (B)" disabled><i data-lucide="eye-off"></i>Add Blur</button>
     <button class="btn" id="findPrivate" title="Read the frame on screen and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds" disabled><i data-lucide="shield-check"></i>Find Private Info</button>
     <span class="grow"></span>
@@ -198,27 +205,32 @@
       <button class="btn plain" id="blurRemove" title="Remove this blur (Delete)"><i data-lucide="trash-2"></i>Remove</button>
     </span>
   </div>
-  <div class="trim-head">
-    <b>Ends</b>
+  <div class="panel" role="tabpanel" data-panel="chapters" hidden>
+    <button class="btn" id="addChapter" title="Mark a chapter at the playhead (M)" disabled><i data-lucide="bookmark-plus"></i>Add Chapter</button>
+    <button class="btn" id="copyChapters" title="Copy a chapter list for a video description, timed to the finished video" disabled><i data-lucide="list-ordered"></i>Copy Chapters</button>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="chapterTools" hidden>
+      <input class="field" id="chapterTitle" aria-label="Chapter name" maxlength="80" style="width:200px">
+      <button class="btn" id="chapterHere" title="Move this chapter to the playhead"><i data-lucide="locate-fixed"></i>Move Here</button>
+      <button class="btn plain" id="chapterRemove" title="Remove this chapter (Delete)"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="panel" role="tabpanel" data-panel="sound" hidden>
+    <button class="btn" id="chooseMusic" title="Add background music; it dips whenever someone speaks" disabled><i data-lucide="music"></i>Choose Music…</button>
+    <span class="dim" id="musicName">None</span>
+    <span class="grow"></span>
+    <span class="zoom-tools" id="musicTools" hidden>
+      <label>Volume <input type="range" id="musicVolume" min="0" max="100" step="1"></label>
+      <label><input type="checkbox" id="musicDuck"> Lower under speech</label>
+      <button class="btn plain" id="musicRemove" title="Remove the music"><i data-lucide="trash-2"></i>Remove</button>
+    </span>
+  </div>
+  <div class="panel" role="tabpanel" data-panel="ends" hidden>
     <label class="zoom-tools">Opening <select class="field" id="opening" disabled><option value="none">None</option><option value="fade">Fade in</option><option value="rise">Rise</option></select></label>
     <label class="zoom-tools">Closing <select class="field" id="closing" disabled><option value="none">None</option><option value="fade">Fade out</option><option value="rise">Rise</option></select></label>
     <span class="dim" id="endsHint">Picture and sound ease in and out over 0.6 s. Rise grows the video out of its background.</span>
   </div>
-  <div class="trim-head">
-    <b>Text</b>
-    <button class="btn" id="addCaption" title="Show text over the video from the playhead (T)" disabled><i data-lucide="captions"></i>Add Text</button>
-    <span class="grow"></span>
-    <span class="zoom-tools" id="captionTools" hidden>
-      <input class="field" id="captionText" aria-label="Caption text" maxlength="160" style="width:220px">
-      <select class="field" id="captionPlace" aria-label="Where it shows"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
-      <select class="field" id="captionSize" aria-label="Text size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
-      <button class="btn" id="captionIn" title="Start this text at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
-      <button class="btn" id="captionOut" title="End this text at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
-      <button class="btn plain" id="captionRemove" title="Remove this text (Delete)"><i data-lucide="trash-2"></i>Remove</button>
-    </span>
-  </div>
-  <div class="trim-head" id="cursorRow" hidden>
-    <b>Cursor</b>
+  <div class="panel" role="tabpanel" data-panel="cursor" hidden>
     <label class="zoom-tools"><input type="checkbox" id="cursorShow"> Show cursor</label>
     <label class="zoom-tools">Size <select class="field" id="cursorSize"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select></label>
     <label class="zoom-tools">Style <select class="field" id="cursorStyle"><option value="arrow">Arrow</option><option value="dot">Dot</option></select></label>
@@ -235,17 +247,26 @@
     <div class="handle" id="handleIn" role="slider" tabindex="0" aria-label="Trim start"></div>
     <div class="handle" id="handleOut" role="slider" tabindex="0" aria-label="Trim end"></div>
   </div>
-  <div class="lane" id="lane" aria-label="Zooms"></div>
-  <div class="lane captions" id="captionLane" aria-label="Text"></div>
-  <div class="lane blurs" id="blurLane" aria-label="Blurs"></div>
-  <div class="lane callouts" id="calloutLane" aria-label="Callouts"></div>
-  <p class="note">Your original is never changed. Cut a stretch out with Cut (X) at its start and again at its end; click a cut to put it back. A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.</p>
+  <div class="lane" id="lane" data-tab="zoom" aria-label="Zooms"></div>
+  <div class="lane captions" id="captionLane" data-tab="text" aria-label="Text"></div>
+  <div class="lane blurs" id="blurLane" data-tab="blur" aria-label="Blurs"></div>
+  <div class="lane callouts" id="calloutLane" data-tab="callouts" aria-label="Callouts"></div>
+  <p class="note" title="A trimmed or cut video, or one with a background, zooms or clicks, is re-encoded in real time, so it takes as long as the part you keep. Otherwise the export is an exact copy.">Your original is never changed. Drag the ends to trim; Cut (X) at a stretch’s start and end takes it out, and a click on a cut puts it back.</p>
 </section>
 <div class="error" id="error" role="alert" hidden>
   <i class="mark" data-lucide="circle-alert"></i>
   <span id="errorText"></span>
   <button class="btn" id="errorPlayer" hidden>Open in Default Player</button>
   <button class="btn icon plain" id="errorClose" title="Dismiss"><i data-lucide="x"></i></button>
+</div>
+<div class="sheet" id="gifSheet" hidden>
+  <div class="card export-options" role="dialog" aria-modal="true" aria-labelledby="gifTitle">
+    <b id="gifTitle">Export GIF</b>
+    <label>Width <select class="field" id="gifWidth"><option value="480">480</option><option value="640">640</option><option value="800" selected>800</option><option value="1280">1280</option></select></label>
+    <label>Frame rate <select class="field" id="gifFps"><option value="5">5 fps</option><option value="10">10 fps</option><option value="12" selected>12 fps</option><option value="15">15 fps</option><option value="24">24 fps</option></select></label>
+    <span class="clock dim" id="gifHint" aria-live="polite"></span>
+    <div class="export-actions"><button class="btn" id="gifCancel">Cancel</button><button class="btn primary" id="gifGo"><i data-lucide="film"></i>Export…</button></div>
+  </div>
 </div>
 <div class="sheet" id="exportSheet" hidden>
   <div class="card export-options" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
