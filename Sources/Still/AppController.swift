@@ -648,7 +648,7 @@ extension AppController {
     private func decorateMenu() {
         let symbols = ["Capture Bar": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
                        "Record / Stop Recording": "record.circle", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
-                       "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
+                       "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward", "Show Last Link as QR Code": "qrcode",
                        "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Clipboard History": "doc.on.clipboard", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {

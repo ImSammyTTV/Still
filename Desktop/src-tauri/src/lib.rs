@@ -801,7 +801,7 @@ fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
         "history" => include_bytes!("../icons/menu/history.png"), "restore" => include_bytes!("../icons/menu/restore.png"),
         "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
         "update" => include_bytes!("../icons/menu/update.png"), "settings" => include_bytes!("../icons/menu/settings.png"),
-        "quit" => include_bytes!("../icons/menu/quit.png"), "stop" => include_bytes!("../icons/menu/stop.png"), _ => return None,
+        "quit" => include_bytes!("../icons/menu/quit.png"), "qr" => include_bytes!("../icons/menu/qr.png"), "stop" => include_bytes!("../icons/menu/stop.png"), _ => return None,
     };
     tauri::image::Image::from_bytes(bytes).ok()
 }
@@ -846,7 +846,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     if !recording { menu = menu.item(&item("record", "Record Screen", "record", accel("record"), true)?); }
     menu.separator()
         .item(&item("open-image", "Open Image…", "open", None, true)?)
-        .item(&item("last-link-qr", "Show Last Link as QR Code", "open", None, last_link)?)
+        .item(&item("last-link-qr", "Show Last Link as QR Code", "qr", None, last_link)?)
         .item(&item("history", "Capture History", "history", accel("history"), true)?)
         .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
         .item(&item("unlock-pins", "Unlock Pinned Screenshots", "unlock", None, true)?)
