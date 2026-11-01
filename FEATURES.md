@@ -85,6 +85,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: Blur boxes for a stretch, following the picture through zooms; Find Private Info reads the frame and blurs emails, card numbers, keys, IP addresses and phone numbers | ☑️ | ☑️ export checked in Chromium |
 | Video editor: background music, looped to length, that dips whenever someone speaks (Lower under speech) | ☑️ | ☑️ export measured in Chromium: louder in the gaps, lower under speech |
 | Video editor: callouts (arrow, box, spotlight) for a stretch, following the picture through zooms; Point at Clicks adds an arrow for each recorded click | ☑️ | ☑️ export checked in Chromium |
+| Video editor: Save Frame (F) to History, and Storyboard: one picture of the video as a grid of labelled frames (one per chapter when there are chapters), opened in the image editor | ☑️ | ☑️ checked in Chromium |
 | Video editor: Chapters (M) and Copy Chapters, a list for a video description timed to the finished video after cuts and export speed | ☑️ | ☑️ checked in Chromium |
 | Video editor: Tighten Pauses finds silences over a second and cuts each down to a short beat (each one a normal cut you can put back) | ☑️ | ☑️ checked in Chromium on a recording with gaps |
 | Video editor: Opening and Closing (Fade, or Rise: the picture grows out of its background), picture and sound easing over 0.6 s | ☑️ | ☑️ export checked in Chromium, sound included |

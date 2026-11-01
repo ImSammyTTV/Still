@@ -95,6 +95,8 @@
   <h1 id="title">Trim Video</h1>
   <span class="grow"></span>
   <button class="btn" id="background" title="Put the video on a background" aria-expanded="false" disabled><i data-lucide="image"></i>Background</button>
+  <button class="btn icon" id="saveFrame" title="Save this frame to History and copy it (F)" disabled><i data-lucide="camera"></i></button>
+  <button class="btn" id="storyboard" title="One picture of the whole video: a grid of frames with their times, or one per chapter" disabled><i data-lucide="layout-grid"></i>Storyboard</button>
   <button class="btn" id="exportGif" disabled><i data-lucide="film"></i>Export GIF…</button>
   <button class="btn primary" id="exportVideo" disabled><i data-lucide="download"></i>Export Video…</button>
 </div>
@@ -272,6 +274,7 @@
 <script src="shared/geometry.js"></script>
 <script src="shared/trim.js"></script>
 <script src="shared/chapters.js"></script>
+<script src="shared/storyboard.js"></script>
 <script src="shared/backdrop.js"></script>
 <script src="shared/zoom.js"></script>
 <script src="shared/cursor.js"></script>

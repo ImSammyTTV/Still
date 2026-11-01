@@ -13,6 +13,7 @@
     "allow-video-export-copy",
     "allow-video-project-save",
     "allow-editor-open-image",
-    "allow-video-music-choose"
+    "allow-video-music-choose",
+    "allow-video-image-save"
   ]
 }

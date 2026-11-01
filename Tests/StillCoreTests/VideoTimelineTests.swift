@@ -138,4 +138,15 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual([arrows[0].start, arrows[0].end, arrows[0].x2!, arrows[0].y2!], [1.6, 3.2, 0.48, 0.38])
         XCTAssertEqual(arrows[1].x2!, 0.22, accuracy: 1e-9); XCTAssertEqual(arrows[1].y2!, 0.22, accuracy: 1e-9)
     }
+
+    /// The same cases as Desktop/test/storyboard.test.js.
+    func testStoryboardFrames() {
+        let f = VideoStoryboard.frames(start: 0, end: 40, cuts: [VideoCut(start: 10, end: 20)], chapters: [], count: 3)
+        XCTAssertEqual(f.map(\.time), [5, 25, 35]); XCTAssertEqual(f.map(\.label), ["0:05", "0:15", "0:25"])
+        let c = VideoStoryboard.frames(start: 0, end: 100, cuts: [], chapters: [VideoChapter(time: 70, title: "Share"), VideoChapter(time: 0, title: "Intro")])
+        XCTAssertEqual(c, [.init(time: 0.05, label: "0:00  Intro"), .init(time: 70.05, label: "1:10  Share")])
+        XCTAssertEqual(VideoStoryboard.frames(start: 0, end: 4, cuts: [], chapters: [], count: 4).map(\.label), ["0:00.5", "0:01.5", "0:02.5", "0:03.5"])
+        let l = VideoStoryboard.layout(6, width: 1920, height: 1080)
+        XCTAssertEqual([Double(l.cols), Double(l.rows), l.tileHeight, l.width, l.height], [4, 2, 270, 2000, 656])
+    }
 }

@@ -25,7 +25,7 @@
     'recording:cancel': ['recording_cancel'], 'recording:error': ['recording_error', 'message', 'stage'], 'camera:failed': ['camera_failed', 'message'],
     'recording:chunk': ['recording_chunk', 'data', 'ext'], 'recording:reset': ['recording_reset'], 'recording:save': ['recording_save', 'ext', 'duration'],
     'recording:begin': ['recording_begin'], 'recording:stop': ['recording_stop'], 'recording:pause': ['recording_pause', 'on'], 'recording:restart': ['recording_restart'],
-    'recording:tick': ['recording_tick', 'seconds', 'paused'], 'video:target': ['video_export_target', 'ext'], 'video:copy': ['video_export_copy'], 'video:project': ['video_project_save', 'project'], 'video:music': ['video_music_choose'],
+    'recording:tick': ['recording_tick', 'seconds', 'paused'], 'video:target': ['video_export_target', 'ext'], 'video:copy': ['video_export_copy'], 'video:project': ['video_project_save', 'project'], 'video:music': ['video_music_choose'], 'video:image': ['video_image_save', 'dataUrl', 'title', 'open'],
     'cloud:get': ['cloud_get'], 'cloud:connect': ['cloud_connect', 'endpoint', 'token'], 'cloud:disconnect': ['cloud_disconnect'],
     'drive:get': ['drive_get'], 'drive:connect': ['drive_connect'], 'drive:disconnect': ['drive_disconnect'],
     'cloud:upload': ['cloud_upload', 'id'], 'library:qr': ['library_qr', 'id'], 'library:combine': ['library_combine', 'ids', 'vertical'], 'library:star': ['library_star', 'id', 'starred'], 'qr:svg': ['qr_svg', 'link'], 'countdown:cancel': ['countdown_cancel'], 'cloud:uploadData': ['cloud_upload_data', 'dataUrl', 'title'],

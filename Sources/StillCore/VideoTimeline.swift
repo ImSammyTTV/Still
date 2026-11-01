@@ -293,3 +293,41 @@ public struct VideoCallout: Codable, Equatable, Hashable, Identifiable {
         return out
     }
 }
+
+/// Storyboard: one picture of a whole video, a grid of frames each labelled with its time in the finished video (and
+/// its chapter's name when there are chapters). Windows and Linux follow the same rules (shared/storyboard.js) and
+/// share the test cases.
+public enum VideoStoryboard {
+    public struct Frame: Equatable { public var time: Double; public var label: String }
+    public struct Layout: Equatable { public var cols, rows: Int; public var tileWidth, tileHeight, strip, gap, width, height: Double }
+
+    /// 0:03.4: tenths, for short videos where whole seconds would repeat.
+    public static func clock(_ seconds: Double) -> String {
+        let tenths = Int((max(0, seconds) * 10).rounded())
+        return String(format: "%d:%02d.%d", tenths / 600, tenths / 10 % 60, tenths % 10)
+    }
+
+    public static func frames(start: Double, end: Double, cuts: [VideoCut], chapters: [VideoChapter], count: Int = 12, max limit: Int = 24, speed: Double = 1) -> [Frame] {
+        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts), total = VideoTimeline.length(kept)
+        guard total > 0 else { return [] }
+        let time = { (t: Double) -> String in
+            let at = VideoTimeline.outputTime(at: t, kept: kept) / max(1, speed)
+            return total / max(1, speed) < 20 ? clock(at) : VideoChapters.stamp(at)
+        }
+        let inside = chapters.filter { c in c.time >= start && c.time <= end && !cuts.contains { c.time >= $0.start && c.time < $0.end } }.sorted { $0.time < $1.time }
+        if !inside.isEmpty {
+            return inside.prefix(limit).map { c in
+                let name = c.title.trimmingCharacters(in: .whitespaces)
+                return Frame(time: min(end - 0.05, c.time + 0.05), label: name.isEmpty ? time(c.time) : "\(time(c.time))  \(name)")
+            }
+        }
+        let n = Swift.max(1, Swift.min(limit, count))
+        return (0..<n).map { i in let t = VideoTimeline.sourceTime(at: total * (Double(i) + 0.5) / Double(n), kept: kept); return Frame(time: t, label: time(t)) }
+    }
+
+    public static func layout(_ n: Int, width: Double, height: Double, tile: Double = 480, columns: Int = 4, gap: Double = 16, strip: Double = 34) -> Layout {
+        let cols = max(1, min(columns, n)), rows = Int((Double(n) / Double(cols)).rounded(.up))
+        let th = (tile * height / max(1, width)).rounded()
+        return Layout(cols: cols, rows: rows, tileWidth: tile, tileHeight: th, strip: strip, gap: gap, width: Double(cols) * tile + Double(cols + 1) * gap, height: Double(rows) * (th + strip) + Double(rows + 1) * gap)
+    }
+}

@@ -159,6 +159,59 @@ import StillCore
             } catch { self.error = "Couldn’t read this frame: \(error.localizedDescription)" }
         }
     }
+    /// The picture at a moment of the recording, as exported (background, blurs, callouts, captions and the rest).
+    private func pictures(at times: [Double], width: Double? = nil) async throws -> [CGImage] {
+        let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
+        let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: settings, metadata: metadata, cameraURL: camera, musicURL: musicURL)
+        let generator = AVAssetImageGenerator(asset: result.asset); generator.videoComposition = result.composition
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        if let width { generator.maximumSize = CGSize(width: width, height: width * result.size.height / max(1, result.size.width)) }
+        var out: [CGImage] = []
+        for time in times {
+            let at = min(result.duration - 0.02, max(0, VideoTimeline.outputTime(at: time, kept: settings.kept)))
+            out.append(try await generator.image(at: CMTime(seconds: at, preferredTimescale: 600)).image)
+        }
+        return out
+    }
+    /// Save Frame: the picture at the playhead, added to History and copied.
+    func saveFrame() {
+        let time = playhead
+        Task {
+            do {
+                guard let image = try await pictures(at: [time]).first else { return }
+                let stamp = VideoChapters.stamp(VideoTimeline.outputTime(at: time, kept: settings.kept))
+                _ = try library.add(image: image, title: "\(item.title) at \(stamp)"); library.copy(image)
+                library.toast("Frame saved to History and copied")
+            } catch { self.error = "Couldn’t save the frame: \(error.localizedDescription)" }
+        }
+    }
+    /// Storyboard: one picture of the whole video, a grid of labelled frames (one per chapter when there are
+    /// chapters), added to History and opened in the image editor.
+    func storyboard() {
+        let shots = VideoStoryboard.frames(start: settings.start, end: settings.end > 0 ? settings.end : duration, cuts: settings.cuts ?? [], chapters: settings.chapters ?? [], speed: exportSpeed)
+        guard !shots.isEmpty else { library.toast("There’s nothing kept to show"); return }
+        Task {
+            do {
+                let images = try await pictures(at: shots.map(\.time), width: 960)
+                guard let first = images.first else { return }
+                let l = VideoStoryboard.layout(images.count, width: Double(first.width), height: Double(first.height))
+                guard let ctx = CGContext(data: nil, width: Int(l.width), height: Int(l.height), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+                ctx.setFillColor(CGColor(srgbRed: 0.086, green: 0.086, blue: 0.102, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: l.width, height: l.height))
+                let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, 15, nil)!
+                for (index, (image, shot)) in zip(images, shots).enumerated() {
+                    let x = l.gap + Double(index % l.cols) * (l.tileWidth + l.gap), top = l.gap + Double(index / l.cols) * (l.tileHeight + l.strip + l.gap)
+                    // Core Graphics counts from the bottom.
+                    let tile = CGRect(x: x, y: l.height - top - l.tileHeight, width: l.tileWidth, height: l.tileHeight)
+                    ctx.saveGState(); ctx.addPath(CGPath(roundedRect: tile, cornerWidth: 8, cornerHeight: 8, transform: nil)); ctx.clip(); ctx.interpolationQuality = .high; ctx.draw(image, in: tile); ctx.restoreGState()
+                    let line = CTLineCreateWithAttributedString(NSAttributedString(string: shot.label, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1)]))
+                    ctx.textPosition = CGPoint(x: x + 4, y: tile.minY - l.strip/2 - 5); CTLineDraw(line, ctx)
+                }
+                guard let sheet = ctx.makeImage() else { return }
+                let saved = try library.add(image: sheet, title: "\(item.title) storyboard"); library.copy(sheet)
+                AppController.shared.openItem(saved); library.toast("Storyboard saved to History and opened")
+            } catch { self.error = "Couldn’t make the storyboard: \(error.localizedDescription)" }
+        }
+    }
     func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
@@ -255,7 +308,7 @@ struct VideoEditorView: View {
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
+            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) }; Divider(); Button("Save Frame to History") { model.saveFrame() }.keyboardShortcut("f", modifiers: []); Button("Make Storyboard") { model.storyboard() } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)

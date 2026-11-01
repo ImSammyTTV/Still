@@ -684,6 +684,7 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'o' || e.key === 'O') $('#setOut').click();
   else if ((e.key === 'z' || e.key === 'Z') && !$('#addZoom').disabled) $('#addZoom').click();
   else if ((e.key === 'x' || e.key === 'X') && !$('#cut').disabled) $('#cut').click();
+  else if ((e.key === 'f' || e.key === 'F') && !$('#saveFrame').disabled) $('#saveFrame').click();
   else if ((e.key === 't' || e.key === 'T') && !$('#addCaption').disabled) { e.preventDefault(); $('#addCaption').click(); }
   else if (e.key === 'Escape' && cutStart !== null) { cutStart = null; render(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCallout >= 0) $('#calloutRemove').click();
@@ -874,6 +875,46 @@ $('#exportGo').onclick = () => {
   });
 };
 
+// ---- Pictures from the video -----------------------------------------------------------------------
+
+// The picture at the player's moment, as exported: background, blurs, callouts, captions and the rest.
+function framePicture(player, width) {
+  const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg), k = width ? width / F.w : 1;
+  const canvas = el('canvas', { width: Math.round(F.w * k), height: Math.round(F.h * k) }), ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingQuality = 'high'; ctx.setTransform(k, 0, 0, k, 0, 0); drawFrame(ctx, player, F);
+  return canvas;
+}
+$('#saveFrame').onclick = async () => {
+  pause();
+  try {
+    const kept = StillTrim.kept(trim, cuts), at = StillChapters.stamp(StillTrim.outputAt(video.currentTime, kept));
+    await still.invoke('video:image', framePicture(video).toDataURL('image/png'), `${document.title || 'Recording'} at ${at}`, false);
+    toast('Frame saved to History and copied');
+  } catch (error) { showError(`Couldn’t save the frame: ${message(error)}`); }
+};
+$('#storyboard').onclick = () => runExport('Making storyboard…', async (run) => {
+  const shots = StillStoryboard.frames(trim, cuts, chapters, { speed: Number(exportChoice.speed) || 1 });
+  if (!shots.length) throw new Error('There’s nothing kept to show.');
+  const player = await unseenPlayer();
+  const F = StillBackdrop.videoFrame(player.videoWidth, player.videoHeight, bg), L = StillStoryboard.layout(shots.length, F.w, F.h);
+  const sheet = el('canvas', { width: L.width, height: L.height }), ctx = sheet.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#16161a'; ctx.fillRect(0, 0, L.width, L.height);
+  ctx.font = `600 15px ${getComputedStyle(document.body).fontFamily}`; ctx.textBaseline = 'middle';
+  try {
+    for (const [i, shot] of shots.entries()) {
+      if (run.cancelled) return null;
+      await seek(player, shot.time);
+      const x = L.gap + (i % L.cols) * (L.tileWidth + L.gap), y = L.gap + Math.floor(i / L.cols) * (L.tileHeight + L.strip + L.gap);
+      ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, L.tileWidth, L.tileHeight, 8); ctx.clip();
+      ctx.drawImage(framePicture(player, L.tileWidth * 2), x, y, L.tileWidth, L.tileHeight); ctx.restore();
+      ctx.fillStyle = '#f5f5f7'; ctx.fillText(shot.label, x + 4, y + L.tileHeight + L.strip / 2, L.tileWidth - 8);
+      setProgress((i + 1) / shots.length * 0.95);
+    }
+  } finally { player.removeAttribute('src'); player.load(); }
+  await still.invoke('video:image', sheet.toDataURL('image/png'), `${document.title || 'Recording'} storyboard`, true);
+  toast('Storyboard saved to History and opened');
+  return null;
+});
 $('#exportGif').onclick = () => {
   const plan = gifPlan();
   if (!plan.ok) return showError(plan.error);
@@ -957,7 +998,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot, #saveFrame, #storyboard').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

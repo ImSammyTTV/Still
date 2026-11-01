@@ -1564,6 +1564,20 @@ async fn video_export_save(app: AppHandle, window: tauri::Window, request: tauri
     video::save_bytes(&private_temp(), bytes, &target)?;
     Ok(target.to_string_lossy().to_string())
 }
+/// A picture made in the video editor (a frame, or a storyboard of frames): added to History, copied, and opened in
+/// the image editor when asked.
+#[tauri::command]
+async fn video_image_save(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> {
+    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+    let image = capture::decode(&bytes).ok_or("Bad image")?;
+    let (w, h) = image.dimensions();
+    let title = title.trim().chars().take(120).collect::<String>();
+    let item = st(&app).library.lock().unwrap().add(&capture::png(&image), "screenshot", "png", if title.is_empty() { None } else { Some(title) }, w, h)?;
+    let _ = copy_image(&app, &image);
+    broadcast(&app, "library:changed", Value::Null);
+    if open { let (a, id) = (app.clone(), item.id.clone()); let _ = app.run_on_main_thread(move || open_editor(&a, Some(&id), false)); }
+    Ok(item.id)
+}
 /// Background music for a recording: the chosen file is copied in beside it (as music.<ext>), so the editor and
 /// later exports keep finding it even if the original moves.
 #[tauri::command]
@@ -1948,7 +1962,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save, video_music_choose,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
             cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, qr_svg, library_qr, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop, scroll::scroll_auto
         ])
