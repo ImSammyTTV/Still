@@ -8,7 +8,7 @@ const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('-
 const TOOLS = [
   ['select', 'mouse-pointer-2', 'Select', 'v'], ['arrow', 'move-up-right', 'Arrow', 'a'], ['rect', 'square', 'Rectangle', 'r'],
   ['filled', 'square-dashed-bottom', 'Filled Rectangle', 'f'], ['ellipse', 'circle', 'Ellipse', 'o'], ['line', 'slash', 'Line', 'l'],
-  ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Counter', 'n'],
+  ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Step', 'n'],
   ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['measure', 'ruler', 'Measure', 'd'], ['stamp', 'smile-plus', 'Stamp', 'e'], ['crop', 'crop', 'Crop', 'c']
 ];
 const COLORS = ['#FF453A', '#FF9F0A', '#FFD60A', '#32D74B', '#64D2FF', '#0A84FF', '#BF5AF2', '#FF375F', '#FFFFFF', '#1D1D1F'];
@@ -505,7 +505,7 @@ async function bake(plan) {
     if (url === 'data:,') { toast('That size is too large to edit.'); return; }
     doc.source = await storeAsset(url); doc.marks = []; doc.crop = null; selected = null;
     syncSource(); commit(); render();
-  } catch (error) { toast(`Couldn’t change the image: ${error.message || error}`); } finally { baking = false; }
+  } catch (error) { toast(`Couldn’t change the image: ${explain(error)}`); } finally { baking = false; }
 }
 const reorient = (kind) => bake((content) => {
   const o = M.orient({ w: content.width, h: content.height }, kind);
@@ -651,7 +651,7 @@ async function saveEdits() {
     dirty = true;
     // The capture was deleted from History: stop autosaving rather than bring it back.
     if (String(e).includes('no longer exists')) { captureGone = true; toast('This capture was deleted. Use Save to keep a copy.'); return; }
-    toast(`Couldn’t save your changes: ${e}`); throw e;
+    toast(`Couldn’t save your changes: ${explain(e)}`); throw e;
   }
 }
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => persist().catch(() => {}), 900); }
@@ -667,15 +667,15 @@ window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async 
 addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); still.send('window:close'); } });
 
 $('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:copy', flatten()); toast('Copied to clipboard'); };
-$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${e}`); } };
-$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', flatten(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${e}`); } };
+$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
+$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', flatten(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
 $('#pin').onclick = () => still.invoke('editor:pin', flatten());
-$('#upload').onclick = async () => { finishTextEdit(); toast('Uploading…'); try { const result = await still.invoke('cloud:uploadData', flatten(), document.title); toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive'); } catch (error) { toast(String(error)); } };
+$('#upload').onclick = async () => { finishTextEdit(); toast('Uploading…'); try { const result = await still.invoke('cloud:uploadData', flatten(), document.title); toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive'); } catch (error) { toast(explain(error)); } };
 $('#ocr').onclick = () => recognize();
 async function recognize() {
   toast('Recognising text…');
   try { const text = (await still.invoke('editor:ocr', flatten())).trim(); if (!text) return toast('No text found'); await navigator.clipboard.writeText(text); toast('Text copied'); }
-  catch (error) { toast(`Text recognition failed: ${error.message}`); }
+  catch (error) { toast(`Text recognition failed: ${explain(error)}`); }
 }
 // Covers every email address, card number, key, IP address and phone number the text recognition finds with a
 // redact box, as one step that a single undo takes back.
@@ -703,7 +703,7 @@ async function blurAllText() {
     for (const b of boxes) doc.marks.push({ type: 'blur', x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h), color, stroke });
     selected = null; commit(); render();
     toast(`Blurred ${boxes.length} line${boxes.length === 1 ? '' : 's'} of text. Undo brings them back.`);
-  } catch (error) { toast(`Couldn’t look for text: ${error.message || error}`); }
+  } catch (error) { toast(`Couldn’t look for text: ${explain(error)}`); }
 }
 async function hidePrivate() {
   finishTextEdit(); toast('Looking for private details…');
@@ -717,7 +717,7 @@ async function hidePrivate() {
     for (const b of fresh) doc.marks.push({ type: 'redact', x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h), color, stroke });
     selected = null; commit(); render();
     toast(`Hid ${fresh.length} private detail${fresh.length === 1 ? '' : 's'}. Undo brings them back.`);
-  } catch (error) { toast(`Couldn’t look for private details: ${error.message || error}`); }
+  } catch (error) { toast(`Couldn’t look for private details: ${explain(error)}`); }
 }
 dragOut($('#dragMe'), () => { finishTextEdit(); still.send('editor:drag', flatten()); });
 

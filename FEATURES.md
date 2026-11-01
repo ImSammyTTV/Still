@@ -133,7 +133,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
   system web engine, which asks for a screen and shows its "sharing your screen" bar.
 - **Windows and Linux:** recording needs a hands-on pass on real hardware after the 1.2.11 fixes.
-- **Everywhere:** the ☑️ items above need a hands-on pass.
+- **Everywhere:** the ☑️ items above need a hands-on pass; [the hands-on checklist](docs/HANDS-ON-CHECKLIST.md) covers the riskiest.
 
 ## How it's checked
 

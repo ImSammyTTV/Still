@@ -46,6 +46,8 @@
   .star.on { color: var(--yellow); }
   .star.on svg { fill: currentColor; }
   #filter button svg { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
+  .tile.missing .thumb img, .tile.missing .thumb video { visibility: hidden; }
+  .tile.missing .thumb::after { content: "File moved or deleted"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: var(--text-sm); }
 </style>
 </head>
 <body class="glass">
@@ -67,7 +69,7 @@
   <button class="btn icon plain" id="pickClear" title="Clear the selection (Esc)"><i data-lucide="x"></i></button>
 </div>
 <script src="bridge.js"></script>
-<script src="vendor/lucide.min.js"></script>
+<script src="vendor/icons.js"></script>
 <script src="shared/geometry.js"></script>
 <script src="common.js"></script>
 <script src="history.js"></script>

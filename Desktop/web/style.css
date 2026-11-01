@@ -14,6 +14,8 @@
      xl for floating cards, pill for capsules. --radius keeps its old meaning (cards). */
   --radius-xs: 4px; --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px; --radius-pill: 999px;
   --radius: var(--radius-lg);
+  /* Motion: quick for hovers and presses, gentle for things that appear. */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1); --quick: 120ms; --gentle: 180ms;
 
   /* Spacing, on a 4px grid. */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-7: 28px;
@@ -93,6 +95,7 @@ body.linux .titlebar { padding-right: var(--space-3); }
 
 /* Buttons: soft rounded controls. .primary is the one action per surface; .icon is square; .plain sits on its parent. */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-md); background: var(--surface-strong); cursor: default; white-space: nowrap; }
+.btn { transition: filter var(--quick) var(--ease), background-color var(--quick) var(--ease), opacity var(--quick) var(--ease); }
 .btn:hover { filter: brightness(1.12); }
 .btn:active { filter: brightness(0.92); }
 .btn.primary { background: var(--accent); color: var(--accent-text); }
@@ -103,6 +106,7 @@ body.linux .titlebar { padding-right: var(--space-3); }
 
 .segmented { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--surface); }
 .segmented button { height: 27px; min-width: 32px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); background: transparent; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.segmented button { transition: background-color var(--quick) var(--ease), color var(--quick) var(--ease); }
 .segmented button:hover { background: var(--surface-strong); }
 .segmented button.active { background: var(--accent); color: var(--accent-text); }
 
@@ -118,17 +122,26 @@ select.field { padding-right: var(--space-6); }
 
 .menu { position: fixed; z-index: 50; min-width: 180px; padding: 5px; border-radius: var(--radius-lg); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); border: 1px solid var(--border); box-shadow: var(--shadow); }
 .menu button { width: 100%; display: flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
+.menu { animation: still-pop var(--gentle) var(--ease); transform-origin: top left; }
 .menu button:hover { background: var(--accent); color: var(--accent-text); }
 .menu hr { border: 0; height: 1px; background: var(--border); margin: var(--space-1) 2px; }
 
-.toast { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); padding: var(--space-2) 14px; border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); font-size: var(--text-sm); opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 80; }
-.toast.show { opacity: 1; }
+.toast { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); padding: var(--space-2) 14px; border-radius: var(--radius-pill); background: var(--hud); color: var(--on-chrome); font-size: var(--text-sm); opacity: 0; transition: opacity var(--gentle) var(--ease), transform var(--gentle) var(--ease); transform: translate(-50%, 6px); pointer-events: none; z-index: 80; max-width: min(560px, calc(100vw - 32px)); text-align: center; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--surface-strong); border-radius: var(--radius-pill); border: 2px solid transparent; background-clip: padding-box; }
 
 /* Focus is always visible, on every control, in both appearances. */
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Things that appear: menus pop, sheets fade in with their card rising, tool panels settle in. They play each time
+   an element goes from hidden to shown. */
+@keyframes still-pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes still-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes still-rise { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.sheet:not([hidden]), .sheet-backdrop:not([hidden]) { animation: still-fade var(--gentle) var(--ease); }
+.sheet:not([hidden]) > .card, .sheet-backdrop:not([hidden]) > .sheet { animation: still-rise var(--gentle) var(--ease); }
+[role="tabpanel"]:not([hidden]) { animation: still-fade var(--quick) var(--ease); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
 /* Glass: on Windows, Settings, History and the editor sit on Acrylic (set by the app), so their backgrounds

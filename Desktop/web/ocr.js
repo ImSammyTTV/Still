@@ -1,8 +1,16 @@
-// Text recognition with the bundled Tesseract engine (WebAssembly), shared by the editor and the OCR capture page.
+// Text recognition with the bundled Tesseract engine (WebAssembly), shared by the editor, the video editor and the
+// OCR capture page.
 window.StillOCR = {
   worker: null,
   async start() {
     if (!this.worker) {
+      // The engine's script loads the first time text is read, so windows that never read text don't pay for it.
+      if (!window.Tesseract) await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'vendor/ocr/tesseract.min.js'; script.onload = resolve;
+        script.onerror = () => reject(new Error('The text reader couldn’t load.'));
+        document.head.append(script);
+      });
       const base = new URL('vendor/ocr/', location.href).href;
       this.worker = await Tesseract.createWorker('eng', 1, { workerPath: `${base}worker.min.js`, corePath: base, langPath: base, gzip: true, cacheMethod: 'none', workerBlobURL: false });
     }

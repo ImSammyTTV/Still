@@ -24,11 +24,23 @@ function el(tag, attrs = {}, children = []) {
 }
 
 let toastTimer;
+// What went wrong, in words: the system's error for a full disk, a folder Still can't write to, a file that has gone
+// or a recording with no sound becomes a sentence that says what to do. Anything else is shown as it came.
+function explain(error) {
+  const text = String((error && error.message) || error || 'Something went wrong.');
+  if (/ENOSPC|no space left|os error 28|os error 112|disk is full|not enough space/i.test(text)) return 'There isn’t enough space on the disk. Free some up and try again.';
+  if (/EACCES|EPERM|permission denied|access is denied|os error 13\b|os error 5\b/i.test(text)) return 'Still isn’t allowed to write there. Choose another folder (Settings → General) or check the folder’s permissions.';
+  if (/ENOENT|no such file|cannot find the (file|path)|os error 2\b|os error 3\b|\(404\)/i.test(text)) return 'The file isn’t where it was. It may have been moved, renamed or deleted.';
+  if (/unable to decode audio|EncodingError|decodeAudioData/i.test(text)) return 'This recording has no sound to listen to.';
+  return text;
+}
+
 function toast(text) {
   let node = $('.toast');
   if (!node) { node = el('div', { class: 'toast', role: 'status', 'aria-live': 'polite' }); document.body.append(node); }
   node.textContent = text; node.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 1800);
+  // Long enough to read: about a word every quarter second, never under 1.8 s or over 6 s.
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), Math.min(6000, Math.max(1800, text.length * 55)));
 }
 
 function popupMenu(anchor, items) {

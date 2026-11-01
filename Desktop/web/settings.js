@@ -220,7 +220,7 @@ const pages = {
     } }, 'Connect');
     const driveButton = el('button', { class: 'btn', onclick: async (event) => {
       if (driveState.connected) { await still.invoke('drive:disconnect'); }
-      else { event.target.disabled = true; event.target.textContent = 'Waiting for your browser…'; try { await still.invoke('drive:connect'); } catch (error) { toast(String(error)); } }
+      else { event.target.disabled = true; event.target.textContent = 'Waiting for your browser…'; try { await still.invoke('drive:connect'); } catch (error) { toast(explain(error)); } }
       driveState = await still.invoke('drive:get'); prefs = await still.invoke('settings:get'); render();
     } }, driveState.connected ? 'Disconnect' : 'Connect');
     const disconnect = el('button', { class: 'btn', onclick: async () => { await still.invoke('cloud:disconnect'); cloudState = { connected: false, hasToken: false }; prefs = await still.invoke('settings:get'); render(); } }, 'Disconnect');
