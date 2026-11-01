@@ -65,6 +65,8 @@ final class ClipboardThumbnails: @unchecked Sendable {
     static let shared = ClipboardHistory()
     @AppStorage("clipboardEnabled") var enabled = true { didSet { enabled ? start() : stop() } }
     @AppStorage("clipboardLimit") var limit = 100 { didSet { trim(); save() } }
+    /// How many of the newest items the menu lists; the rest wait in its Older submenu.
+    @AppStorage("clipboardMenuCount") var menuCount = 20
     @AppStorage("clipboardPasteAutomatically") var pasteAutomatically = false
     @Published private(set) var items: [ClipItem] = []
 
@@ -188,13 +190,26 @@ final class ClipboardThumbnails: @unchecked Sendable {
     }
     private func save() { if let data = try? JSONEncoder().encode(items) { try? data.write(to: indexURL, options: .atomic) } }
 
-    /// Builds menu items for the history: the first ten get 1–9 and 0 as keys.
+    /// Builds menu items for the history: the newest `menuCount` (the first ten get 1–9 and 0 as keys), then an
+    /// Older submenu with the rest, so a long history keeps the menu short without losing anything.
     func menuItems(target: AnyObject, action: Selector, numbered: Bool) -> [NSMenuItem] {
         guard !items.isEmpty else {
             let empty = NSMenuItem(title: enabled ? "Nothing copied yet" : "Clipboard history is off", action: nil, keyEquivalent: ""); empty.isEnabled = false
             return [empty]
         }
-        return items.enumerated().map { index, item in
+        let shown = max(1, menuCount)
+        var list = entries(Array(items.prefix(shown)), from: 0, target: target, action: action, numbered: numbered)
+        if items.count > shown {
+            let older = NSMenuItem(title: "Older (\(items.count - shown))", action: nil, keyEquivalent: "")
+            let submenu = NSMenu(); for entry in self.entries(Array(items.dropFirst(shown)), from: shown, target: target, action: action, numbered: false) { submenu.addItem(entry) }
+            older.submenu = submenu; older.image = NSImage(systemSymbolName: "clock", accessibilityDescription: nil); AppController.keepImageVisible(older)
+            list += [.separator(), older]
+        }
+        return list
+    }
+    private func entries(_ list: [ClipItem], from start: Int, target: AnyObject, action: Selector, numbered: Bool) -> [NSMenuItem] {
+        list.enumerated().map { offset, item in
+            let index = start + offset
             let key = numbered && index < 10 ? String((index+1) % 10) : ""
             let entry = NSMenuItem(title: item.title, action: action, keyEquivalent: key)
             entry.keyEquivalentModifierMask = []; entry.target = target; entry.representedObject = item.id

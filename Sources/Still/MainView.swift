@@ -325,6 +325,8 @@ struct ClipboardSettings: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle("Keep a history of what I copy", isOn: $history.enabled)
                     Picker("Remember", selection: $history.limit) { ForEach([25, 50, 100, 200], id: \.self) { Text("Last \($0) items").tag($0) } }.frame(width: 260)
+                    Picker("Show in menu", selection: $history.menuCount) { ForEach([5, 10, 15, 20, 30, 50], id: \.self) { Text("\($0) newest").tag($0) } }.frame(width: 260)
+                    Text("Anything older is in the Older submenu at the bottom of the list.").font(.system(size: 10)).foregroundStyle(.secondary)
                     Toggle("Paste automatically after choosing an item", isOn: $history.pasteAutomatically)
                     Text("Press ⇧⌘V anywhere (change it in Shortcuts) or open Clipboard History in the menu bar menu. Pick an item, or press 1–9 and 0 for the newest ten. Automatic pasting needs Accessibility permission.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }.padding(6)
