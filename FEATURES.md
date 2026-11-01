@@ -91,6 +91,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: Fast-Forward (S) a dull stretch at 2×, 4× or 8×: a badge shows the rate, the voice drops to a murmur, and chapters, music and lengths follow the shorter video | ☑️ | ☑️ export checked in Chromium (length and badge) |
 | Video editor: Undo and Redo of every edit (⌘Z / Ctrl+Z); on Windows and Linux each step names what it changed and opens its tab | ✅ | ☑️ checked in Chromium |
 | Video editor: tools grouped in tabs, each with its lane's colour and a count of what it holds; empty lanes hidden | (side inspector) | ☑️ checked in Chromium |
+| Video editor: Speed Up Waits turns stretches where the screen barely moves and nobody speaks (progress bars, installs, loading) into fast-forwards | ☑️ | ☑️ checked in Chromium on a video with an 8 s still stretch |
 | Video editor: Tighten Pauses finds silences over a second and cuts each down to a short beat (each one a normal cut you can put back) | ☑️ | ☑️ checked in Chromium on a recording with gaps |
 | Video editor: Opening and Closing (Fade, or Rise: the picture grows out of its background), picture and sound easing over 0.6 s | ☑️ | ☑️ export checked in Chromium, sound included |
 | Video editor: background (gradients, padding, corners, shadow) | ✅ export tested | ☑️ gradients or your own picture · video and GIF exports checked in Chromium |

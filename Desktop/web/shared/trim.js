@@ -73,6 +73,27 @@
     const next = list.find((k) => k.start > time), end = Math.min(clip.end, time + 5, next ? next.start : Infinity);
     return normalizeSkims([...list, { start: time, end, rate }], clip);
   }
+  // Waits worth speeding up: stretches of at least `minimum` seconds where the picture barely moves (every change
+  // between samples under `still`) and nobody speaks (outside `speech`), such as a progress bar, an install or a
+  // page loading. `changes[i]` is the difference between the pictures at start + i*step and start + (i+1)*step.
+  // Each becomes a fast-forward at `rate` that leaves `keep` seconds at either end, so the wait is seen to begin
+  // and to end.
+  function waits(changes, step, speech, { start = 0, minimum = 4, still = 0.02, keep = 0.5, rate = 4 } = {}) {
+    const calm = [];
+    let from = null;
+    (changes || []).forEach((v, i) => {
+      if (v < still) { if (from === null) from = start + i * step; }
+      else if (from !== null) { calm.push({ start: from, end: start + i * step }); from = null; }
+    });
+    if (from !== null) calm.push({ start: from, end: start + (changes || []).length * step });
+    const out = [];
+    for (const c of calm) {
+      let pieces = [c];
+      for (const s of speech || []) pieces = pieces.flatMap((p) => (s.end <= p.start || s.start >= p.end ? [p] : [{ start: p.start, end: s.start }, { start: s.end, end: p.end }].filter((q) => q.end > q.start)));
+      for (const p of pieces) if (p.end - p.start >= minimum) out.push({ start: p.start + keep, end: p.end - keep, rate });
+    }
+    return out;
+  }
   const skimAt = (time, skims) => { for (const k of skims || []) if (time >= k.start && time < k.end) return k.rate; return 1; };
 
   // The stretches that stay, in order. With fast-forwards they're split where one starts or ends, and the parts
@@ -179,5 +200,5 @@
     return out;
   }
 
-  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, MIN_SKIM, RATES, normalizeSkims, addSkim, skimAt, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf, speech, duck };
+  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, MIN_SKIM, RATES, normalizeSkims, addSkim, skimAt, waits, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf, speech, duck };
 });

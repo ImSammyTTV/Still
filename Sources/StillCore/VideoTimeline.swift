@@ -51,6 +51,29 @@ public enum VideoTimeline {
         return normalizedSkims(list + [VideoCut(start: time, end: min(end, time + 5, next), rate: rate)], start: start, end: end)
     }
 
+    /// Waits worth speeding up: stretches of at least `minimum` seconds where the picture barely moves and nobody
+    /// speaks, each as a fast-forward at `rate` that leaves `keep` seconds at either end. Same rules as shared/trim.js.
+    public static func waits(changes: [Double], step: Double, speech: [VideoCut], start: Double = 0, minimum: Double = 4, still: Double = 0.02, keep: Double = 0.5, rate: Double = 4) -> [VideoCut] {
+        var calm: [VideoCut] = [], from: Double?
+        for (i, v) in changes.enumerated() {
+            if v < still { if from == nil { from = start + Double(i) * step } }
+            else if let f = from { calm.append(VideoCut(start: f, end: start + Double(i) * step)); from = nil }
+        }
+        if let f = from { calm.append(VideoCut(start: f, end: start + Double(changes.count) * step)) }
+        var out: [VideoCut] = []
+        for c in calm {
+            var pieces = [c]
+            for s in speech {
+                pieces = pieces.flatMap { p -> [VideoCut] in
+                    if s.end <= p.start || s.start >= p.end { return [p] }
+                    return [VideoCut(start: p.start, end: s.start), VideoCut(start: s.end, end: p.end)].filter { $0.end > $0.start }
+                }
+            }
+            for p in pieces where p.end - p.start >= minimum { out.append(VideoCut(start: p.start + keep, end: p.end - keep, rate: rate)) }
+        }
+        return out
+    }
+
     public static func skimRate(at time: Double, skims: [VideoCut]) -> Double {
         skims.first { time >= $0.start && time < $0.end }?.rate ?? 1
     }

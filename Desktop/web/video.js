@@ -498,27 +498,55 @@ $('#chapterTitle').addEventListener('input', (e) => { chapters = chapters.map((c
 $('#chapterTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
 $('#chapterHere').onclick = () => { const moved = { ...chapters[selectedChapter], time: video.currentTime }; chapters = chapters.map((c, i) => (i === selectedChapter ? moved : c)).sort((a, b) => a.time - b.time); selectedChapter = chapters.indexOf(moved); renderChapters(); };
 $('#chapterRemove').onclick = () => { chapters = chapters.filter((_, i) => i !== selectedChapter); selectedChapter = -1; renderChapters(); };
+// How much the picture changes through the kept part: a tiny greyscale copy every `step` seconds (half a second,
+// or longer on long recordings) and the difference between each and the next. Progress fills up to `share`.
+async function scanChanges(run, player, share) {
+  const span = trim.end - trim.start, step = Math.max(0.5, span / 400), total = Math.max(1, Math.floor(span / step));
+  const small = el('canvas', { width: 32, height: 18 }), sctx = small.getContext('2d', { willReadFrequently: true });
+  const grey = () => {
+    sctx.drawImage(player, 0, 0, 32, 18);
+    const d = sctx.getImageData(0, 0, 32, 18).data, g = new Array(576);
+    for (let i = 0; i < 576; i++) g[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114;
+    return g;
+  };
+  const changes = []; let last = null;
+  for (let i = 0; i <= total; i++) {
+    if (run.cancelled) return null;
+    await seek(player, Math.min(trim.end, trim.start + i * step));
+    const g = grey(); if (last) changes.push(StillChapters.difference(last, g)); last = g;
+    setProgress(i / total * share);
+  }
+  return { changes, step, grey };
+}
+// Speed Up Waits: stretches where the picture barely moves and nobody speaks (a progress bar, an install, a page
+// loading) become 4× fast-forwards, leaving half a second at each end.
+$('#speedWaits').onclick = () => runExport('Looking for waits…', async (run) => {
+  try {
+    let speech = [];
+    try { speech = StillTrim.speech(await recordingLevels(), 0.05); } catch { /* No sound: every still stretch counts. */ }
+    const player = await unseenPlayer();
+    try {
+      const scan = await scanChanges(run, player, 1);
+      if (!scan) return null;
+      const found = StillTrim.waits(scan.changes, scan.step, speech, { start: trim.start, rate: Number(exportChoice.skimRate) || 4 })
+        .filter((w) => !cuts.some((c) => c.start < w.end && c.end > w.start));
+      const before = StillTrim.keptLength(trim, cuts, skims);
+      skims = StillTrim.normalizeSkims([...skims, ...found], trim); selectedSkim = -1; render(); showTab('trim');
+      const saved = before - StillTrim.keptLength(trim, cuts, skims);
+      toast(found.length && saved > 0.05 ? `Sped up ${found.length} wait${found.length === 1 ? '' : 's'}, ${saved.toFixed(1)} s shorter. Click one on its lane to change it.` : 'No long waits found');
+    } finally { player.removeAttribute('src'); player.load(); }
+  } catch (error) { if (!run.cancelled) toast(`Couldn’t look for waits: ${message(error)}`); }
+  return null;
+});
 // Find Chapters: watches the kept part for big changes in the picture (another app, a new page, a new slide) and
 // marks a chapter at each, named from the largest text on screen just after the change.
 $('#findChapters').onclick = () => runExport('Finding chapters…', async (run) => {
   try {
     const player = await unseenPlayer();
     try {
-      const span = trim.end - trim.start, step = Math.max(0.5, span / 400), total = Math.max(1, Math.floor(span / step));
-      const small = el('canvas', { width: 32, height: 18 }), sctx = small.getContext('2d', { willReadFrequently: true });
-      const grey = () => {
-        sctx.drawImage(player, 0, 0, 32, 18);
-        const d = sctx.getImageData(0, 0, 32, 18).data, g = new Array(576);
-        for (let i = 0; i < 576; i++) g[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114;
-        return g;
-      };
-      const changes = []; let last = null;
-      for (let i = 0; i <= total; i++) {
-        if (run.cancelled) return null;
-        await seek(player, Math.min(trim.end, trim.start + i * step));
-        const g = grey(); if (last) changes.push(StillChapters.difference(last, g)); last = g;
-        setProgress(i / total * 0.7);
-      }
+      const scan = await scanChanges(run, player, 0.7);
+      if (!scan) return null;
+      const { changes, step, grey } = scan;
       const rough = StillChapters.scenes(changes, step, { start: trim.start })
         .filter((t) => !cuts.some((c) => t >= c.start && t < c.end) && !chapters.some((c) => Math.abs(c.time - t) < 3)).slice(0, 24);
       // Each change is somewhere in the step before; halving it five times finds the moment to a few hundredths.
@@ -1203,7 +1231,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #addSkim, #findChapters, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot, #saveFrame, #storyboard').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #addSkim, #speedWaits, #findChapters, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot, #saveFrame, #storyboard').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

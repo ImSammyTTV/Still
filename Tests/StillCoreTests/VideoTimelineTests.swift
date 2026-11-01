@@ -13,6 +13,17 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoTimeline.adding(cuts, from: 8, to: 8.05, start: 1, end: 10), cuts, "too short to count")
     }
 
+    /// The same cases as the waits test in Desktop/test/trim.test.js.
+    func testWaitsBecomeFastForwards() {
+        var changes = Array(repeating: 0.1, count: 40)
+        for i in 4..<20 { changes[i] = 0.005 }
+        for i in 24..<30 { changes[i] = 0.001 }
+        XCTAssertEqual(VideoTimeline.waits(changes: changes, step: 0.5, speech: []), [VideoCut(start: 2.5, end: 9.5, rate: 4)])
+        XCTAssertEqual(VideoTimeline.waits(changes: changes, step: 0.5, speech: [VideoCut(start: 5, end: 6)]), [VideoCut(start: 6.5, end: 9.5, rate: 4)])
+        XCTAssertEqual(VideoTimeline.waits(changes: changes, step: 0.5, speech: [], start: 10, rate: 8), [VideoCut(start: 12.5, end: 19.5, rate: 8)])
+        XCTAssertEqual(VideoTimeline.waits(changes: Array(repeating: 0, count: 20), step: 0.5, speech: []), [VideoCut(start: 0.5, end: 9.5, rate: 4)])
+    }
+
     /// The same cases as the Find Chapters tests in Desktop/test/chapters.test.js.
     func testFindChaptersPicksBigChangesAGapApart() {
         var changes = Array(repeating: 0.01, count: 100)
