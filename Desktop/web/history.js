@@ -27,9 +27,19 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && picks.length && e
 const sizeLabel = (item) => item.kind === 'recording' ? StillGeometry.formatDuration(item.duration || 0) : item.width ? `${item.width} × ${item.height}` : '';
 const when = (time) => new Date(time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
+// Recordings load their first frame only when their tile comes near the window, so a long History opens at once
+// instead of reading every video file up front.
+const nearby = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const video = entry.target; nearby.unobserve(video);
+    video.preload = 'metadata'; video.src = video.dataset.src;
+  }
+}, { rootMargin: '400px' });
+
 async function load() {
   const items = await still.invoke('library:list', { query: $('#search').value, kind });
-  const grid = $('#grid'); grid.replaceChildren(); images.clear(); tiles.clear();
+  const grid = $("#grid"); grid.replaceChildren(); images.clear(); tiles.clear(); nearby.disconnect();
   picks = picks.filter((id) => items.some((i) => i.id === id && i.kind !== 'recording'));
   if (!items.length) {
     grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No captures match your search.' : kind === 'starred' ? 'Star a capture to find it here.' : 'Your captures will appear here.'}</div>` }));
@@ -37,9 +47,9 @@ async function load() {
   }
   for (const item of items) {
     const url = `${still.fileUrl(item.path)}?t=${item.modified || item.created}`;
-    const media = item.kind === 'recording' ? el('video', { src: url, muted: true, preload: 'metadata' }) : el('img', { src: item.thumb ? `${still.fileUrl(item.thumb)}?t=${item.modified || item.created}` : url, loading: 'lazy', decoding: 'async', draggable: 'false' });
+    const media = item.kind === 'recording' ? el('video', { 'data-src': `${url}#t=0.1`, muted: true, preload: 'none' }) : el('img', { src: item.thumb ? `${still.fileUrl(item.thumb)}?t=${item.modified || item.created}` : url, loading: 'lazy', decoding: 'async', draggable: 'false' });
     if (item.kind !== 'recording') images.set(item.id, media);
-    if (item.kind === 'recording') { media.muted = true; media.addEventListener('mouseenter', () => media.play().catch(() => {})); media.addEventListener('mouseleave', () => { media.pause(); media.currentTime = 0; }); }
+    if (item.kind === 'recording') { nearby.observe(media); media.muted = true; media.addEventListener('mouseenter', () => media.play().catch(() => {})); media.addEventListener('mouseleave', () => { media.pause(); if (media.src) media.currentTime = 0.1; }); }
     const title = el('div', { class: 'title', title: 'Double-click to rename' }, item.title);
     title.addEventListener('dblclick', (e) => { e.stopPropagation(); title.contentEditable = 'true'; title.focus(); document.getSelection().selectAllChildren(title); });
     title.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); title.blur(); } if (e.key === 'Escape') { title.textContent = item.title; title.blur(); } });

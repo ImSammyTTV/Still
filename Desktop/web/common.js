@@ -28,7 +28,8 @@ function toast(text) {
   let node = $('.toast');
   if (!node) { node = el('div', { class: 'toast', role: 'status', 'aria-live': 'polite' }); document.body.append(node); }
   node.textContent = text; node.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 1800);
+  // Long enough to read: about a word every quarter second, never under 1.8 s or over 6 s.
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), Math.min(6000, Math.max(1800, text.length * 55)));
 }
 
 function popupMenu(anchor, items) {
