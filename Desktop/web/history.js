@@ -14,11 +14,11 @@ function togglePick(item) {
   picks = picks.includes(item.id) ? picks.filter((id) => id !== item.id) : [...picks, item.id];
   showPicks();
 }
-function star(item, on) { still.invoke('library:star', item.id, on).then(() => toast(on ? 'Starred' : 'Star removed')).catch((error) => toast(String(error))); }
+function star(item, on) { still.invoke('library:star', item.id, on).then(() => toast(on ? 'Starred' : 'Star removed')).catch((error) => toast(explain(error))); }
 async function combinePicks(vertical) {
   toast('Combining…');
   try { await still.invoke('library:combine', picks, vertical); picks = []; showPicks(); }
-  catch (error) { toast(String(error)); }
+  catch (error) { toast(explain(error)); }
 }
 $('#combineSide').onclick = () => combinePicks(false);
 $('#combineStack').onclick = () => combinePicks(true);
@@ -64,6 +64,8 @@ async function load() {
         el('button', { class: `star${item.starred ? ' on' : ''}`, title: item.starred ? 'Unstar' : 'Star to find it again quickly', 'aria-label': item.starred ? 'Unstar' : 'Star', 'aria-pressed': String(!!item.starred), html: icon('star'), onclick: (e) => { e.stopPropagation(); star(item, !item.starred); } }), el('span', { class: 'kind', html: `${icon(item.kind === 'recording' ? 'video' : 'image')}${item.kind === 'recording' ? 'Video' : 'Image'}` }), tools]),
       el('div', { class: 'meta' }, [title, el('div', { class: 'sub' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}`)])
     ]);
+    // A capture whose file has gone (moved, renamed or deleted outside Still) says so instead of showing a broken picture.
+    media.addEventListener('error', () => { if (media.getAttribute('src')) { tile.classList.add('missing'); tile.title = 'This file has been moved or deleted'; } });
     tiles.set(item.id, tile);
     tile.addEventListener('click', (e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); togglePick(item); } });
     tile.addEventListener('dblclick', () => still.invoke('library:open', item.id));
@@ -75,10 +77,10 @@ async function load() {
         ...(item.kind === 'recording' ? [{ label: 'Open in Default Player', icon: 'play', action: () => still.invoke('library:play', item.id) }] : []),
         { label: item.starred ? 'Unstar' : 'Star', icon: 'star', action: () => star(item, !item.starred) },
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },
-        { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved'), (e) => toast(`Couldn’t save: ${e}`)) },
-        { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${e}`)) },
-        { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(String(error))) },
-        { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(String(error))) },
+        { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
+        { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
+        { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(explain(error))) },
+        { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(explain(error))) },
         ...(item.kind === 'recording' ? [] : picks.length >= 2 && picks.includes(item.id)
           ? [{ label: `Combine ${picks.length} Side by Side`, icon: 'columns-2', action: () => combinePicks(false) }, { label: `Combine ${picks.length} Top to Bottom`, icon: 'rows-2', action: () => combinePicks(true) }]
           : [{ label: picks.includes(item.id) ? 'Remove from Combine' : 'Select to Combine', icon: 'copy-plus', action: () => togglePick(item) }]),

@@ -44,6 +44,7 @@ struct HistoryView: View {
                                         ZStack {
                                             RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.07))
                                             if let image = library.thumbnail(item) { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).padding(3) }
+                                            else if !FileManager.default.fileExists(atPath: library.url(item).path) { Text("File moved or deleted").font(.system(size: 12)).foregroundStyle(.secondary) }
                                             if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 35)).shadow(radius: 5) }
                                             if item.isStarred {
                                                 Image(systemName: "star.fill").font(.system(size: 13)).foregroundStyle(.yellow).padding(6).background(.black.opacity(0.55), in: Circle())

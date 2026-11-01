@@ -49,7 +49,7 @@ let opening = 'none', closing = 'none';
 const ends = (t) => StillTransitions.at(t, trim, opening, closing);
 const needsCanvas = () => hasBg() || zooms.length > 0 || drawsClicks() || drawsCursor() || captions.some((c) => c.text) || StillTransitions.active(opening, closing) || blurs.length > 0 || !!music || callouts.length > 0 || skims.length > 0;
 
-const message = (error) => (error && error.message) || String(error);
+const message = explain;
 
 function showError(text, canOpenPlayer = false) {
   $('#errorText').textContent = text; $('#errorPlayer').hidden = !canOpenPlayer; $('#error').hidden = false;
@@ -184,7 +184,7 @@ $('#tighten').onclick = async () => {
     cuts = StillTrim.normalizeCuts([...cuts, ...found], trim); render();
     const saved = before - StillTrim.keptLength(trim, cuts);
     toast(found.length ? `Tightened ${found.length} pause${found.length === 1 ? '' : 's'}, ${saved.toFixed(1)} s shorter. Click a cut to put it back.` : 'No long pauses found');
-  } catch (error) { toast(`Couldn’t listen to this recording: ${message(error)}`); }
+  } catch (error) { const why = message(error); toast(/no sound/.test(why) ? why : `Couldn’t listen to this recording: ${why}`); }
   finally { $('#tighten').disabled = false; }
 };
 const isWhole = () => StillTrim.isFull(trim, duration) && !cuts.length && !skims.length;
