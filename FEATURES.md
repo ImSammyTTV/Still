@@ -86,6 +86,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: background music, looped to length, that dips whenever someone speaks (Lower under speech) | ☑️ | ☑️ export measured in Chromium: louder in the gaps, lower under speech |
 | Video editor: callouts (arrow, box, spotlight) for a stretch, following the picture through zooms; Point at Clicks adds an arrow for each recorded click | ☑️ | ☑️ export checked in Chromium |
 | Video editor: Save Frame (F) to History, and Storyboard: one picture of the video as a grid of labelled frames (one per chapter when there are chapters), opened in the image editor | ☑️ | ☑️ checked in Chromium |
+| Video editor: Find Chapters marks a chapter wherever the screen changes a lot (another app, a new page) and names it from the largest text on screen there | ☑️ | ☑️ checked in Chromium on a three-screen video: found and named both changes to a tenth of a second |
 | Video editor: Chapters (M) and Copy Chapters, a list for a video description timed to the finished video after cuts and export speed | ☑️ | ☑️ checked in Chromium |
 | Video editor: Fast-Forward (S) a dull stretch at 2×, 4× or 8×: a badge shows the rate, the voice drops to a murmur, and chapters, music and lengths follow the shorter video | ☑️ | ☑️ export checked in Chromium (length and badge) |
 | Video editor: Undo and Redo of every edit (⌘Z / Ctrl+Z); on Windows and Linux each step names what it changed and opens its tab | ✅ | ☑️ checked in Chromium |

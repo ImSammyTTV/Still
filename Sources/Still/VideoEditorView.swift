@@ -159,6 +159,45 @@ import StillCore
             } catch { self.error = "Couldn’t read this frame: \(error.localizedDescription)" }
         }
     }
+    /// Find Chapters: watches the kept part for big changes in the picture (another app, a new page, a new slide) and
+    /// marks a chapter at each, named from the largest text on screen just after the change.
+    func findChapters() {
+        guard !listening else { return }
+        listening = true
+        let url = library.videoSource(item), start = settings.start, end = settings.end > 0 ? settings.end : duration, cuts = settings.cuts ?? []
+        Task {
+            defer { listening = false }
+            do {
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url)); generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 160, height: 160)
+                let span = end - start, step = max(0.5, span / 400), count = max(1, Int(span / step))
+                generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = CMTime(seconds: step / 4, preferredTimescale: 600)
+                let grey = { (t: Double) async throws -> [Double] in ChapterFinder.grey(try await generator.image(at: CMTime(seconds: t, preferredTimescale: 600)).image) }
+                var changes: [Double] = [], last: [Double]?
+                for i in 0...count { let g = try await grey(min(end, start + Double(i) * step)); if let last { changes.append(VideoChapters.difference(last, g)) }; last = g }
+                let existing = settings.chapters ?? []
+                let rough = VideoChapters.scenes(changes, step: step, start: start)
+                    .filter { t in !cuts.contains { t >= $0.start && t < $0.end } && !existing.contains { abs($0.time - t) < 3 } }.prefix(24)
+                guard !rough.isEmpty else { library.toast("No clear changes of scene found"); return }
+                // Each change is somewhere in the step before; halving it five times finds the moment to a few hundredths.
+                generator.requestedTimeToleranceAfter = .zero
+                let full = AVAssetImageGenerator(asset: AVURLAsset(url: url)); full.appliesPreferredTrackTransform = true
+                full.requestedTimeToleranceBefore = .zero; full.requestedTimeToleranceAfter = .zero
+                var found: [VideoChapter] = [], named = 0
+                for (n, t) in rough.enumerated() {
+                    var lo = t - step, hi = t
+                    let before = try await grey(lo), after = try await grey(hi)
+                    for _ in 0..<5 { let mid = (lo + hi) / 2, g = try await grey(mid); if VideoChapters.difference(g, after) < VideoChapters.difference(g, before) { hi = mid } else { lo = mid } }
+                    let frame = try await full.image(at: CMTime(seconds: min(end - 0.05, hi + 0.4), preferredTimescale: 600)).image
+                    let title = (try? await Task.detached(priority: .userInitiated) { try ChapterFinder.title(in: frame) }.value) ?? ""
+                    if !title.isEmpty { named += 1 }
+                    found.append(VideoChapter(time: hi, title: title.isEmpty ? "Chapter \(existing.count + n + 1)" : title))
+                }
+                settings.chapters = (existing + found).sorted { $0.time < $1.time }
+                library.toast("Found \(found.count) chapter\(found.count == 1 ? "" : "s")\(named > 0 ? ", \(named == found.count ? "all" : "\(named)") named from the screen" : "")")
+            } catch { self.error = "Couldn’t look for chapters: \(error.localizedDescription)" }
+        }
+    }
     /// The picture at a moment of the recording, as exported (background, blurs, callouts, captions and the rest).
     private func pictures(at times: [Double], width: Double? = nil) async throws -> [CGImage] {
         let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
@@ -409,7 +448,8 @@ struct VideoEditorView: View {
             }
             if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Chapters":
-            HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                Button(model.listening ? "Looking…" : "Find Chapters") { model.findChapters() }.disabled(model.listening).help("Look for big changes on screen (another app, a new page) and mark a chapter at each, named from the screen")
                 Button("Add Chapter at Playhead") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
                 Button("Copy Chapters") {
                     let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed, skims: model.settings.skims ?? [])

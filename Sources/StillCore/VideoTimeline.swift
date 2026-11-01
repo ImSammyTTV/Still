@@ -279,6 +279,56 @@ public enum VideoChapters {
         if rows[0].at > 0 { rows.insert((0, "Intro"), at: 0) }
         return rows.map { "\(stamp(Double($0.at))) \($0.title)" }.joined(separator: "\n")
     }
+
+    // Find Chapters: where the screen changes, named from what it says. Same rules as shared/chapters.js.
+
+    /// How different two small greyscale pictures are, 0 (the same) to 1 (black to white everywhere).
+    public static func difference(_ a: [Double], _ b: [Double]) -> Double {
+        let n = min(a.count, b.count)
+        guard n > 0 else { return 0 }
+        var sum = 0.0; for i in 0..<n { sum += abs(a[i] - b[i]) }
+        return sum / Double(n) / 255
+    }
+
+    /// The moments the picture changes a lot: `changes[i]` is the difference between the pictures at start + i*step
+    /// and start + (i+1)*step. A change counts when it stands six median deviations above the median (and at least
+    /// `floor`); of changes closer than `gap` seconds the bigger one wins; nothing in the first two seconds.
+    public static func scenes(_ changes: [Double], step: Double, gap: Double = 10, floor: Double = 0.08, start: Double = 0) -> [Double] {
+        let values = changes.filter { $0.isFinite }
+        guard !values.isEmpty else { return [] }
+        let middle = { (list: [Double]) in list.sorted()[list.count / 2] }
+        let median = middle(values), spread = middle(values.map { abs($0 - median) })
+        let threshold = max(floor, median + 6 * spread)
+        var peaks: [(time: Double, v: Double)] = []
+        for (i, v) in changes.enumerated() {
+            let before = i > 0 ? changes[i-1] : 0, after = i + 1 < changes.count ? changes[i+1] : 0
+            guard v >= threshold, v >= before, v >= after else { continue }
+            let time = start + Double(i + 1) * step
+            if time - start >= 2 { peaks.append((time, v)) }
+        }
+        var kept: [Double] = []
+        for p in peaks.sorted(by: { $0.v != $1.v ? $0.v > $1.v : $0.time < $1.time }) where kept.allSatisfy({ abs($0 - p.time) >= gap }) { kept.append(p.time) }
+        return kept.sorted()
+    }
+
+    /// A chapter's name from the lines of text on screen: the line in the largest type that reads like a title
+    /// (three letters or more, mostly letters, up to 60 characters), the higher one on a tie, without trailing
+    /// separators and shortened at a word past 40 characters. "" when nothing fits.
+    public static func pickTitle(_ rows: [(text: String, top: Double, height: Double)]) -> String {
+        let separators: Set<Character> = [" ", ":", "|", "•", "·", "–", "—", "-"]
+        let fits = rows.compactMap { row -> (text: String, top: Double, height: Double)? in
+            var text = row.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            while let last = text.last, separators.contains(last) { text.removeLast() }
+            let letters = text.filter(\.isLetter).count
+            guard letters >= 3, Double(letters) / Double(max(1, text.count)) >= 0.5, text.count <= 60 else { return nil }
+            return (text, row.top, row.height)
+        }
+        guard let best = fits.sorted(by: { $0.height != $1.height ? $0.height > $1.height : $0.top < $1.top }).first?.text else { return "" }
+        guard best.count > 40 else { return best }
+        let cut = String(best.prefix(40))
+        if let space = cut.lastIndex(of: " "), cut.distance(from: cut.startIndex, to: space) > 20 { return String(cut[..<space]).trimmingCharacters(in: .whitespaces) + "…" }
+        return cut.trimmingCharacters(in: .whitespaces) + "…"
+    }
 }
 
 /// Background music for a recording: a file copied in beside it, its volume (0 to 1), whether it dips while someone

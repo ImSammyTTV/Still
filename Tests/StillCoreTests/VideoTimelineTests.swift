@@ -13,6 +13,23 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoTimeline.adding(cuts, from: 8, to: 8.05, start: 1, end: 10), cuts, "too short to count")
     }
 
+    /// The same cases as the Find Chapters tests in Desktop/test/chapters.test.js.
+    func testFindChaptersPicksBigChangesAGapApart() {
+        var changes = Array(repeating: 0.01, count: 100)
+        changes[19] = 0.5; changes[21] = 0.3; changes[59] = 0.2; changes[2] = 0.9; changes[79] = 0.05
+        XCTAssertEqual(VideoChapters.scenes(changes, step: 0.5), [10, 30])
+        XCTAssertEqual(VideoChapters.scenes(changes, step: 0.5, start: 5), [15, 35])
+        XCTAssertEqual(VideoChapters.scenes(Array(repeating: 0, count: 40), step: 0.5), [])
+        XCTAssertEqual(VideoChapters.difference([0, 255], [255, 255]), 0.5)
+    }
+
+    func testFindChaptersNamesFromTheLargestTitleLikeLine() {
+        let rows: [(text: String, top: Double, height: Double)] = [("File  Edit View", 5, 12), ("Getting Started:", 80, 32), ("12:45 PM", 3, 40), ("Welcome back", 200, 32)]
+        XCTAssertEqual(VideoChapters.pickTitle(rows), "Getting Started")
+        XCTAssertEqual(VideoChapters.pickTitle([("Configuring the deployment pipeline for production servers", 0, 20)]), "Configuring the deployment pipeline for…")
+        XCTAssertEqual(VideoChapters.pickTitle([("42 | 17", 0, 50)]), "")
+    }
+
     /// The same cases as the fast-forward tests in Desktop/test/trim.test.js.
     func testFastForwardsAreSortedInsideTheClipAndNeverOverlap() {
         let skims = VideoTimeline.normalizedSkims([VideoCut(start: 3, end: 8, rate: 8), VideoCut(start: 1, end: 5, rate: 2), VideoCut(start: 18, end: 25, rate: 3), VideoCut(start: 12, end: 12.2, rate: 2)], start: 0, end: 20)
