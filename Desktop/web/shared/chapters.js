@@ -17,8 +17,8 @@
 
   // The list, one chapter per line. Chapters in a cut or outside the clip are left out, and ones that land on the
   // same second keep the last name.
-  function list(chapters, clip, cuts, speed = 1) {
-    const kept = Trim.kept(clip, cuts || []);
+  function list(chapters, clip, cuts, speed = 1, skims = []) {
+    const kept = Trim.kept(clip, cuts || [], skims);
     const rows = [];
     for (const c of [...(chapters || [])].sort((a, b) => a.time - b.time)) {
       if (c.time < clip.start || c.time > clip.end || (cuts || []).some((x) => c.time >= x.start && c.time < x.end)) continue;

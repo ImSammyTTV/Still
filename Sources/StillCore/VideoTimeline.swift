@@ -5,7 +5,11 @@ import CoreGraphics
 public struct VideoCut: Codable, Equatable, Hashable {
     public var start: Double
     public var end: Double
-    public init(start: Double, end: Double) { self.start = start; self.end = end }
+    /// For a fast-forward, or a kept stretch inside one: how many times faster it plays (2, 4 or 8); nil plays as recorded.
+    public var rate: Double?
+    public init(start: Double, end: Double, rate: Double? = nil) { self.start = start; self.end = end; self.rate = rate }
+    /// How long it lasts in the finished video.
+    public var played: Double { (end - start) / (rate ?? 1) }
 }
 
 /// Cuts and the stretches that stay. Cuts are kept sorted, inside the clip, at least `minimumCut` long, and merged
@@ -26,20 +30,57 @@ public enum VideoTimeline {
         normalized(cuts + [VideoCut(start: min(a, b), end: max(a, b))], start: start, end: end)
     }
 
-    /// The stretches that stay, in order.
-    public static func kept(start: Double, end: Double, cuts: [VideoCut]) -> [VideoCut] {
-        var out: [VideoCut] = [], at = start
-        for cut in normalized(cuts, start: start, end: end) { if cut.start > at { out.append(VideoCut(start: at, end: cut.start)) }; at = max(at, cut.end) }
-        if end > at { out.append(VideoCut(start: at, end: end)) }
+    // Fast-forwards: stretches that play 2, 4 or 8 times faster. Kept sorted, inside the clip, at least `minimumSkim`
+    // long, never overlapping (a later one starts where an earlier one ends). Same rules as shared/trim.js.
+    public static let minimumSkim = 0.5, skimRates: [Double] = [2, 4, 8]
+
+    public static func normalizedSkims(_ skims: [VideoCut], start: Double, end: Double) -> [VideoCut] {
+        let clamp = { (t: Double) in min(end, max(start, t)) }
+        let sorted = skims.map { VideoCut(start: clamp($0.start), end: clamp($0.end), rate: skimRates.contains($0.rate ?? 0) ? $0.rate : 4) }
+            .filter { $0.start.isFinite && $0.end.isFinite }.sorted { $0.start < $1.start }
+        var out: [VideoCut] = []
+        for var skim in sorted { if let last = out.last, skim.start < last.end { skim.start = last.end }; if skim.end - skim.start >= minimumSkim { out.append(skim) } }
         return out
     }
 
-    public static func length(_ kept: [VideoCut]) -> Double { kept.reduce(0) { $0 + $1.end - $1.start } }
+    /// A new fast-forward from `time`, five seconds long or to the end of the clip or the next one.
+    public static func addingSkim(_ skims: [VideoCut], at time: Double, start: Double, end: Double, rate: Double = 4) -> [VideoCut] {
+        let list = normalizedSkims(skims, start: start, end: end)
+        if list.contains(where: { time >= $0.start && time < $0.end }) { return list }
+        let next = list.first { $0.start > time }?.start ?? .infinity
+        return normalizedSkims(list + [VideoCut(start: time, end: min(end, time + 5, next), rate: rate)], start: start, end: end)
+    }
+
+    public static func skimRate(at time: Double, skims: [VideoCut]) -> Double {
+        skims.first { time >= $0.start && time < $0.end }?.rate ?? 1
+    }
+
+    /// The stretches that stay, in order. With fast-forwards they're split where one starts or ends, and the parts
+    /// inside one carry its rate.
+    public static func kept(start: Double, end: Double, cuts: [VideoCut], skims: [VideoCut] = []) -> [VideoCut] {
+        var out: [VideoCut] = [], at = start
+        for cut in normalized(cuts, start: start, end: end) { if cut.start > at { out.append(VideoCut(start: at, end: cut.start)) }; at = max(at, cut.end) }
+        if end > at { out.append(VideoCut(start: at, end: end)) }
+        let fast = normalizedSkims(skims, start: start, end: end)
+        guard !fast.isEmpty else { return out }
+        var split: [VideoCut] = []
+        for k in out {
+            var from = k.start
+            for f in fast where f.end > from && f.start < k.end {
+                if f.start > from { split.append(VideoCut(start: from, end: f.start)) }
+                let stop = min(k.end, f.end); split.append(VideoCut(start: max(from, f.start), end: stop, rate: f.rate)); from = stop
+            }
+            if k.end - from > 1e-9 { split.append(VideoCut(start: from, end: k.end)) }
+        }
+        return split
+    }
+
+    public static func length(_ kept: [VideoCut]) -> Double { kept.reduce(0) { $0 + $1.played } }
 
     /// The recording's time at a moment of the finished video.
     public static func sourceTime(at time: Double, kept: [VideoCut]) -> Double {
         var left = max(0, time)
-        for segment in kept { let length = segment.end - segment.start; if left <= length { return segment.start + left }; left -= length }
+        for segment in kept { let length = segment.played; if left <= length { return segment.start + left * (segment.rate ?? 1) }; left -= length }
         return kept.last?.end ?? 0
     }
 
@@ -48,8 +89,8 @@ public enum VideoTimeline {
         var before = 0.0
         for segment in kept {
             if time < segment.start { return before }
-            if time <= segment.end { return before + time - segment.start }
-            before += segment.end - segment.start
+            if time <= segment.end { return before + (time - segment.start) / (segment.rate ?? 1) }
+            before += segment.played
         }
         return before
     }
@@ -224,8 +265,8 @@ public enum VideoChapters {
         let s = max(0, Int((seconds + 1e-6).rounded(.down))), h = s/3600, m = s/60 % 60, r = s % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, r) : String(format: "%d:%02d", m, r)
     }
-    public static func list(_ chapters: [VideoChapter], start: Double, end: Double, cuts: [VideoCut], speed: Double = 1) -> String {
-        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts)
+    public static func list(_ chapters: [VideoChapter], start: Double, end: Double, cuts: [VideoCut], speed: Double = 1, skims: [VideoCut] = []) -> String {
+        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts, skims: skims)
         var rows: [(at: Int, title: String)] = []
         for chapter in chapters.sorted(by: { $0.time < $1.time }) {
             guard chapter.time >= start, chapter.time <= end, !cuts.contains(where: { chapter.time >= $0.start && chapter.time < $0.end }) else { continue }
@@ -307,8 +348,8 @@ public enum VideoStoryboard {
         return String(format: "%d:%02d.%d", tenths / 600, tenths / 10 % 60, tenths % 10)
     }
 
-    public static func frames(start: Double, end: Double, cuts: [VideoCut], chapters: [VideoChapter], count: Int = 12, max limit: Int = 24, speed: Double = 1) -> [Frame] {
-        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts), total = VideoTimeline.length(kept)
+    public static func frames(start: Double, end: Double, cuts: [VideoCut], chapters: [VideoChapter], count: Int = 12, max limit: Int = 24, speed: Double = 1, skims: [VideoCut] = []) -> [Frame] {
+        let kept = VideoTimeline.kept(start: start, end: end, cuts: cuts, skims: skims), total = VideoTimeline.length(kept)
         guard total > 0 else { return [] }
         let time = { (t: Double) -> String in
             let at = VideoTimeline.outputTime(at: t, kept: kept) / max(1, speed)

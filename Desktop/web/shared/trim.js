@@ -55,26 +55,61 @@
     return out;
   }
   const removeCut = (cuts, index) => (cuts || []).filter((_, i) => i !== index);
-  // The stretches that stay, in order.
-  function kept(clip, cuts) {
+  // ---- Fast-forward: stretches that play faster -----------------------------------------------------
+  // A fast-forward is { start, end, rate } in the recording's own time, rate 2, 4 or 8. They're kept sorted, inside
+  // the clip, at least MIN_SKIM long, and never overlap (a later one starts where an earlier one ends).
+  const MIN_SKIM = 0.5, RATES = [2, 4, 8];
+  function normalizeSkims(skims, clip) {
+    const sorted = (skims || []).map((k) => ({ start: clamp(Number(k.start), clip.start, clip.end), end: clamp(Number(k.end), clip.start, clip.end), rate: RATES.includes(Number(k.rate)) ? Number(k.rate) : 4 }))
+      .filter((k) => Number.isFinite(k.start) && Number.isFinite(k.end)).sort((x, y) => x.start - y.start);
+    const out = [];
+    for (const k of sorted) { const last = out[out.length - 1]; if (last && k.start < last.end) k.start = last.end; if (k.end - k.start >= MIN_SKIM) out.push(k); }
+    return out;
+  }
+  // A new fast-forward from `time`, five seconds long or to the end of the clip or the next one.
+  function addSkim(skims, time, clip, rate = 4) {
+    const list = normalizeSkims(skims, clip);
+    if (list.some((k) => time >= k.start && time < k.end)) return list;
+    const next = list.find((k) => k.start > time), end = Math.min(clip.end, time + 5, next ? next.start : Infinity);
+    return normalizeSkims([...list, { start: time, end, rate }], clip);
+  }
+  const skimAt = (time, skims) => { for (const k of skims || []) if (time >= k.start && time < k.end) return k.rate; return 1; };
+
+  // The stretches that stay, in order. With fast-forwards they're split where one starts or ends, and the parts
+  // inside one carry its rate.
+  function kept(clip, cuts, skims) {
     const out = []; let at = clip.start;
     for (const c of normalizeCuts(cuts, clip)) { if (c.start > at) out.push({ start: at, end: c.start }); at = Math.max(at, c.end); }
     if (clip.end > at) out.push({ start: at, end: clip.end });
-    return out;
+    const fast = normalizeSkims(skims, clip);
+    if (!fast.length) return out;
+    const split = [];
+    for (const k of out) {
+      let from = k.start;
+      for (const f of fast) {
+        if (f.end <= from || f.start >= k.end) continue;
+        if (f.start > from) split.push({ start: from, end: f.start });
+        const end = Math.min(k.end, f.end); split.push({ start: Math.max(from, f.start), end, rate: f.rate }); from = end;
+      }
+      if (k.end - from > 1e-9) split.push({ start: from, end: k.end });
+    }
+    return split;
   }
-  const keptLength = (clip, cuts) => kept(clip, cuts).reduce((sum, k) => sum + k.end - k.start, 0);
+  // How long a stretch lasts in the finished video.
+  const played = (k) => (k.end - k.start) / (k.rate || 1);
+  const keptLength = (clip, cuts, skims) => kept(clip, cuts, skims).reduce((sum, k) => sum + played(k), 0);
   // Where playback goes from `time`: the end of the cut it's in, or `time` itself.
   function skip(time, cuts) { for (const c of cuts || []) if (time >= c.start && time < c.end) return c.end; return time; }
   // The recording's time at a moment of the finished video, and the other way round (a time inside a cut
   // counts from where the cut ends).
   function sourceAt(t, segments) {
     let left = Math.max(0, t);
-    for (const k of segments) { const len = k.end - k.start; if (left <= len) return k.start + left; left -= len; }
+    for (const k of segments) { const len = played(k); if (left <= len) return k.start + left * (k.rate || 1); left -= len; }
     return segments.length ? segments[segments.length - 1].end : 0;
   }
   function outputAt(time, segments) {
     let before = 0;
-    for (const k of segments) { if (time < k.start) return before; if (time <= k.end) return before + time - k.start; before += k.end - k.start; }
+    for (const k of segments) { if (time < k.start) return before; if (time <= k.end) return before + (time - k.start) / (k.rate || 1); before += played(k); }
     return before;
   }
 
@@ -144,5 +179,5 @@
     return out;
   }
 
-  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf, speech, duck };
+  return { MIN_LENGTH, MIN_CUT, full, restore, setIn, setOut, isFull, length, position, timeAt, clock, recorderType, addCut, normalizeCuts, removeCut, MIN_SKIM, RATES, normalizeSkims, addSkim, skimAt, kept, keptLength, skip, sourceAt, outputAt, pauses, levelsOf, speech, duck };
 });

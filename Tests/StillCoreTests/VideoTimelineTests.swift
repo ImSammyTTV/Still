@@ -13,6 +13,29 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(VideoTimeline.adding(cuts, from: 8, to: 8.05, start: 1, end: 10), cuts, "too short to count")
     }
 
+    /// The same cases as the fast-forward tests in Desktop/test/trim.test.js.
+    func testFastForwardsAreSortedInsideTheClipAndNeverOverlap() {
+        let skims = VideoTimeline.normalizedSkims([VideoCut(start: 3, end: 8, rate: 8), VideoCut(start: 1, end: 5, rate: 2), VideoCut(start: 18, end: 25, rate: 3), VideoCut(start: 12, end: 12.2, rate: 2)], start: 0, end: 20)
+        XCTAssertEqual(skims, [VideoCut(start: 1, end: 5, rate: 2), VideoCut(start: 5, end: 8, rate: 8), VideoCut(start: 18, end: 20, rate: 4)])
+        let one = [VideoCut(start: 5, end: 9, rate: 4)]
+        XCTAssertEqual(VideoTimeline.addingSkim(one, at: 2, start: 0, end: 20), [VideoCut(start: 2, end: 5, rate: 4), VideoCut(start: 5, end: 9, rate: 4)])
+        XCTAssertEqual(VideoTimeline.addingSkim(one, at: 6, start: 0, end: 20), one)
+        XCTAssertEqual(VideoTimeline.addingSkim(one, at: 17, start: 0, end: 20, rate: 8), [VideoCut(start: 5, end: 9, rate: 4), VideoCut(start: 17, end: 20, rate: 8)])
+        XCTAssertEqual(VideoTimeline.skimRate(at: 6, skims: one), 4)
+        XCTAssertEqual(VideoTimeline.skimRate(at: 9, skims: one), 1)
+    }
+
+    func testFastForwardsSplitTheKeptStretchesAndShortenTheVideo() {
+        let kept = VideoTimeline.kept(start: 0, end: 20, cuts: [VideoCut(start: 5, end: 7)], skims: [VideoCut(start: 4, end: 10, rate: 4)])
+        XCTAssertEqual(kept, [VideoCut(start: 0, end: 4), VideoCut(start: 4, end: 5, rate: 4), VideoCut(start: 7, end: 10, rate: 4), VideoCut(start: 10, end: 20)])
+        XCTAssertEqual(VideoTimeline.length(kept), 15)
+        XCTAssertEqual(VideoTimeline.outputTime(at: 8, kept: kept), 4.5)
+        XCTAssertEqual(VideoTimeline.outputTime(at: 12, kept: kept), 7)
+        XCTAssertEqual(VideoTimeline.sourceTime(at: 4.5, kept: kept), 8)
+        XCTAssertEqual(VideoTimeline.sourceTime(at: 4.1, kept: kept), 4.4, accuracy: 1e-9)
+        XCTAssertEqual(VideoTimeline.sourceTime(at: 7, kept: kept), 12)
+    }
+
     func testKeptStretchesAndTimesEitherSideOfACut() {
         let kept = VideoTimeline.kept(start: 1, end: 10, cuts: [VideoCut(start: 4, end: 7)])
         XCTAssertEqual(kept, [VideoCut(start: 1, end: 4), VideoCut(start: 7, end: 10)])

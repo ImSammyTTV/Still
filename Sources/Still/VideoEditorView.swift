@@ -188,7 +188,7 @@ import StillCore
     /// Storyboard: one picture of the whole video, a grid of labelled frames (one per chapter when there are
     /// chapters), added to History and opened in the image editor.
     func storyboard() {
-        let shots = VideoStoryboard.frames(start: settings.start, end: settings.end > 0 ? settings.end : duration, cuts: settings.cuts ?? [], chapters: settings.chapters ?? [], speed: exportSpeed)
+        let shots = VideoStoryboard.frames(start: settings.start, end: settings.end > 0 ? settings.end : duration, cuts: settings.cuts ?? [], chapters: settings.chapters ?? [], speed: exportSpeed, skims: settings.skims ?? [])
         guard !shots.isEmpty else { library.toast("There’s nothing kept to show"); return }
         Task {
             do {
@@ -211,6 +211,22 @@ import StillCore
                 AppController.shared.openItem(saved); library.toast("Storyboard saved to History and opened")
             } catch { self.error = "Couldn’t make the storyboard: \(error.localizedDescription)" }
         }
+    }
+    /// Fast-forward: a stretch from the playhead that plays faster in the finished video, with a badge so viewers know.
+    @Published var skimRate: Double = UserDefaults.standard.double(forKey: "videoSkimRate") > 1 ? UserDefaults.standard.double(forKey: "videoSkimRate") : 4
+    func fastForward() {
+        let skims = VideoTimeline.addingSkim(settings.skims ?? [], at: playhead, start: settings.start, end: settings.end, rate: skimRate)
+        if skims == VideoTimeline.normalizedSkims(settings.skims ?? [], start: settings.start, end: settings.end) {
+            library.toast(VideoTimeline.skimRate(at: playhead, skims: skims) > 1 ? "Already fast-forwarding here" : "Too close to the end to fast-forward"); return
+        }
+        settings.skims = skims
+        library.toast("Fast-forward added. Click it to change its speed; right-click to move or remove it.")
+    }
+    func changeSkim(_ skim: VideoCut, to new: VideoCut?) {
+        var list = (settings.skims ?? []).filter { $0 != skim }
+        if let new { list.append(new); if let rate = new.rate { skimRate = rate; UserDefaults.standard.set(rate, forKey: "videoSkimRate") } }
+        let fixed = VideoTimeline.normalizedSkims(list, start: settings.start, end: settings.end)
+        settings.skims = fixed.isEmpty ? nil : fixed
     }
     func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
@@ -396,7 +412,7 @@ struct VideoEditorView: View {
             HStack {
                 Button("Add Chapter at Playhead") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
                 Button("Copy Chapters") {
-                    let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed)
+                    let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed, skims: model.settings.skims ?? [])
                     if text.isEmpty { model.library.toast("No chapters in the part you keep") } else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string); model.library.toast(model.exportSpeed > 1 ? "Chapters copied (timed for \(model.exportSpeed.formatted())× export)" : "Chapters copied") }
                 }.disabled((model.settings.chapters ?? []).isEmpty).help("Copy a chapter list for a video description, timed to the finished video")
             }
@@ -483,11 +499,12 @@ struct VideoEditorView: View {
                 Button { model.settings.start = min(model.playhead, model.settings.end-0.2) } label: { Label("Set In", systemImage: "arrow.right.to.line") }.help("Start the video at the playhead (I)").keyboardShortcut("i", modifiers: [])
                 Button { model.settings.end = max(model.playhead, model.settings.start+0.2) } label: { Label("Set Out", systemImage: "arrow.left.to.line") }.help("End the video at the playhead (O)").keyboardShortcut("o", modifiers: [])
                 Button { model.cut() } label: { Label(model.cutStart == nil ? "Cut" : "End Cut", systemImage: "scissors") }.help("Cut out a stretch: press at its start, then at its end (X). Click a cut to put it back.").keyboardShortcut("x", modifiers: [])
+                Button { model.fastForward() } label: { Label("Fast-Forward", systemImage: "forward.fill") }.help("Fast-forward a dull stretch from the playhead, with a badge so viewers know (S)").keyboardShortcut("s", modifiers: [])
                 Button { model.tightenPauses() } label: { Label(model.listening ? "Listening…" : "Tighten Pauses", systemImage: "waveform") }.disabled(model.listening).help("Find long silences and cut them down to a short beat")
                 Menu { Picker("Opening", selection: Binding(get: { model.settings.opening ?? "none" }, set: { model.settings.opening = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade In").tag("fade"); Text("Rise").tag("rise") }
                     Picker("Closing", selection: Binding(get: { model.settings.closing ?? "none" }, set: { model.settings.closing = $0 == "none" ? nil : $0 })) { Text("None").tag("none"); Text("Fade Out").tag("fade"); Text("Rise").tag("rise") }
                 } label: { Label("Ends", systemImage: "circle.lefthalf.filled") }.fixedSize().help("How the video opens and closes: picture and sound ease in and out over 0.6 s; Rise grows the video out of its background")
-                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration; model.settings.cuts = nil; model.cutStart = nil }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01 && (model.settings.cuts ?? []).isEmpty)
+                Button("Reset") { model.settings.start = 0; model.settings.end = model.duration; model.settings.cuts = nil; model.settings.skims = nil; model.cutStart = nil }.disabled(model.settings.start <= 0 && model.settings.end >= model.duration - 0.01 && (model.settings.cuts ?? []).isEmpty && (model.settings.skims ?? []).isEmpty)
                 Text(model.dirty ? "Unsaved edits" : "Edits saved").foregroundStyle(.secondary).font(.system(size: 10))
             }.buttonStyle(.borderless).controlSize(.small)
             GeometryReader { geometry in
@@ -516,6 +533,23 @@ struct VideoEditorView: View {
                         Rectangle().fill(.black.opacity(0.65)).overlay(Rectangle().strokeBorder(.red, lineWidth: 2)).overlay(Image(systemName: "scissors").foregroundStyle(.white))
                             .frame(width: max(4, x(cut.end)-x(cut.start)), height: 52).offset(x: x(cut.start))
                             .onTapGesture { model.removeCut(cut) }.help("Cut \(time(cut.start)) to \(time(cut.end)): click to put it back")
+                    }
+                    // Fast-forwards: dashed like motion lines, with their rate. A click steps the rate (2×, 4×, 8×).
+                    ForEach(model.settings.skims ?? [], id: \.self) { skim in
+                        let rate = skim.rate ?? 4
+                        RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.35)).overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.white.opacity(0.85), style: StrokeStyle(lineWidth: 2, dash: [5, 4])))
+                            .overlay(Label("\(Int(rate))×", systemImage: "forward.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).labelStyle(.titleAndIcon).lineLimit(1).padding(.horizontal, 3).minimumScaleFactor(0.5))
+                            .frame(width: max(6, x(skim.end)-x(skim.start)), height: 52).offset(x: x(skim.start))
+                            .onTapGesture { let rates = VideoTimeline.skimRates; model.changeSkim(skim, to: VideoCut(start: skim.start, end: skim.end, rate: rates[((rates.firstIndex(of: rate) ?? 1) + 1) % rates.count])) }
+                            .contextMenu {
+                                ForEach(VideoTimeline.skimRates, id: \.self) { r in Button("\(Int(r))× faster") { model.changeSkim(skim, to: VideoCut(start: skim.start, end: skim.end, rate: r)) } }
+                                Divider()
+                                Button("Start at Playhead") { model.changeSkim(skim, to: VideoCut(start: min(model.playhead, skim.end - VideoTimeline.minimumSkim), end: skim.end, rate: rate)) }
+                                Button("End at Playhead") { model.changeSkim(skim, to: VideoCut(start: skim.start, end: max(model.playhead, skim.start + VideoTimeline.minimumSkim), rate: rate)) }
+                                Divider()
+                                Button("Remove Fast-Forward", role: .destructive) { model.changeSkim(skim, to: nil) }
+                            }
+                            .help("Fast-forward \(Int(rate))× \(time(skim.start)) to \(time(skim.end)): click to change the speed, right-click to move or remove it")
                     }
                     // Chapter markers along the top.
                     ForEach(model.settings.chapters ?? []) { chapter in Circle().fill(.yellow).overlay(Circle().strokeBorder(.black.opacity(0.5), lineWidth: 1)).frame(width: 12, height: 12).offset(x: x(chapter.time)-6, y: -26).help(chapter.title).onTapGesture { model.seek(chapter.time) } }

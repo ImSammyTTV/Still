@@ -113,3 +113,24 @@ test('music dips while someone speaks and eases back', () => {
   assert.ok(Math.abs(T.duck(1.925, r) - 0.65) < 1e-9);
   assert.ok(Math.abs(T.duck(4.075, r) - 0.65) < 1e-9);
 });
+
+test('fast-forwards are sorted, inside the clip, never overlap, and use rate 2, 4 or 8', () => {
+  const clip = { start: 0, end: 20 };
+  assert.deepEqual(T.normalizeSkims([{ start: 3, end: 8, rate: 8 }, { start: 1, end: 5, rate: 2 }, { start: 18, end: 25, rate: 3 }, { start: 12, end: 12.2, rate: 2 }], clip),
+    [{ start: 1, end: 5, rate: 2 }, { start: 5, end: 8, rate: 8 }, { start: 18, end: 20, rate: 4 }]);
+  const skims = [{ start: 5, end: 9, rate: 4 }];
+  assert.deepEqual(T.addSkim(skims, 2, clip), [{ start: 2, end: 5, rate: 4 }, { start: 5, end: 9, rate: 4 }]);
+  assert.deepEqual(T.addSkim(skims, 6, clip), skims);
+  assert.deepEqual(T.addSkim(skims, 17, clip, 8), [{ start: 5, end: 9, rate: 4 }, { start: 17, end: 20, rate: 8 }]);
+  assert.equal(T.skimAt(6, skims), 4); assert.equal(T.skimAt(9, skims), 1);
+});
+
+test('fast-forwards split the kept stretches and shorten the finished video', () => {
+  const clip = { start: 0, end: 20 }, cuts = [{ start: 5, end: 7 }], skims = [{ start: 4, end: 10, rate: 4 }];
+  const kept = T.kept(clip, cuts, skims);
+  assert.deepEqual(kept, [{ start: 0, end: 4 }, { start: 4, end: 5, rate: 4 }, { start: 7, end: 10, rate: 4 }, { start: 10, end: 20 }]);
+  assert.equal(T.keptLength(clip, cuts, skims), 15);
+  assert.equal(T.outputAt(8, kept), 4.5); assert.equal(T.outputAt(12, kept), 7);
+  assert.equal(T.sourceAt(4.5, kept), 8); assert.ok(Math.abs(T.sourceAt(4.1, kept) - 4.4) < 1e-9); assert.equal(T.sourceAt(7, kept), 12);
+  assert.deepEqual(T.kept(clip, cuts, []), T.kept(clip, cuts));
+});
