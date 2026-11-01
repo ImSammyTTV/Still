@@ -394,7 +394,7 @@ struct VideoEditorView: View {
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export MP4…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) }; Divider(); Button("Save Frame to History") { model.saveFrame() }.keyboardShortcut("f", modifiers: []); Button("Make Storyboard") { model.storyboard() } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
+            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export Video…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) }; Divider(); Button("Save Frame to History") { model.saveFrame() }.keyboardShortcut("f", modifiers: []); Button("Make Storyboard") { model.storyboard() } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -404,6 +404,7 @@ struct VideoEditorView: View {
             }
             timeline
         }.font(.system(size: 12)).background(Studio.paper)
+        .background { shortcuts }
         .onChange(of: model.settings) { _, _ in model.schedulePreview() }
         .sheet(isPresented: $model.showExportOptions) {
             VStack(alignment: .leading, spacing: 14) {
@@ -417,6 +418,16 @@ struct VideoEditorView: View {
         }
         .sheet(isPresented: $model.exporting) { VStack(spacing: 18) { Text("Exporting…").font(.headline); ProgressView(value: model.exportProgress).frame(width: 300); Text("\(Int(model.exportProgress*100))%").monospacedDigit().foregroundStyle(.secondary); Button("Cancel") { model.cancelExport() } }.padding(30).interactiveDismissDisabled() }
         .alert("Video Editor", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
+    }
+    /// The editing shortcuts, as on Windows and Linux: each works from any panel and opens the panel its tool is in.
+    private var shortcuts: some View {
+        Group {
+            Button("") { model.panel = "Zoom"; model.addZoom() }.keyboardShortcut("z", modifiers: [])
+            Button("") { model.panel = "Text"; var list = model.settings.captions ?? []; list.append(VideoCaption.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.captions = list.sorted { $0.start < $1.start } }.keyboardShortcut("t", modifiers: [])
+            Button("") { model.panel = "Callouts"; var list = model.settings.callouts ?? []; list.append(VideoCallout.new("arrow", at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.callouts = list.sorted { $0.start < $1.start } }.keyboardShortcut("a", modifiers: [])
+            Button("") { model.panel = "Blur"; var list = model.settings.blurs ?? []; list.append(VideoBlur.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.blurs = list.sorted { $0.start < $1.start } }.keyboardShortcut("b", modifiers: [])
+            Button("") { model.panel = "Chapters"; var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
+        }.opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
     }
     private var inspector: some View {
         VStack(spacing: 0) {
@@ -437,7 +448,7 @@ struct VideoEditorView: View {
             slider("Motion Blur", value: $model.settings.motionBlur, range: 0...1)
         case "Zoom":
             HStack {
-                Button("Add Zoom") { model.addZoom() }; Button("Smart Zooms") { model.smartZooms() }
+                Button("Add Zoom") { model.addZoom() }.help("Zoom in at the playhead (Z)"); Button("Auto Zoom") { model.smartZooms() }
                 if !model.pickedZooms.isEmpty { Spacer(); Button(model.pickedZooms.count == 1 ? "Remove Zoom" : "Remove \(model.pickedZooms.count) Zooms", role: .destructive) { model.removePickedZooms() }.keyboardShortcut(.delete, modifiers: []) }
             }
             if !model.settings.zooms.isEmpty { Text("Click zooms on the trim bar to pick them; ⌘-click picks several.").font(.system(size: 10)).foregroundStyle(.secondary) }
@@ -452,7 +463,7 @@ struct VideoEditorView: View {
             }
             if model.settings.zooms.isEmpty { Text("Add a zoom at the playhead, or generate zooms from recorded clicks.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Text":
-            Button("Add Text at Playhead") { var captions = model.settings.captions ?? []; captions.append(VideoCaption.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.captions = captions.sorted { $0.start < $1.start } }
+            Button("Add Text") { var captions = model.settings.captions ?? []; captions.append(VideoCaption.new(at: model.playhead, start: model.settings.start, end: model.settings.end)); model.settings.captions = captions.sorted { $0.start < $1.start } }
             ForEach(Binding(get: { model.settings.captions ?? [] }, set: { model.settings.captions = $0.isEmpty ? nil : $0 })) { $caption in
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { TextField("Text", text: $caption.text, axis: .vertical).lineLimit(1...3); Button { model.settings.captions?.removeAll { $0.id == caption.id }; if model.settings.captions?.isEmpty == true { model.settings.captions = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove text") }
@@ -481,7 +492,7 @@ struct VideoEditorView: View {
         case "Chapters":
             VStack(alignment: .leading, spacing: 8) {
                 Button(model.listening ? "Looking…" : "Find Chapters") { model.findChapters() }.disabled(model.listening).help("Look for big changes on screen (another app, a new page) and mark a chapter at each, named from the screen")
-                Button("Add Chapter at Playhead") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }.keyboardShortcut("m", modifiers: [])
+                Button("Add Chapter") { var list = model.settings.chapters ?? []; list.append(VideoChapter(time: model.playhead, title: "Chapter \(list.count + 1)")); model.settings.chapters = list.sorted { $0.time < $1.time } }
                 Button("Copy Chapters") {
                     let text = VideoChapters.list(model.settings.chapters ?? [], start: model.settings.start, end: model.settings.end > 0 ? model.settings.end : model.duration, cuts: model.settings.cuts ?? [], speed: model.exportSpeed, skims: model.settings.skims ?? [])
                     if text.isEmpty { model.library.toast("No chapters in the part you keep") } else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string); model.library.toast(model.exportSpeed > 1 ? "Chapters copied (timed for \(model.exportSpeed.formatted())× export)" : "Chapters copied") }

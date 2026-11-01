@@ -8,7 +8,7 @@ const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('-
 const TOOLS = [
   ['select', 'mouse-pointer-2', 'Select', 'v'], ['arrow', 'move-up-right', 'Arrow', 'a'], ['rect', 'square', 'Rectangle', 'r'],
   ['filled', 'square-dashed-bottom', 'Filled Rectangle', 'f'], ['ellipse', 'circle', 'Ellipse', 'o'], ['line', 'slash', 'Line', 'l'],
-  ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Counter', 'n'],
+  ['pen', 'pencil', 'Pen', 'p'], ['highlight', 'highlighter', 'Highlight', 'h'], ['text', 'type', 'Text', 't'], ['step', 'list-ordered', 'Step', 'n'],
   ['redact', 'eye-off', 'Redact', 'b'], ['blur', 'droplet', 'Blur', 'u'], ['pixelate', 'grid-3x3', 'Pixelate', 'x'], ['spotlight', 'sun-dim', 'Spotlight', 's'], ['loupe', 'zoom-in', 'Loupe', 'm'], ['measure', 'ruler', 'Measure', 'd'], ['stamp', 'smile-plus', 'Stamp', 'e'], ['crop', 'crop', 'Crop', 'c']
 ];
 const COLORS = ['#FF453A', '#FF9F0A', '#FFD60A', '#32D74B', '#64D2FF', '#0A84FF', '#BF5AF2', '#FF375F', '#FFFFFF', '#1D1D1F'];
