@@ -56,11 +56,16 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     tile says "File moved or deleted".
 20. **Upload and copy link**, then open the link on your phone with **Show QR Code**.
 
+21. **Find Similar.** Take three screenshots of the same page (scroll a little between them) and one of something else.
+    Right-click one in History and choose Find Similar: the other two show, the different one doesn't.
+22. **Search the Web for This Image** on a screenshot of a product or landmark. The search page opens; paste (Ctrl+V or
+    ⌘V) and the results are for that picture.
+
 ## Things going wrong
 
-21. **Disk nearly full.** Export a long video to a nearly full USB stick or drive. You should get "There isn't enough
+23. **Disk nearly full.** Export a long video to a nearly full USB stick or drive. You should get "There isn't enough
     space on the disk", not a long technical error.
-22. **Recording with no sound.** Use Tighten Pauses on a recording made without a microphone. It should simply say
+24. **Recording with no sound.** Use Tighten Pauses on a recording made without a microphone. It should simply say
     the recording has no sound.
 
 ## After the checklist

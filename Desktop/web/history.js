@@ -1,4 +1,10 @@
 let kind = 'all';
+// Find Similar: the screenshot the grid is showing look-alikes of, or null for the usual History.
+let similarTo = null;
+function findSimilar(item) { similarTo = item; $('#grid').scrollTop = 0; load(); }
+function searchWeb(item) {
+  still.invoke('library:searchWeb', item.id).then(() => toast('Image copied. Paste it on the search page (Ctrl+V) to search.')).catch((error) => toast(explain(error)));
+}
 const images = new Map();
 // Screenshots picked with Ctrl/⌘-click (or Shift-click) to combine, in the order they were picked.
 let picks = [];
@@ -38,8 +44,23 @@ const nearby = new IntersectionObserver((entries) => {
 }, { rootMargin: '400px' });
 
 async function load() {
-  const items = await still.invoke('library:list', { query: $('#search').value, kind });
+  let items = await still.invoke('library:list', { query: similarTo ? '' : $('#search').value, kind: similarTo ? 'screenshot' : kind });
+  let banner = null;
+  if (similarTo) {
+    const target = items.find((i) => i.id === similarTo.id);
+    let found = [];
+    try { found = target ? await still.invoke('library:similar', target.id) : []; } catch (error) { toast(explain(error)); }
+    const byId = new Map(items.map((i) => [i.id, i]));
+    items = target ? [target, ...found.map((f) => byId.get(f.id)).filter(Boolean)] : [];
+    const count = items.length - 1;
+    banner = el('div', { class: 'similar-bar' }, [
+      el('span', { html: icon('images') }),
+      el('span', {}, count > 0 ? `${count} ${count === 1 ? 'screenshot looks' : 'screenshots look'} like “${similarTo.title}”` : `Nothing else in your history looks like “${similarTo.title}”`),
+      el('button', { class: 'btn', onclick: () => { similarTo = null; load(); } }, 'Show All')
+    ]);
+  }
   const grid = $("#grid"); grid.replaceChildren(); images.clear(); tiles.clear(); nearby.disconnect();
+  if (banner) grid.append(banner);
   picks = picks.filter((id) => items.some((i) => i.id === id && i.kind !== 'recording'));
   if (!items.length) {
     grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No matching captures' : kind === 'starred' ? 'Star a capture to find it here.' : 'No captures yet. Take a screenshot to see it in your capture history.'}</div>` }));
@@ -79,6 +100,9 @@ async function load() {
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },
         { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
+        ...(item.kind === 'recording' ? [] : [
+          { label: 'Find Similar', icon: 'images', action: () => findSimilar(item) },
+          { label: 'Search the Web for This Image', icon: 'globe', action: () => searchWeb(item) }]),
         { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(explain(error))) },
         { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(explain(error))) },
         ...(item.kind === 'recording' ? [] : picks.length >= 2 && picks.includes(item.id)
@@ -98,10 +122,10 @@ async function load() {
 
 $('#filter').addEventListener('click', (e) => {
   const b = e.target.closest('[data-kind]'); if (!b) return;
-  kind = b.dataset.kind; $$('#filter button').forEach((x) => x.classList.toggle('active', x === b)); load();
+  kind = b.dataset.kind; similarTo = null; $$('#filter button').forEach((x) => x.classList.toggle('active', x === b)); load();
 });
 let searchTimer;
-$('#search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
+$('#search').addEventListener('input', () => { similarTo = null; clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
 still.on('library:changed', load);
 still.on('library:thumb', ({ id, thumb }) => { const image = images.get(id); if (image) image.src = `${still.fileUrl(thumb)}?t=${Date.now()}`; });
 applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); load(); });
