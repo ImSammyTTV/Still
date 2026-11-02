@@ -39,7 +39,10 @@ function init(data) {
   if (data.primary) document.body.classList.add('primary');
   if (data.last) region = data.last;
   $('.mode[data-mode="scroll"]').hidden = !data.canScroll;
-  image.onload = () => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); };
+  // The window stays hidden until the frozen screen is on it, so it never flashes black or shows a half-drawn page.
+  const shown = () => requestAnimationFrame(() => requestAnimationFrame(() => still.send('overlay:drawn')));
+  image.onload = () => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); shown(); };
+  image.onerror = shown;
   image.src = still.fileUrl(data.imagePath);
   refreshIcons();
   window.focus();
@@ -56,7 +59,7 @@ if (window.__STILL_PARAMS__.init) init(window.__STILL_PARAMS__.init);
 else { refreshIcons(); still.on('overlay:init', init, () => still.send('overlay:ready')); }
 still.on('overlay:purpose', (next) => { purpose = next; if (!StillCaptureInput.allowsWindowSelection(next)) setWindowMode(false, true); updateBar(); });
 still.on('overlay:windowMode', (on) => setWindowMode(on, true));
-still.on('overlay:clear', () => { if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
+still.on('overlay:clear', () => { here = false; if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
 
 function resize() {
   const dpr = devicePixelRatio || 1;
@@ -94,8 +97,10 @@ function updateBar() {
 
 // ---- Drawing -------------------------------------------------------------------------------
 
+// Read once: looking up a style on every frame makes the browser work out the page's styles again.
+const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono');
 function label(text, x, y) {
-  ctx.font = `500 12px ${getComputedStyle(document.body).getPropertyValue('--mono')}`;
+  ctx.font = `500 12px ${MONO}`;
   const w = ctx.measureText(text).width;
   const px = Math.min(innerWidth - w - 16, Math.max(10, x + 18)), py = Math.min(innerHeight - 30, Math.max(10, y + 18));
   ctx.fillStyle = 'rgba(0,0,0,.72)'; roundRect(px - 7, py - 5, w + 14, 24, 6); ctx.fill();
@@ -136,7 +141,7 @@ function drawMagnifier() {
   ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
   ctx.strokeRect(x + size / 2 - zoom / 2, y + size / 2 - zoom / 2, zoom, zoom);
   // The current zoom, so a scroll of the wheel has visible feedback.
-  ctx.font = `500 10px ${getComputedStyle(document.body).getPropertyValue('--mono')}`; ctx.textBaseline = 'bottom'; ctx.textAlign = 'right';
+  ctx.font = `500 10px ${MONO}`; ctx.textBaseline = 'bottom'; ctx.textAlign = 'right';
   const tag = `${zoom}×`, tw = ctx.measureText(tag).width;
   ctx.fillStyle = 'rgba(0,0,0,.6)'; roundRect(x + size - tw - 12, y + size - 18, tw + 8, 14, 4); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.fillText(tag, x + size - 8, y + size - 5); ctx.textAlign = 'left';
@@ -145,7 +150,7 @@ function drawMagnifier() {
   // The colour under the crosshair, ready to copy with C.
   const hex = colourAt(pointer);
   if (!hex) return;
-  ctx.font = `500 10px ${getComputedStyle(document.body).getPropertyValue('--mono')}`; ctx.textBaseline = 'middle';
+  ctx.font = `500 10px ${MONO}`; ctx.textBaseline = 'middle';
   const text = `${hex}  C`, width = ctx.measureText(text).width + 26, top = y + size + 6;
   ctx.fillStyle = 'rgba(0,0,0,.72)'; roundRect(x, top, width, 18, 5); ctx.fill();
   ctx.fillStyle = hex; ctx.fillRect(x + 5, top + 4, 10, 10); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(x + 5.5, top + 4.5, 9, 9);
@@ -182,16 +187,25 @@ $('#barHandle').addEventListener('pointerdown', (e) => {
 });
 const onBar = (e) => $('#bar').contains(e.target) || e.target.closest('.menu');
 
-addEventListener('mousemove', (e) => {
-  if (onBar(e)) return;
-  pointer = point(e); still.send('overlay:pointer');
+// A mouse can report a thousand moves a second. The page keeps only the latest and draws once per screen refresh,
+// and tells the other screens just once when the pointer arrives here, so the pointer never waits on the overlay.
+let here = false, frame = 0, square = false;
+function onFrame() {
+  frame = 0;
+  if (!config) return;
   if (windowMode) hovered = G.windowAt(config.windows, pointer);
   else if (anchor) {
     if (fixed) region = G.intersect({ x: pointer.x, y: pointer.y, w: fixed.w, h: fixed.h }, bounds());
-    else region = G.dragRect(anchor, pointer, { aspect, square: e.shiftKey, bounds: bounds() });
+    else region = G.dragRect(anchor, pointer, { aspect, square, bounds: bounds() });
     updateBar();
   }
   draw();
+}
+addEventListener('mousemove', (e) => {
+  if (onBar(e)) return;
+  pointer = point(e); square = e.shiftKey;
+  if (!here) { here = true; still.send('overlay:pointer'); }
+  if (!frame) frame = requestAnimationFrame(onFrame);
 });
 
 addEventListener('mousedown', (e) => {
