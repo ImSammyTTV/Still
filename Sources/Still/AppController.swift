@@ -247,9 +247,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         for (id, title, action) in [(1, "Capture Area", #selector(captureArea)), (2, "Capture Window", #selector(captureWindow)), (3, "Capture Full Screen", #selector(captureScreen)), (6, "Capture Previous Area", #selector(capturePrevious)), (7, "Scrolling Capture", #selector(scrollingCapture))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; item.tag = id; menu.addItem(item)
         }
-        let timed = NSMenuItem(title: "Timed Capture", action: nil, keyEquivalent: ""), timers = NSMenu()
-        for delay in [3, 5, 10] { let entry = NSMenuItem(title: "Capture Area in \(delay) Seconds", action: #selector(timedCapture(_:)), keyEquivalent: ""); entry.tag = delay; entry.target = self; timers.addItem(entry) }
-        timed.submenu = timers; menu.addItem(timed)
+        let trayTimed = NSMenuItem(title: "Timed Capture", action: nil, keyEquivalent: ""), trayTimers = NSMenu()
+        for delay in [3, 5, 10] { let entry = NSMenuItem(title: "Capture Area in \(delay) Seconds", action: #selector(timedCapture(_:)), keyEquivalent: ""); entry.tag = delay; entry.target = self; trayTimers.addItem(entry) }
+        trayTimed.submenu = trayTimers; menu.addItem(trayTimed)
         for (id, title, action) in [(8, "Capture Text", #selector(captureText)), (4, "Record Screen", #selector(record))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; item.tag = id; menu.addItem(item)
         }
