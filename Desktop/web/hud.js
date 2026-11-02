@@ -186,5 +186,7 @@ $('#restart').onclick = () => {
   }
   if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
+// Problems with the extras (the camera bubble, say) show on the bar itself, where they can't be missed.
+still.on('hud:note', (text) => toast(text));
 if (opts.stopShortcut) still.invoke('shortcut:label', opts.stopShortcut).then((label) => { const stop = $('#stop'); stop.title = `Stop and save (${label})`; stop.setAttribute('aria-label', stop.title); }).catch(() => {});
 begin().catch((error) => still.invoke('recording:error', withWhy(error.message || String(error))));

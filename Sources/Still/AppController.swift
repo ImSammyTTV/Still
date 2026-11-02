@@ -145,7 +145,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let size = Preferences.shared.recordingCameraSize
                 let panel = NSPanel(contentRect: CGRect(x: screen.visibleFrame.maxX-size-24, y: screen.visibleFrame.minY+80, width: size, height: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
                 panel.level = .floating; panel.isOpaque = false; panel.backgroundColor = .clear; panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true
-                panel.contentView = NSHostingView(rootView: CameraBubble(session: session).clipShape(RoundedRectangle(cornerRadius: Preferences.shared.recordingCameraShape == "circle" ? size/2 : 18)))
+                panel.contentView = NSHostingView(rootView: CameraBubble(session: session).frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: Preferences.shared.recordingCameraShape == "circle" ? size/2 : 18)))
                 panel.orderFrontRegardless(); self.cameraPanel = panel
             }
         }.store(in: &subscriptions)

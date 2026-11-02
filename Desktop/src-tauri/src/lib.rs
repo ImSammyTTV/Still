@@ -1367,6 +1367,7 @@ async fn recording_finished(app: AppHandle) { end_recording_extras(&app); }
 #[tauri::command]
 async fn camera_failed(app: AppHandle, message: String) {
     if let Some(w) = app.get_webview_window("camera") { let _ = w.destroy(); }
+    let _ = app.emit_to("hud", "hud:note", format!("Camera off: {message}"));
     notify(&app, "Camera bubble is off", &message);
 }
 #[tauri::command]

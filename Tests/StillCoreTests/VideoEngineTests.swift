@@ -24,6 +24,51 @@ final class VideoEngineTests: XCTestCase {
         }
         input.markAsFinished(); await writer.finishWriting(); XCTAssertEqual(writer.status, .completed, writer.error?.localizedDescription ?? "")
     }
+    /// A camera clip: 2 seconds of solid green, as the camera recorder would leave it.
+    func cameraFixture(_ url: URL) async throws {
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 160, AVVideoHeightKey: 120])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB, kCVPixelBufferWidthKey as String: 160, kCVPixelBufferHeightKey as String: 120, kCVPixelBufferCGImageCompatibilityKey as String: true, kCVPixelBufferCGBitmapContextCompatibilityKey as String: true])
+        writer.add(input); XCTAssertTrue(writer.startWriting()); writer.startSession(atSourceTime: .zero)
+        for index in 0..<24 {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 2_000_000) }
+            var optional: CVPixelBuffer?
+            XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 160, 120, kCVPixelFormatType_32ARGB, [kCVPixelBufferCGImageCompatibilityKey: true, kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary, &optional), kCVReturnSuccess)
+            let buffer = optional!
+            CVPixelBufferLockBaseAddress(buffer, [])
+            let ctx = CGContext(data: CVPixelBufferGetBaseAddress(buffer), width: 160, height: 120, bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer), space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue)!
+            ctx.setFillColor(NSColor(red: 0, green: 0.8, blue: 0, alpha: 1).cgColor); ctx.fill(CGRect(x: 0, y: 0, width: 160, height: 120))
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            XCTAssertTrue(adaptor.append(buffer, withPresentationTime: CMTime(value: Int64(index), timescale: 12)))
+        }
+        input.markAsFinished(); await writer.finishWriting(); XCTAssertEqual(writer.status, .completed, writer.error?.localizedDescription ?? "")
+    }
+    /// The camera goes through the same steps as a real recording: trimmed to line up with the screen, then laid over
+    /// the bottom right of the export.
+    func testCameraAppearsInTheExport() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-camera-test-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let input = folder.appendingPathComponent("input.mp4"), raw = folder.appendingPathComponent("camera.mp4"), camera = folder.appendingPathComponent("aligned.mp4"), output = folder.appendingPathComponent("output.mp4")
+        try await fixture(input); try await cameraFixture(raw)
+        try await VideoEngine.trim(raw, start: 0.1, duration: 1.8, to: camera)
+        var settings = VideoSettings(); settings.fps = 12; settings.cameraSize = 0.3; settings.cameraMirror = false
+        var metadata = RecordingMetadata(); metadata.cursorIncludedInVideo = false; metadata.cameraFilename = "aligned.mp4"
+        let prepared = try await VideoEngine.prepare(url: input, settings: settings, metadata: metadata, cameraURL: camera)
+        try await VideoEngine.export(prepared, to: output)
+        let video = AVURLAsset(url: output)
+        let image = try await AVAssetImageGenerator(asset: video).image(at: CMTime(seconds: 0.5, preferredTimescale: 600)).image
+        let w = image.width, h = image.height
+        var pixels = [UInt8](repeating: 0, count: w*h*4)
+        let context = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w*4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // The bubble's middle: 30% of the width, 3% in from the right and bottom edges. Rows run from the top.
+        let side = Double(w)*0.3, cx = Int(Double(w)*0.97 - side/2), cy = Int(Double(h)*0.97 - side/2)
+        let at = (cy*w+cx)*4
+        XCTAssertGreaterThan(Int(pixels[at+1]), Int(pixels[at])+60, "The camera (green) should be in the bottom right, got rgb(\(pixels[at]), \(pixels[at+1]), \(pixels[at+2]))")
+        let away = (20*w+20)*4
+        XCTAssertGreaterThan(pixels[away], 200, "Away from the bubble the screen recording shows through")
+    }
     func testTrimBackgroundZoomCursorAndMP4GIFExport() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-video-test-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
