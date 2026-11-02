@@ -707,7 +707,7 @@ fn end_recording_extras(app: &AppHandle) {
 
 // ---- Tray, shortcuts ----------------------------------------------------------------------------
 
-const ACTIONS: [(&str, &str); 10] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Fullscreen"),
+const ACTIONS: [(&str, &str); 10] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Full Screen"),
     ("previous", "Capture Previous Area"), ("scrolling", "Scrolling Capture"),
     ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture")];
 
@@ -838,11 +838,11 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&item("allInOne", "Capture Bar", "allInOne", accel("allInOne"), true)?).separator()
         .item(&item("area", "Capture Area", "area", accel("area"), true)?)
         .item(&item("window", "Capture Window", "window", accel("window"), true)?)
-        .item(&item("fullscreen", "Capture Fullscreen", "fullscreen", accel("fullscreen"), true)?)
+        .item(&item("fullscreen", "Capture Full Screen", "fullscreen", accel("fullscreen"), true)?)
         .item(&item("previous", "Capture Previous Area", "previous", accel("previous"), true)?)
         .item(&item("scrolling", if scrolling { "Finish Scrolling Capture" } else { "Scrolling Capture" }, "scrolling", accel("scrolling"), true)?)
         .item(&timers)
-        .item(&item("text", "Capture Text (OCR)", "text", accel("text"), true)?);
+        .item(&item("text", "Capture Text", "text", accel("text"), true)?);
     if !recording { menu = menu.item(&item("record", "Record Screen", "record", accel("record"), true)?); }
     menu.separator()
         .item(&item("open-image", "Open Image…", "open", None, true)?)

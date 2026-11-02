@@ -4,7 +4,7 @@ const PAGES = [
   ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
-  ['allInOne', 'Capture Bar'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Fullscreen'],
+  ['allInOne', 'Capture Bar'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Full Screen'],
   ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture (press again to finish)'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
