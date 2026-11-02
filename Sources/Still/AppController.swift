@@ -817,6 +817,9 @@ extension AppController {
         guard let target = screen ?? NSScreen.main else { return }
         let panel = SelectionPanel(contentRect: CGRect(x: target.visibleFrame.midX-180, y: target.visibleFrame.midY-160, width: 360, height: 330), styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.level = .floating; panel.hasShadow = true
+        // The bar is always dark, so its window is too: the Recording Settings popover then draws as dark glass with
+        // light text, instead of light glass under the bar's light text.
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.contentView = NSHostingView(rootView: RecordingSetupView(library: library, selectedSize: rect?.size, selectedWindow: windowID != nil, chooseArea: { [weak self] in self?.closeRecordingSetup(); self?.showAllInOne(purpose: .recording) }, cancel: { [weak self] in self?.closeRecordingSetup(); self?.restoreOverlays() }, record: { [weak self] format, studio, full, size in
             guard let self else { return }; self.closeRecordingSetup(); self.forceVideoEditor = studio
             Preferences.shared.recordingFormat = format; self.recorder.systemAudio = self.library.systemAudio; self.recorder.microphone = self.library.microphoneAudio
