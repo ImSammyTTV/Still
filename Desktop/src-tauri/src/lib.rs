@@ -10,6 +10,7 @@ mod qr;
 mod record;
 mod scroll;
 mod settings;
+mod similar;
 mod video;
 
 use capture::Grab;
@@ -1166,6 +1167,50 @@ async fn library_reveal(app: AppHandle, id: String) {
     let file = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| lib.file(&i)) };
     if let Some(f) = file { reveal(&f); }
 }
+/// Fingerprints already worked out, by capture id and when it last changed, so a second Find Similar is instant.
+static FINGERPRINTS: std::sync::OnceLock<Mutex<HashMap<String, (i64, u64)>>> = std::sync::OnceLock::new();
+/// Find Similar: the other screenshots in History that look like this one, closest first.
+#[tauri::command]
+async fn library_similar(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
+    let (items, files) = {
+        let lib = st(&app).library.lock().unwrap();
+        let items: Vec<Item> = lib.search("", "screenshot");
+        let files: Vec<PathBuf> = items.iter().map(|i| lib.thumb(i).unwrap_or_else(|| lib.file(i))).collect();
+        (items, files)
+    };
+    if !items.iter().any(|i| i.id == id) { return Err("Only screenshots can be compared.".into()); }
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache = FINGERPRINTS.get_or_init(Default::default);
+        let mut prints = Vec::new();
+        for (item, file) in items.iter().zip(files) {
+            let stamp = item.modified.unwrap_or(item.created);
+            let known = cache.lock().unwrap().get(&item.id).filter(|(s, _)| *s == stamp).map(|(_, f)| *f);
+            let print = match known {
+                Some(f) => Some(f),
+                None => std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).map(|image| {
+                    let f = similar::fingerprint(&image); cache.lock().unwrap().insert(item.id.clone(), (stamp, f)); f
+                }),
+            };
+            if let Some(f) = print { prints.push((item.id.clone(), f)); }
+        }
+        let target = prints.iter().find(|(i, _)| *i == id).map(|(_, f)| *f).ok_or("Couldn’t read this screenshot.")?;
+        let others: Vec<(String, u64)> = prints.into_iter().filter(|(i, _)| *i != id).collect();
+        Ok(similar::rank(target, &others, 60).into_iter().map(|(id, distance)| json!({ "id": id, "distance": distance })).collect())
+    }).await.map_err(|e| e.to_string())?
+}
+/// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
+/// search. Nothing is uploaded until the person pastes it there.
+#[tauri::command]
+async fn library_search_web(app: AppHandle, id: String) -> Result<(), String> {
+    library_copy(app, id).await?;
+    open_url("https://images.google.com/");
+    Ok(())
+}
+fn open_url(url: &str) {
+    #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(url).spawn(); }
+    #[cfg(target_os = "linux")] { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(url).spawn(); }
+}
 fn reveal(file: &Path) {
     #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(format!("/select,{}", file.display())).spawn(); }
     #[cfg(target_os = "linux")] { if let Some(dir) = file.parent() { let _ = std::process::Command::new("xdg-open").arg(dir).spawn(); } }
@@ -1959,7 +2004,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

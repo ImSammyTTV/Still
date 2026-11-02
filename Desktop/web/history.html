@@ -46,6 +46,11 @@
   .star.on { color: var(--yellow); }
   .star.on svg { fill: currentColor; }
   #filter button svg { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
+  /* Find Similar: says what the grid is showing, with a way back to everything. */
+  .similar-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+  .similar-bar svg { width: 16px; height: 16px; color: var(--accent); display: block; }
+  .similar-bar .btn { margin-left: auto; }
+  .similar-bar + .tile { border-color: var(--accent); }
   .tile.missing .thumb img, .tile.missing .thumb video { visibility: hidden; }
   .tile.missing .thumb::after { content: "File moved or deleted"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: var(--text-sm); }
 </style>
