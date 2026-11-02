@@ -422,7 +422,7 @@ function applyCrop() {
   if (!r || r.w <= 4 || r.h <= 4) return;
   if (!size) { doc.crop = r; commit(); return; }
   // A size crops and then scales to exactly its pixels, as one step that one undo takes back.
-  doc.crop = r;
+  doc.crop = r; cropSize = null; $('#cropSize').value = '';
   bake((content) => ({ w: size.w, h: size.h, paint: (t) => t.drawImage(content, 0, 0, size.w, size.h) }));
   toast(`${size.group} ${size.name}: ${size.w} × ${size.h}`);
 }

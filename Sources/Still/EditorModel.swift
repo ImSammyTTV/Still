@@ -26,6 +26,8 @@ final class EditorModel: ObservableObject {
     @Published var selectedID: UUID?
     @Published var activeSheet: EditorSheet?
     @Published var cropAspect: Double?
+    /// A social media size the next crop is scaled to; it also locks the crop to that shape.
+    @Published var cropSize: SocialSizes.Size?
     @Published var cornerRadius: Double = 12 { willSet { if !suppressChanges, newValue != cornerRadius { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var shadow: Double = 24 { willSet { if !suppressChanges, newValue != shadow { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var aspectRatio: Double? { willSet { if !suppressChanges, newValue != aspectRatio { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
@@ -135,9 +137,17 @@ final class EditorModel: ObservableObject {
     func crop(_ rect: CGRect) {
         do {
             let rendered = try ImageRenderer.render(source, marks: marks)
-            let cropped = try ImageRenderer.crop(rendered, to: rect)
+            var cropped = try ImageRenderer.crop(rendered, to: rect)
+            // A size crops and then scales to exactly its pixels, as one step that one undo takes back.
+            if let size = cropSize { cropped = try ImageRenderer.resize(cropped, width: size.width, height: size.height) }
             snapshot(); source = cropped; marks = []; selectedID = nil; dirty = true
+            if let size = cropSize { library.toast("\(size.title): \(SocialSizes.note(crop: rect, size: size))"); cropSize = nil; cropAspect = nil }
         } catch { self.error = error.localizedDescription }
+    }
+    /// Locks the crop tool to a size (or back to any shape with nil).
+    func chooseCropSize(_ size: SocialSizes.Size?) {
+        cropSize = size; cropAspect = size?.aspect; tool = .crop
+        if let size { library.toast("Drag over the part to keep for \(size.title)") }
     }
     /// The picture as it leaves the editor, with the watermark from Settings unless it's left off this one.
     func flattened(watermarked: Bool = true) throws -> CGImage {

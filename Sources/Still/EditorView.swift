@@ -67,8 +67,21 @@ struct EditorView: View {
                     Button("Flip Vertically") { model.transform(orientation: 4) }
                     Divider()
                     Menu("Crop Aspect Ratio") {
-                        Button("Freeform") { model.cropAspect = nil; model.tool = .crop }
-                        ForEach([1.0, 4.0/3, 16.0/9, 9.0/16], id: \.self) { ratio in Button(aspectName(ratio)) { model.cropAspect = ratio; model.tool = .crop } }
+                        Button("Freeform") { model.cropSize = nil; model.cropAspect = nil; model.tool = .crop }
+                        ForEach([1.0, 4.0/3, 16.0/9, 9.0/16], id: \.self) { ratio in Button(aspectName(ratio)) { model.cropSize = nil; model.cropAspect = ratio; model.tool = .crop } }
+                    }
+                    Menu("Crop to Size") {
+                        Button("Any Size") { model.chooseCropSize(nil) }
+                        ForEach(SocialSizes.groups, id: \.self) { group in
+                            Section(group) {
+                                ForEach(SocialSizes.all.filter { $0.group == group }) { size in
+                                    let title = "\(size.name) (\(size.width) × \(size.height))"
+                                    Button { model.chooseCropSize(size) } label: {
+                                        if model.cropSize == size { Label(title, systemImage: "checkmark") } else { Text(title) }
+                                    }
+                                }
+                            }
+                        }
                     }
                 } label: { Image(systemName: "rectangle.and.arrow.up.right.and.arrow.down.left").frame(width: 25, height: 26) }.menuStyle(.borderlessButton).fixedSize().help("Resize, rotate & flip")
                 roundButton("photo", "Background") { model.activeSheet = .background }
