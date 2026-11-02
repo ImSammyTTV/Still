@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Trim Video</title>
+<title>Video Editor</title>
 <link rel="stylesheet" href="style.css">
 <style>
   body { display: grid; grid-template-rows: 52px minmax(0, 1fr) auto auto auto; }
@@ -111,7 +111,7 @@
 </head>
 <body class="glass">
 <div class="titlebar">
-  <h1 id="title">Trim Video</h1>
+  <h1 id="title">Video Editor</h1>
   <span class="grow"></span>
   <button class="btn icon plain" id="undo" title="Undo (Ctrl+Z)" disabled><i data-lucide="undo-2"></i></button>
   <button class="btn icon plain" id="redo" title="Redo (Ctrl+Shift+Z)" disabled><i data-lucide="redo-2"></i></button>
@@ -202,7 +202,7 @@
     <span class="grow"></span>
     <span class="zoom-tools" id="calloutTools" hidden>
       <span class="dim" id="calloutHint">Drag on the video to place it.</span>
-      <select class="field" id="calloutColor" aria-label="Colour"><option value="#FF453A">Red</option><option value="#FFD60A">Yellow</option><option value="#32D74B">Green</option><option value="#0A84FF">Blue</option><option value="#FFFFFF">White</option></select>
+      <select class="field" id="calloutColor" aria-label="Color"><option value="#FF453A">Red</option><option value="#FFD60A">Yellow</option><option value="#32D74B">Green</option><option value="#0A84FF">Blue</option><option value="#FFFFFF">White</option></select>
       <button class="btn" id="calloutIn" title="Start this callout at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
       <button class="btn" id="calloutOut" title="End this callout at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
       <button class="btn plain" id="calloutRemove" title="Remove this callout (Delete)"><i data-lucide="trash-2"></i>Remove</button>
@@ -241,8 +241,8 @@
     </span>
   </div>
   <div class="panel" role="tabpanel" data-panel="ends" hidden>
-    <label class="zoom-tools">Opening <select class="field" id="opening" disabled><option value="none">None</option><option value="fade">Fade in</option><option value="rise">Rise</option></select></label>
-    <label class="zoom-tools">Closing <select class="field" id="closing" disabled><option value="none">None</option><option value="fade">Fade out</option><option value="rise">Rise</option></select></label>
+    <label class="zoom-tools">Opening <select class="field" id="opening" disabled><option value="none">None</option><option value="fade">Fade In</option><option value="rise">Rise</option></select></label>
+    <label class="zoom-tools">Closing <select class="field" id="closing" disabled><option value="none">None</option><option value="fade">Fade Out</option><option value="rise">Rise</option></select></label>
     <span class="dim" id="endsHint">Picture and sound ease in and out over 0.6 s. Rise grows the video out of its background.</span>
   </div>
   <div class="panel" role="tabpanel" data-panel="cursor" hidden>

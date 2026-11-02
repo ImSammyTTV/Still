@@ -146,7 +146,7 @@ async function finish() {
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
   await writes; // The last second is usually still on its way.
   // No data is a failure to report, never something to drop quietly.
-  if (!written) return still.invoke('recording:error', withWhy(failure || 'No video was captured. Try the WebM format in Settings → Recording.'), 'save');
+  if (!written) return still.invoke('recording:error', withWhy(failure || 'No video was captured. Try the WebM format in Settings → Screen Recording.'), 'save');
   try {
     await still.invoke('recording:save', ext, duration);
   } catch (error) {

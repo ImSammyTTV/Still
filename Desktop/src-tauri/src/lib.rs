@@ -189,7 +189,7 @@ fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
 /// Recordings open here rather than in the image editor.
 fn open_video(app: &AppHandle, id: &str) {
     let label = format!("video-{id}");
-    let title = st(app).library.lock().unwrap().get(id).map(|i| i.title).unwrap_or_else(|| "Still — Trim Video".into());
+    let title = st(app).library.lock().unwrap().get(id).map(|i| i.title).unwrap_or_else(|| "Still — Video Editor".into());
     close_preview(app, id);
     focus_or(app, &label, || glass(builder(app, &label, "video.html", json!({ "id": id }))).title(title).inner_size(960.0, 700.0).min_inner_size(720.0, 560.0).decorations(false).center().build().ok());
 }
@@ -603,7 +603,7 @@ fn window_gone(app: &AppHandle, label: &str) {
 /// engine reports, so a failed recording says which recorder failed.
 fn native_engine(rec: &Value) -> Result<(), String> {
     if !cfg!(windows) { return Err("Still’s own recorder is Windows-only.".into()) }
-    if rec["engine"].as_str() == Some("webview") { return Err("Settings → Recording → Record with is set to the system recorder.".into()) }
+    if rec["engine"].as_str() == Some("webview") { return Err("Settings → Screen Recording → Record with is set to the system recorder.".into()) }
     record::available()
 }
 

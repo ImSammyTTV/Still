@@ -1,11 +1,11 @@
 const PAGES = [
   ['Setup', 'sparkles', '#8e8e93'],
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
-  ['Screenshots', 'camera', '#34c759'], ['Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
+  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
-  ['allInOne', 'Capture Bar'], ['area', 'Capture Area (Space for window)'], ['window', 'Capture Window'], ['fullscreen', 'Capture Full Screen'],
-  ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture (press again to finish)'],
+  ['allInOne', 'Capture Bar'], ['area', 'Capture Area'], ['window', 'Capture Window'], ['fullscreen', 'Capture Full Screen'],
+  ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
 let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' };
@@ -88,7 +88,7 @@ const qualityRow = () => {
   const keep = el('button', { class: 'btn', title: 'Keep this bitrate under Quality with a name', onclick: async () => {
     const label = name.value.trim(); if (!label) { name.focus(); return; }
     await savePresets([...presets(), { name: label, megabits: mbit(amount.value) }]);
-  } }, 'Save Preset');
+  } }, 'Add Preset');
   return row('Quality', el('span', { style: 'display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, [choice, amount, el('span', {}, 'Mbps'), name, keep]));
 };
 // The saved presets, each with a way to remove it. Nothing to show until there's one.
@@ -127,19 +127,19 @@ const pages = {
     group('App', [
       toggle('Launch at login', 'launchAtLogin'),
       toggle('Check for updates automatically', 'autoUpdate'),
-      select('Appearance', 'theme', [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']])
+      select('Appearance', 'theme', [['system', 'System Default'], ['dark', 'Dark'], ['light', 'Light']])
     ]),
     group('Sounds', [toggle('Play sounds', 'playSounds')]),
-    group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: () => { setSetupDone(false); current = 'Setup'; render(); } }, 'Open Setup Assistant'))]),
+    group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: () => { setSetupDone(false); current = 'Setup'; render(); } }, 'Open Setup Assistant…'))]),
     group('Export', [row('Export location', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
       el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Documents › Still'),
       el('button', { class: 'btn', onclick: async () => { if (await still.invoke('settings:chooseFolder')) { prefs = await still.invoke('settings:get'); render(); } } }, 'Choose…')
     ]))], 'Save actions from Floating Preview, the editor and After Capture use this folder.'),
-    group('After capture', [
+    group('After Capture', [
       toggle('Show Floating Preview', 'afterCapture.quickAccess'), toggle('Copy to clipboard', 'afterCapture.copy'),
-      toggle('Save to export location', 'afterCapture.save'), toggle('Open Annotate', 'afterCapture.annotate')
+      toggle('Save to export location', 'afterCapture.save'), toggle('Open Annotate tool', 'afterCapture.annotate')
     ]),
-    group('After recording', [toggle('Show Floating Preview', 'afterRecording.quickAccess'), toggle('Save to export location', 'afterRecording.save')]),
+    group('After Recording', [toggle('Show Floating Preview', 'afterRecording.quickAccess'), toggle('Save to export location', 'afterRecording.save')]),
     group('Capture History', [select('Keep history', 'historyDays', [[0, 'Forever'], [1, '1 day'], [3, '3 days'], [7, '1 week'], [30, '1 month'], [90, '3 months']], true)],
       'Older captures are deleted for good. Starred captures are always kept.'),
     el('div', { style: 'display:flex;gap:8px;margin-top:18px' }, [
@@ -156,17 +156,17 @@ const pages = {
     el('div', { style: 'display:flex;justify-content:flex-end;margin-top:14px' }, [el('button', { class: 'btn', onclick: async () => { await still.invoke('settings:reset', 'shortcuts'); prefs = await still.invoke('settings:get'); render(); } }, 'Reset Defaults')])
   ],
   'Floating Preview': () => [
-    group('Overlay', [
-      select('Position', 'quickAccess.side', [['left', 'Bottom left'], ['right', 'Bottom right']]),
+    group('Floating Preview', [
+      select('Position', 'quickAccess.side', [['left', 'Bottom Left'], ['right', 'Bottom Right']]),
       select('Size', 'quickAccess.size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]),
       toggle('Close automatically', 'quickAccess.autoClose'),
       select('Close after', 'quickAccess.closeAfter', [[5, '5 seconds'], [10, '10 seconds'], [15, '15 seconds'], [30, '30 seconds'], [60, '1 minute']], true)
     ], 'Hover a preview to keep it open. Drag it into any app, or double-click to annotate.')
   ],
   Screenshots: () => [
-    group('File', [
+    group('Screenshots', [
       fileNameRow(),
-      select('Format', 'imageFormat', [['png', 'PNG'], ['jpg', 'JPEG']]),
+      select('Image format', 'imageFormat', [['png', 'PNG'], ['jpg', 'JPEG']]),
       select('JPEG quality', 'jpegQuality', [[100, 'Maximum'], [90, 'High'], [75, 'Medium'], [60, 'Low']], true)
     ]),
     watermarkGroup(),
@@ -176,7 +176,7 @@ const pages = {
     ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it. Scroll to zoom the magnifier.'),
     prefs.platform === 'win32' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], 'Your icons come back as soon as the capture ends.') : null
   ],
-  Recording: () => [
+  'Screen Recording': () => [
     prefs.platform === 'win32' ? group('Recorder', [
       select('Record with', 'recording.engine', [['auto', 'Still (recommended)'], ['webview', 'System web engine']]),
       toggle('Cursor effects in the video editor', 'recording.cursorEffects')
@@ -188,17 +188,17 @@ const pages = {
       select('Countdown', 'recording.countdown', [[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], true)
     ], prefs.shortcuts.record ? `Press ${StillGeometry.shortcutLabel(prefs.shortcuts.record, prefs.platform)} to stop a recording from anywhere, even when a full-screen app hides the recording controls. If MP4 can’t be encoded on this computer, Still records WebM instead.` : 'Set a Start / Stop Recording shortcut to stop a recording from anywhere, even when a full-screen app hides the recording controls.'),
     presetsGroup(),
-    group('Audio', [toggle('Record microphone', 'recording.microphone'), ...(prefs.platform === 'win32' ? [toggle('Record computer audio', 'recording.systemAudio')] : [])],
+    group('Audio', [toggle('Record microphone', 'recording.microphone'), ...(prefs.platform === 'win32' ? [toggle('Record system audio', 'recording.systemAudio')] : [])],
       prefs.platform === 'win32' ? null : 'Computer audio recording is available on Windows.'),
     group('Camera', [
-      toggle('Show camera bubble', 'recording.camera'),
+      toggle('Record camera', 'recording.camera'),
       select('Size', 'recording.cameraSize', [[120, 'Small'], [180, 'Medium'], [240, 'Large'], [320, 'Extra large']], true),
-      select('Shape', 'recording.cameraShape', [['circle', 'Circle'], ['rounded', 'Rounded square']])
+      select('Shape', 'recording.cameraShape', [['circle', 'Circle'], ['rounded', 'Rounded rectangle']])
     ], `The bubble floats above your other windows and appears in the video wherever it overlaps the recorded area. Drag it to move it.${prefs.platform === 'linux' && !prefs.globalInput ? ' On Wayland your desktop decides where it sits and whether it stays on top.' : ''}`),
     group('Overlays', [
       toggle('Show clicks', 'recording.clicks', { off: !prefs.globalInput }),
       toggle('Show keystrokes', 'recording.keys', { off: !prefs.globalInput, redraw: true }),
-      toggle('Shortcuts only', 'recording.keysShortcutsOnly', { disabled: !prefs.globalInput || !get('recording.keys') })
+      toggle('Show only shortcuts', 'recording.keysShortcutsOnly', { disabled: !prefs.globalInput || !get('recording.keys') })
     ], `Keys appear on screen and in the video, and Still never saves, logs or sends them. It only watches while recording. With Shortcuts only on, it reads the keyboard only while ${prefs.platform === 'win32' ? 'Ctrl, Alt or Win' : 'Ctrl, Alt or Super'} is held, so plain typing isn’t seen at all. With Shortcuts only off, everything you type appears in the recording, including passwords: Still can’t tell when you’re in a password field.`),
     prefs.globalInput ? null : el('div', { class: 'hint warning' }, 'Your desktop doesn’t let apps see clicks or keys in other windows, so these are off. They work in an X11 session.')
   ],
@@ -207,7 +207,7 @@ const pages = {
       row('Color', el('input', { type: 'color', value: prefs.annotate.color, style: 'width:44px;height:26px;border:0;background:none', onchange: (e) => set({ annotate: { color: e.target.value.toUpperCase() } }) })),
       select('Stroke width', 'annotate.stroke', [[2, '2 px'], [4, '4 px'], [6, '6 px'], [10, '10 px']], true),
       select('Text size', 'annotate.font', [[20, 'Small'], [28, 'Medium'], [40, 'Large']], true)
-    ], 'Tool keys: V select · A arrow · R rectangle · O ellipse · L line · P pen · H highlight · T text · N counter · B redact · U blur · X pixelate · S spotlight · C crop')
+    ], 'Tool keys: V select · A arrow · R rectangle · O ellipse · L line · P pen · H highlight · T text · N step · B redact · U blur · X pixelate · S spotlight · C crop')
   ],
   Cloud: () => {
     const status = el('span', { style: 'color:var(--text-2)' }, cloudState.connected ? 'Connected' : 'Not connected');
@@ -230,7 +230,7 @@ const pages = {
         driveState.available ? row(driveState.connected ? `Google Drive: ${driveState.email}` : 'Google Drive', driveButton) : row('Google Drive', el('span', { style: 'color:var(--text-2)' }, 'Not available in this build')),
         driveState.connected ? select('Who can open Drive links', 'cloud.driveAccess', [['link', 'Anyone with the link'], ['private', 'Only me']]) : null
       ], prefs.cloud.provider === 'icloud' ? 'Upload saves into a Still folder in iCloud Drive. iCloud has no share link, so nothing is copied to your clipboard.' : 'Files go into a Still folder in your Drive. Still can only see files it put there.'),
-      group('Server', [row('Server address', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
+      group('Server', [row('Server URL', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
         'Run your own Still Cloud server (see Cloud/README.md in the project). Uploads only happen when you press Upload or turn on automatic upload. The token is stored in your user profile, readable only by you.'),
       group('Uploads', [
         select('Links expire after', 'cloud.expiryDays', [[1, '1 day'], [7, '7 days'], [30, '30 days'], [0, 'Never']], true),
@@ -270,7 +270,7 @@ function shortcutField(key) {
   const show = async () => {
     const accel = prefs.shortcuts[key];
     field.replaceChildren();
-    if (recordingKey === key) { field.append(el('span', { class: 'placeholder' }, 'Press keys…')); return; }
+    if (recordingKey === key) { field.append(el('span', { class: 'placeholder' }, 'Press shortcut…')); return; }
     if (!accel) { field.append(el('span', { class: 'placeholder' }, 'Record shortcut')); return; }
     const label = await still.invoke('shortcut:label', accel);
     label.split(' + ').forEach((part) => field.append(el('kbd', {}, part)));
@@ -311,7 +311,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   updateStatus = await still.invoke('update:status');
   driveState = await still.invoke('drive:get');
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
-  const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings…', 'aria-label': 'Search settings categories', autocomplete: 'off' });
+  const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings', 'aria-label': 'Search settings categories', autocomplete: 'off' });
   const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');
   searchBox = search;
   search.addEventListener('input', filterNav);

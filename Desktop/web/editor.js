@@ -673,7 +673,7 @@ $('#pin').onclick = () => still.invoke('editor:pin', flatten());
 $('#upload').onclick = async () => { finishTextEdit(); toast('Uploading…'); try { const result = await still.invoke('cloud:uploadData', flatten(), document.title); toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive'); } catch (error) { toast(explain(error)); } };
 $('#ocr').onclick = () => recognize();
 async function recognize() {
-  toast('Recognising text…');
+  toast('Recognizing text…');
   try { const text = (await still.invoke('editor:ocr', flatten())).trim(); if (!text) return toast('No text found'); await navigator.clipboard.writeText(text); toast('Text copied'); }
   catch (error) { toast(`Text recognition failed: ${explain(error)}`); }
 }

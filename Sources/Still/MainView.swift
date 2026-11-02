@@ -115,8 +115,8 @@ struct MainView: View {
             section("After Capture") {
                 HStack { Text("Action").foregroundStyle(.secondary); Spacer(); Text("Screenshot").foregroundStyle(.secondary).frame(width: 85); Text("Recording").foregroundStyle(.secondary).frame(width: 75) }
                 afterRow("Show Floating Preview", image: $library.showPreview, video: $prefs.recordingPreview)
-                afterRow("Copy file to clipboard", image: $library.autoCopy, video: $prefs.copyRecording)
-                afterRow("Save", image: $prefs.saveAfterCapture)
+                afterRow("Copy to clipboard", image: $library.autoCopy, video: $prefs.copyRecording)
+                afterRow("Save to export location", image: $prefs.saveAfterCapture)
                 afterRow("Upload to Cloud & copy link", image: $prefs.autoUploadImages, video: $prefs.autoUploadVideos)
                 afterRow("Open Annotate tool", image: $prefs.annotateAfterCapture)
                 afterRow("Pin to the screen", image: $prefs.pinAfterCapture)
@@ -143,7 +143,7 @@ struct MainView: View {
                 Toggle("Show after recording", isOn: $prefs.recordingPreview)
                 choice("Position", selection: $prefs.previewPosition) { Text("Bottom Left").tag("bottomLeft"); Text("Bottom Right").tag("bottomRight"); Text("Top Left").tag("topLeft"); Text("Top Right").tag("topRight") }
                 HStack { Text("Size"); Slider(value: $prefs.previewWidth, in: 180...400, step: 10); Text("\(Int(prefs.previewWidth)) px").foregroundStyle(.secondary).frame(width: 48) }
-                choice("Automatically close", selection: $prefs.previewTimeout) { Text("Never").tag(0.0); Text("5 seconds").tag(5.0); Text("10 seconds").tag(10.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0); Text("60 seconds").tag(60.0) }
+                choice("Close automatically", selection: $prefs.previewTimeout) { Text("Never").tag(0.0); Text("5 seconds").tag(5.0); Text("10 seconds").tag(10.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0); Text("1 minute").tag(60.0) }
             }
             section("Swipe Gestures") {
                 choice("Swipe left", selection: $prefs.previewSwipeLeft) { ForEach(["dismiss", "copy", "save", "edit", "upload"], id: \.self) { Text($0.capitalized).tag($0) } }
@@ -220,12 +220,12 @@ struct MainView: View {
                 Toggle("Animate clicks", isOn: $prefs.clickAnimated)
             }
             section("Capture Keystrokes") {
-                Toggle("Show keystrokes", isOn: $prefs.recordingKeys); Toggle("Show only command keys", isOn: $prefs.recordingCommandKeysOnly)
+                Toggle("Show keystrokes", isOn: $prefs.recordingKeys); Toggle("Show only shortcuts", isOn: $prefs.recordingCommandKeysOnly)
                 choice("Style", selection: $prefs.keysStyle) { Text("Dark").tag("dark"); Text("Light").tag("light") }
                 HStack { Text("Size"); Slider(value: $prefs.keysSize, in: 0.5...2) }
                 choice("Position", selection: $prefs.keysPosition) { ForEach(["topLeft", "topCenter", "topRight", "bottomLeft", "bottomCenter", "bottomRight"], id: \.self) { Text($0.replacingOccurrences(of: "top", with: "Top ").replacingOccurrences(of: "bottom", with: "Bottom ")).tag($0) } }
             }
-            section("Camera") { Toggle("Record camera", isOn: $prefs.recordingCamera); choice("Camera", selection: $prefs.recordingCameraID) { Text("System Default").tag(""); ForEach(cameraDevices, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) } }; Toggle("Fullscreen camera", isOn: $prefs.cameraFullscreen); Toggle("Mirror camera", isOn: $prefs.cameraMirror); choice("Position", selection: $prefs.cameraPosition) { ForEach(["topLeft", "topRight", "bottomLeft", "bottomRight"], id: \.self) { Text($0.replacingOccurrences(of: "top", with: "Top ").replacingOccurrences(of: "bottom", with: "Bottom ")).tag($0) } }; choice("Shape", selection: $prefs.recordingCameraShape) { Text("Circle").tag("circle"); Text("Rounded rectangle").tag("rounded") }; HStack { Text("Size"); Slider(value: $prefs.recordingCameraSize, in: 100...360, step: 10) } }.onAppear { cameraDevices = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera], mediaType: .video, position: .unspecified).devices }
+            section("Camera") { Toggle("Record camera", isOn: $prefs.recordingCamera); choice("Camera", selection: $prefs.recordingCameraID) { Text("System Default").tag(""); ForEach(cameraDevices, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) } }; Toggle("Full screen camera", isOn: $prefs.cameraFullscreen); Toggle("Mirror camera", isOn: $prefs.cameraMirror); choice("Position", selection: $prefs.cameraPosition) { ForEach(["topLeft", "topRight", "bottomLeft", "bottomRight"], id: \.self) { Text($0.replacingOccurrences(of: "top", with: "Top ").replacingOccurrences(of: "bottom", with: "Bottom ")).tag($0) } }; choice("Shape", selection: $prefs.recordingCameraShape) { Text("Circle").tag("circle"); Text("Rounded rectangle").tag("rounded") }; HStack { Text("Size"); Slider(value: $prefs.recordingCameraSize, in: 100...360, step: 10) } }.onAppear { cameraDevices = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera], mediaType: .video, position: .unspecified).devices }
         }
     }
     private var annotate: some View {

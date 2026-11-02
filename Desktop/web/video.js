@@ -1051,7 +1051,7 @@ async function recordClip(run, type, plan) {
 
 // Export options, asked each time Export Video is chosen and remembered for next time: a size (the shorter side
 // brought down to 2160, 1440, 1080, 720 or 480 pixels, never up) and a quality (Maximum, the Mac's High,
-// Balanced and Smaller File, or a bitrate preset from Settings → Recording).
+// Balanced and Smaller File, or a bitrate preset from Settings → Screen Recording).
 let prefs = {};
 const exportChoice = (() => { try { return JSON.parse(localStorage.getItem('stillVideoExport')) || {}; } catch { return {}; } })();
 const sourceFrame = () => StillBackdrop.videoFrame(video.videoWidth, video.videoHeight, bg);
@@ -1119,7 +1119,7 @@ $('#saveFrame').onclick = async () => {
   pause();
   try {
     const kept = StillTrim.kept(trim, cuts, skims), at = StillChapters.stamp(StillTrim.outputAt(video.currentTime, kept));
-    await still.invoke('video:image', framePicture(video).toDataURL('image/png'), `${document.title || 'Recording'} at ${at}`, false);
+    await still.invoke('video:image', framePicture(video).toDataURL('image/png'), `${(item && item.title) || 'Recording'} at ${at}`, false);
     toast('Frame saved to History and copied');
   } catch (error) { showError(`Couldn’t save the frame: ${message(error)}`); }
 };
@@ -1142,7 +1142,7 @@ $('#storyboard').onclick = () => runExport('Making storyboard…', async (run) =
       setProgress((i + 1) / shots.length * 0.95);
     }
   } finally { player.removeAttribute('src'); player.load(); }
-  await still.invoke('video:image', sheet.toDataURL('image/png'), `${document.title || 'Recording'} storyboard`, true);
+  await still.invoke('video:image', sheet.toDataURL('image/png'), `${(item && item.title) || 'Recording'} storyboard`, true);
   toast('Storyboard saved to History and opened');
   return null;
 });

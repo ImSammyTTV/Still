@@ -99,7 +99,7 @@ struct EditorView: View {
                 }
             } label: { Image(systemName: model.tool == .text ? "textformat" : model.tool == .stamp ? "face.smiling" : "arrow.up.right").padding(5) }.menuStyle(.borderlessButton).fixedSize().help("Tool style")
             Spacer(minLength: 0)
-            Menu("Save as…") {
+            Menu("Save As…") {
                 Button("Image…") { model.export() }.keyboardShortcut("e", modifiers: .command)
                 Button("Editable Project…") { model.saveProject() }
                 Button("Save to Capture History") { model.save() }.keyboardShortcut("s", modifiers: .command)
@@ -146,7 +146,7 @@ struct EditorView: View {
             roundButton("pin.fill", "Pin to Screen") { do { AppController.shared.pin(try model.flattened()) } catch { model.error = error.localizedDescription } }
             roundButton("doc.on.doc.fill", "Copy") { model.copy() }.keyboardShortcut("c", modifiers: [.command, .shift])
             roundButton("square.and.arrow.down", "Save Image") { model.export() }
-            roundButton("icloud.and.arrow.up", "Upload to Cloud") { AppController.shared.uploadEditor(model) }
+            roundButton("icloud.and.arrow.up", "Upload and Copy Link") { AppController.shared.uploadEditor(model) }
         }.padding(.horizontal, 13).frame(height: 45).background(Studio.surface).overlay(alignment: .top) { Divider() }
     }
     private func roundButton(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {

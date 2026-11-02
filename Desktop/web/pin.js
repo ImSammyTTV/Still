@@ -29,8 +29,8 @@ addEventListener('keydown', (e) => {
 addEventListener('contextmenu', (e) => {
   e.preventDefault();
   popupMenu({ x: e.clientX, y: e.clientY }, [
-    { label: 'Copy', icon: 'copy', action: () => still.invoke('editor:copy', imageData()) },
-    { label: 'Lock (click-through)', icon: 'lock', action: lock },
+    { label: 'Copy Image', icon: 'copy', action: () => still.invoke('editor:copy', imageData()) },
+    { label: 'Lock (Click Through)', icon: 'lock', action: lock },
     '-',
     { label: 'Close', icon: 'x', action: () => still.send('window:close') }
   ]);
