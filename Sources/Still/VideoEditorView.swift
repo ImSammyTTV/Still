@@ -526,7 +526,7 @@ struct VideoEditorView: View {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack {
                         Text(callout.kind.capitalized).fontWeight(.medium)
-                        Picker("Colour", selection: $callout.color) { ForEach(VideoCallout.colors, id: \.self) { hex in Text(["FF453A": "Red", "FFD60A": "Yellow", "32D74B": "Green", "0A84FF": "Blue", "FFFFFF": "White"][hex] ?? hex).tag(hex) } }.labelsHidden().fixedSize()
+                        Picker("Color", selection: $callout.color) { ForEach(VideoCallout.colors, id: \.self) { hex in Text(["FF453A": "Red", "FFD60A": "Yellow", "32D74B": "Green", "0A84FF": "Blue", "FFFFFF": "White"][hex] ?? hex).tag(hex) } }.labelsHidden().fixedSize()
                         Spacer(); Button { model.settings.callouts?.removeAll { $0.id == callout.id }; if model.settings.callouts?.isEmpty == true { model.settings.callouts = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove callout")
                     }
                     HStack { TextField("Start", value: $callout.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $callout.end, format: .number.precision(.fractionLength(2))) }
@@ -540,7 +540,7 @@ struct VideoEditorView: View {
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
             Picker("Style", selection: $model.settings.cursorStyle) { Text("Arrow").tag("arrow"); Text("Dot").tag("dot") }
-            Toggle("Smooth Cursor", isOn: $model.settings.smoothCursor)
+            Toggle("Smooth movement", isOn: $model.settings.smoothCursor)
             Divider(); Toggle("Click Effects", isOn: $model.settings.showClicks)
             ColorPicker("Click Color", selection: hexColor($model.settings.clickColor), supportsOpacity: false)
             slider("Click Size", value: defaulted($model.settings.clickSize, 1), range: 0.4...2.5)
@@ -556,7 +556,7 @@ struct VideoEditorView: View {
             Toggle("Show Camera", isOn: $model.settings.cameraEnabled)
             Toggle("Fullscreen Camera", isOn: defaulted($model.settings.cameraFullscreen, false))
             Toggle("Mirror Camera", isOn: defaulted($model.settings.cameraMirror, true))
-            Picker("Shape", selection: $model.settings.cameraShape) { Text("Circle").tag("circle"); Text("Rounded").tag("rounded") }
+            Picker("Shape", selection: $model.settings.cameraShape) { Text("Circle").tag("circle"); Text("Rounded rectangle").tag("rounded") }
             slider("Size", value: $model.settings.cameraSize, range: 0.1...0.6)
             slider("Horizontal Position", value: $model.settings.cameraX, range: 0...1)
             slider("Vertical Position", value: $model.settings.cameraY, range: 0...1)

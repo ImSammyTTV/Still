@@ -146,7 +146,7 @@ async function finish() {
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
   await writes; // The last second is usually still on its way.
   // No data is a failure to report, never something to drop quietly.
-  if (!written) return still.invoke('recording:error', withWhy(failure || 'No video was captured. Try the WebM format in Settings → Recording.'), 'save');
+  if (!written) return still.invoke('recording:error', withWhy(failure || 'No video was captured. Try the WebM format in Settings → Screen Recording.'), 'save');
   try {
     await still.invoke('recording:save', ext, duration);
   } catch (error) {
@@ -186,5 +186,7 @@ $('#restart').onclick = () => {
   }
   if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
+// Problems with the extras (the camera bubble, say) show on the bar itself, where they can't be missed.
+still.on('hud:note', (text) => toast(text));
 if (opts.stopShortcut) still.invoke('shortcut:label', opts.stopShortcut).then((label) => { const stop = $('#stop'); stop.title = `Stop and save (${label})`; stop.setAttribute('aria-label', stop.title); }).catch(() => {});
 begin().catch((error) => still.invoke('recording:error', withWhy(error.message || String(error))));

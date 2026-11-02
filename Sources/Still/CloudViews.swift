@@ -30,7 +30,7 @@ struct CloudSettingsView: View {
             card("Account") {
                 TextField("Server URL", text: $endpoint, prompt: Text("https://captures.example.com")).textFieldStyle(.roundedBorder).accessibilityLabel("Cloud server URL")
                 SecureField("Personal Access Token", text: $token, prompt: Text("Stored securely in Keychain")).textFieldStyle(.roundedBorder)
-                HStack { Button(testing ? "Connecting…" : "Save & Test Connection") { connect() }.disabled(testing || endpoint.isEmpty); Spacer(); Button("Open Cloud") { if let url = URL(string: prefs.cloudEndpoint), !prefs.cloudEndpoint.isEmpty { NSWorkspace.shared.open(url) } }.disabled(prefs.cloudEndpoint.isEmpty) }
+                HStack { Button(testing ? "Connecting…" : "Connect") { connect() }.disabled(testing || endpoint.isEmpty); Spacer(); Button("Open Cloud") { if let url = URL(string: prefs.cloudEndpoint), !prefs.cloudEndpoint.isEmpty { NSWorkspace.shared.open(url) } }.disabled(prefs.cloudEndpoint.isEmpty) }
                 if !status.isEmpty { Text(status).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 Button("Copy Saved Token") { if let secret = CloudKeychain.token(for: prefs.cloudEndpoint) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(secret, forType: .string); NSPasteboard.general.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")); library.toast("Personal token copied") } }.buttonStyle(.link).font(.system(size: 10)).disabled(prefs.cloudEndpoint.isEmpty)
             }

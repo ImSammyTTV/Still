@@ -41,7 +41,12 @@ final class MarkCanvas: NSView {
             let veil = NSBezierPath(rect: bounds); veil.append(NSBezierPath(rect: rect)); veil.windingRule = .evenOdd
             NSColor.black.withAlphaComponent(0.38).setFill(); veil.fill()
             NSColor.white.setStroke(); let path = NSBezierPath(rect: rect); path.lineWidth = 1.5; path.setLineDash([6, 4], count: 2, phase: 0); path.stroke()
-            let label = "\(Int(draft.rect.width)) × \(Int(draft.rect.height))"
+            // The part every phone and TV shows, for sizes that are cut down on smaller screens.
+            if let size = model.cropSize, let safe = SocialSizes.safeArea(in: rect, size: size) {
+                let guide = NSBezierPath(rect: safe); guide.lineWidth = 1.5; guide.setLineDash([6, 4], count: 2, phase: 0); NSColor.white.withAlphaComponent(0.8).setStroke(); guide.stroke()
+                ("Shown on every device" as NSString).draw(at: CGPoint(x: safe.minX+6, y: safe.minY+6), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white])
+            }
+            let label = model.cropSize.map { "\(Int(draft.rect.width)) × \(Int(draft.rect.height)) → " + SocialSizes.note(crop: draft.rect, size: $0) } ?? "\(Int(draft.rect.width)) × \(Int(draft.rect.height))"
             (label as NSString).draw(at: CGPoint(x: rect.minX+7, y: max(rect.minY+7, 7)), withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white, .backgroundColor: NSColor.black.withAlphaComponent(0.6)])
         }
         if model.tool == .select, let selected = model.selectedMark {
@@ -122,10 +127,10 @@ final class MarkCanvas: NSView {
         guard var mark = draft else { return }
         var end = pixel(event)
         if mark.tool == .crop, let aspect = model.cropAspect {
-            let width = abs(end.x-start.x)
-            end.y = start.y+(end.y >= start.y ? width/aspect : -width/aspect)
+            let rect = SocialSizes.dragged(from: start, to: end, aspect: aspect, within: CGRect(x: 0, y: 0, width: model.source.width, height: model.source.height))
+            end = CGPoint(x: end.x >= start.x ? rect.maxX : rect.minX, y: end.y >= start.y ? rect.maxY : rect.minY)
         }
-        if event.modifierFlags.contains(.shift), mark.tool != .pen {
+        if event.modifierFlags.contains(.shift), mark.tool != .pen, !(mark.tool == .crop && model.cropAspect != nil) {
             if mark.tool == .arrow {
                 let dx = end.x-start.x, dy = end.y-start.y, distance = hypot(dx, dy)
                 let angle = (atan2(dy, dx)/(.pi/4)).rounded() * (.pi/4)

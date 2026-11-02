@@ -67,8 +67,21 @@ struct EditorView: View {
                     Button("Flip Vertically") { model.transform(orientation: 4) }
                     Divider()
                     Menu("Crop Aspect Ratio") {
-                        Button("Freeform") { model.cropAspect = nil; model.tool = .crop }
-                        ForEach([1.0, 4.0/3, 16.0/9, 9.0/16], id: \.self) { ratio in Button(aspectName(ratio)) { model.cropAspect = ratio; model.tool = .crop } }
+                        Button("Freeform") { model.cropSize = nil; model.cropAspect = nil; model.tool = .crop }
+                        ForEach([1.0, 4.0/3, 16.0/9, 9.0/16], id: \.self) { ratio in Button(aspectName(ratio)) { model.cropSize = nil; model.cropAspect = ratio; model.tool = .crop } }
+                    }
+                    Menu("Crop to Size") {
+                        Button("Any Size") { model.chooseCropSize(nil) }
+                        ForEach(SocialSizes.groups, id: \.self) { group in
+                            Section(group) {
+                                ForEach(SocialSizes.all.filter { $0.group == group }) { size in
+                                    let title = "\(size.name) (\(size.width) × \(size.height))"
+                                    Button { model.chooseCropSize(size) } label: {
+                                        if model.cropSize == size { Label(title, systemImage: "checkmark") } else { Text(title) }
+                                    }
+                                }
+                            }
+                        }
                     }
                 } label: { Image(systemName: "rectangle.and.arrow.up.right.and.arrow.down.left").frame(width: 25, height: 26) }.menuStyle(.borderlessButton).fixedSize().help("Resize, rotate & flip")
                 roundButton("photo", "Background") { model.activeSheet = .background }
@@ -99,7 +112,7 @@ struct EditorView: View {
                 }
             } label: { Image(systemName: model.tool == .text ? "textformat" : model.tool == .stamp ? "face.smiling" : "arrow.up.right").padding(5) }.menuStyle(.borderlessButton).fixedSize().help("Tool style")
             Spacer(minLength: 0)
-            Menu("Save as…") {
+            Menu("Save As…") {
                 Button("Image…") { model.export() }.keyboardShortcut("e", modifiers: .command)
                 Button("Editable Project…") { model.saveProject() }
                 Button("Save to Capture History") { model.save() }.keyboardShortcut("s", modifiers: .command)
@@ -146,7 +159,7 @@ struct EditorView: View {
             roundButton("pin.fill", "Pin to Screen") { do { AppController.shared.pin(try model.flattened()) } catch { model.error = error.localizedDescription } }
             roundButton("doc.on.doc.fill", "Copy") { model.copy() }.keyboardShortcut("c", modifiers: [.command, .shift])
             roundButton("square.and.arrow.down", "Save Image") { model.export() }
-            roundButton("icloud.and.arrow.up", "Upload to Cloud") { AppController.shared.uploadEditor(model) }
+            roundButton("icloud.and.arrow.up", "Upload and Copy Link") { AppController.shared.uploadEditor(model) }
         }.padding(.horizontal, 13).frame(height: 45).background(Studio.surface).overlay(alignment: .top) { Divider() }
     }
     private func roundButton(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {

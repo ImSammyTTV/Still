@@ -97,8 +97,24 @@ struct RecordingHUD: View {
         }.padding(.horizontal, 18).frame(height: 42).background(.ultraThickMaterial, in: Capsule()).environment(\.colorScheme, .dark)
     }
 }
+/// The live camera while recording. The preview sits in its own layer that's resized whenever the view is, so it
+/// always fills the bubble (a replaced backing layer could keep a zero size and show nothing).
+final class CameraPreviewView: NSView {
+    let preview: AVCaptureVideoPreviewLayer
+    init(session: AVCaptureSession) {
+        preview = AVCaptureVideoPreviewLayer(session: session); super.init(frame: .zero)
+        wantsLayer = true; layer?.masksToBounds = true
+        preview.videoGravity = .resizeAspectFill; layer?.addSublayer(preview)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func layout() {
+        super.layout()
+        CATransaction.begin(); CATransaction.setDisableActions(true); preview.frame = bounds; CATransaction.commit()
+        layer?.cornerRadius = Preferences.shared.recordingCameraShape == "circle" ? bounds.width/2 : 18
+    }
+}
 struct CameraBubble: NSViewRepresentable {
     let session: AVCaptureSession
-    func makeNSView(context: Context) -> NSView { let view = NSView(); view.wantsLayer = true; let layer = AVCaptureVideoPreviewLayer(session: session); layer.videoGravity = .resizeAspectFill; view.layer = layer; view.layer?.masksToBounds = true; return view }
-    func updateNSView(_ view: NSView, context: Context) { view.layer?.cornerRadius = Preferences.shared.recordingCameraShape == "circle" ? view.bounds.width/2 : 18 }
+    func makeNSView(context: Context) -> CameraPreviewView { CameraPreviewView(session: session) }
+    func updateNSView(_ view: CameraPreviewView, context: Context) { view.needsLayout = true }
 }

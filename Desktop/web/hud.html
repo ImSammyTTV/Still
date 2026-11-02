@@ -17,6 +17,10 @@
   button:hover { background: var(--chrome-surface-strong); }
   button.stop { background: var(--red); color: #fff; }
   button svg { width: 15px; height: 15px; }
+  /* Messages cover the bar for a moment: the window is only as tall as the bar, so the usual spot above the
+     bottom edge would be outside it. */
+  .toast { left: 4px; right: 4px; top: 4px; bottom: 4px; max-width: none; transform: translateY(4px); display: grid; place-items: center; padding: 0 10px; font-size: var(--text-xs); line-height: 1.25; }
+  .toast.show { transform: none; }
 </style>
 </head>
 <body>

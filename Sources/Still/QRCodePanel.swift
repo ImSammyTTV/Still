@@ -36,7 +36,7 @@ private struct QRCodeCard: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("Open on your phone").font(.system(size: 15, weight: .semibold)).padding(.top, 18)
+            Text("Open on Phone").font(.system(size: 15, weight: .semibold)).padding(.top, 18)
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white)
                 if let image { Image(nsImage: image).interpolation(.none).resizable().scaledToFit().padding(16) }

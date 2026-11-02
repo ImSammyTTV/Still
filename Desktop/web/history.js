@@ -42,7 +42,7 @@ async function load() {
   const grid = $("#grid"); grid.replaceChildren(); images.clear(); tiles.clear(); nearby.disconnect();
   picks = picks.filter((id) => items.some((i) => i.id === id && i.kind !== 'recording'));
   if (!items.length) {
-    grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No captures match your search.' : kind === 'starred' ? 'Star a capture to find it here.' : 'Your captures will appear here.'}</div>` }));
+    grid.append(el('div', { class: 'empty', html: `${icon('images')}<div>${$('#search').value ? 'No matching captures' : kind === 'starred' ? 'Star a capture to find it here.' : 'No captures yet. Take a screenshot to see it in your capture history.'}</div>` }));
     return refreshIcons();
   }
   for (const item of items) {
@@ -55,7 +55,7 @@ async function load() {
     title.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); title.blur(); } if (e.key === 'Escape') { title.textContent = item.title; title.blur(); } });
     title.addEventListener('blur', () => { title.contentEditable = 'false'; const next = title.textContent.trim(); if (next && next !== item.title) still.invoke('library:rename', item.id, next); else title.textContent = item.title; });
     const tools = el('div', { class: 'tools' }, [
-      el('button', { title: 'Copy', html: icon('copy'), onclick: (e) => { e.stopPropagation(); still.invoke('library:copy', item.id).then(() => toast('Copied')); } }),
+      el('button', { title: 'Copy', html: icon('copy'), onclick: (e) => { e.stopPropagation(); still.invoke('library:copy', item.id).then(() => toast(item.kind === 'recording' ? 'Copied recording' : 'Copied image')); } }),
       el('button', { title: 'Show in folder', html: icon('folder-open'), onclick: (e) => { e.stopPropagation(); still.invoke('library:reveal', item.id); } }),
       el('button', { title: 'Delete', html: icon('trash-2'), onclick: async (e) => { e.stopPropagation(); await still.invoke('library:delete', item.id); } })
     ]);
@@ -73,7 +73,7 @@ async function load() {
     tile.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       popupMenu({ x: e.clientX, y: e.clientY }, [
-        { label: item.kind === 'recording' ? 'Trim and Export…' : 'Annotate', icon: item.kind === 'recording' ? 'scissors' : 'pencil', action: () => still.invoke('library:open', item.id) },
+        { label: item.kind === 'recording' ? 'Open Video Editor' : 'Annotate', icon: item.kind === 'recording' ? 'scissors' : 'pencil', action: () => still.invoke('library:open', item.id) },
         ...(item.kind === 'recording' ? [{ label: 'Open in Default Player', icon: 'play', action: () => still.invoke('library:play', item.id) }] : []),
         { label: item.starred ? 'Unstar' : 'Star', icon: 'star', action: () => star(item, !item.starred) },
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },

@@ -65,7 +65,7 @@ import CryptoKit
         let alert = NSAlert()
         alert.messageText = "Still \(release.version) is available"
         alert.informativeText = "You have \(currentVersion). Still will download the update, check it and relaunch."
-        alert.addButton(withTitle: "Install and Relaunch"); alert.addButton(withTitle: "Later"); alert.addButton(withTitle: "Skip This Version")
+        alert.addButton(withTitle: "Install and Restart"); alert.addButton(withTitle: "Later"); alert.addButton(withTitle: "Skip This Version")
         switch alert.runModal() {
         case .alertFirstButtonReturn: install(release)
         case .alertThirdButtonReturn: UserDefaults.standard.set(release.version, forKey: "skippedVersion")

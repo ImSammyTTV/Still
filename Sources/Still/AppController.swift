@@ -145,7 +145,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let size = Preferences.shared.recordingCameraSize
                 let panel = NSPanel(contentRect: CGRect(x: screen.visibleFrame.maxX-size-24, y: screen.visibleFrame.minY+80, width: size, height: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
                 panel.level = .floating; panel.isOpaque = false; panel.backgroundColor = .clear; panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true
-                panel.contentView = NSHostingView(rootView: CameraBubble(session: session).clipShape(RoundedRectangle(cornerRadius: Preferences.shared.recordingCameraShape == "circle" ? size/2 : 18)))
+                panel.contentView = NSHostingView(rootView: CameraBubble(session: session).frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: Preferences.shared.recordingCameraShape == "circle" ? size/2 : 18)))
                 panel.orderFrontRegardless(); self.cameraPanel = panel
             }
         }.store(in: &subscriptions)
@@ -222,7 +222,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         edit.submenu = editMenu; main.addItem(edit)
         let captureItem = NSMenuItem(); let captureMenu = NSMenu(title: "Capture")
-        for (title, action) in [("Capture Bar", #selector(allInOne)), ("Capture Area", #selector(captureArea)), ("Capture Window", #selector(captureWindow)), ("Capture Full Screen", #selector(captureScreen)), ("Capture Text", #selector(captureText)), ("Scrolling Capture", #selector(scrollingCapture)), ("Record / Stop Recording", #selector(record)), ("Capture Previous Area", #selector(capturePrevious))] {
+        for (title, action) in [("Capture Bar", #selector(allInOne)), ("Capture Area", #selector(captureArea)), ("Capture Window", #selector(captureWindow)), ("Capture Full Screen", #selector(captureScreen)), ("Capture Text", #selector(captureText)), ("Scrolling Capture", #selector(scrollingCapture)), ("Record Screen", #selector(record)), ("Capture Previous Area", #selector(capturePrevious))] {
             let entry = NSMenuItem(title: title,action: action,keyEquivalent: ""); entry.target = self; captureMenu.addItem(entry)
         }
         captureMenu.addItem(.separator())
@@ -240,25 +240,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = Studio.menuBarIcon()
         menu = NSMenu()
+        // The same items, in the same order, as the Windows and Linux tray menu. Each tag is its shortcut's id, so
+        // decorateMenu can show the keys.
         menu.addItem(withTitle: "Capture Bar", action: #selector(allInOne), keyEquivalent: "")
         menu.addItem(.separator())
-        let shortcuts = Shortcut.load()
-        for (id, title, action) in [(UInt32(1), "Capture Area", #selector(captureArea)), (2, "Capture Window", #selector(captureWindow)), (3, "Capture Full Screen", #selector(captureScreen)), (4, "Record / Stop Recording", #selector(record)), (8, "Capture Text", #selector(captureText))] {
-            let label = shortcuts.first(where: { $0.id == id })?.label ?? ""
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; item.tag = Int(id); menu.addItem(item)
-            _ = label
+        for (id, title, action) in [(1, "Capture Area", #selector(captureArea)), (2, "Capture Window", #selector(captureWindow)), (3, "Capture Full Screen", #selector(captureScreen)), (6, "Capture Previous Area", #selector(capturePrevious)), (7, "Scrolling Capture", #selector(scrollingCapture))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; item.tag = id; menu.addItem(item)
+        }
+        let trayTimed = NSMenuItem(title: "Timed Capture", action: nil, keyEquivalent: ""), trayTimers = NSMenu()
+        for delay in [3, 5, 10] { let entry = NSMenuItem(title: "Capture Area in \(delay) Seconds", action: #selector(timedCapture(_:)), keyEquivalent: ""); entry.tag = delay; entry.target = self; trayTimers.addItem(entry) }
+        trayTimed.submenu = trayTimers; menu.addItem(trayTimed)
+        for (id, title, action) in [(8, "Capture Text", #selector(captureText)), (4, "Record Screen", #selector(record))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; item.tag = id; menu.addItem(item)
         }
         menu.addItem(.separator())
-        let clipboard = NSMenuItem(title: "Clipboard History", action: nil, keyEquivalent: ""); clipboardMenu.delegate = self; clipboard.submenu = clipboardMenu; menu.addItem(clipboard)
+        let clipboard = NSMenuItem(title: "Clipboard History", action: nil, keyEquivalent: ""); clipboardMenu.delegate = self; clipboard.submenu = clipboardMenu; clipboard.tag = 13; menu.addItem(clipboard)
         menu.addItem(withTitle: "Open Image…", action: #selector(importImage), keyEquivalent: "")
-        menu.addItem(withTitle: "Capture Previous Area", action: #selector(capturePrevious), keyEquivalent: "")
-        menu.addItem(withTitle: "Scrolling Capture", action: #selector(scrollingCapture), keyEquivalent: "")
-        menu.addItem(withTitle: "Capture History", action: #selector(showHistory), keyEquivalent: "")
-        menu.addItem(withTitle: "Restore Last Capture", action: #selector(restoreLastCapture), keyEquivalent: "")
         menu.addItem(withTitle: "Show Last Link as QR Code", action: #selector(showLastLinkQR), keyEquivalent: "")
-        menu.addItem(withTitle: "Hide / Show Overlays", action: #selector(toggleOverlays), keyEquivalent: "")
-        menu.addItem(withTitle: "Toggle Desktop Icons", action: #selector(toggleDesktop), keyEquivalent: "")
+        menu.addItem(withTitle: "Capture History", action: #selector(showHistory), keyEquivalent: "").tag = 9
+        menu.addItem(withTitle: "Restore Last Capture", action: #selector(restoreLastCapture), keyEquivalent: "").tag = 10
         menu.addItem(withTitle: "Unlock Pinned Screenshots", action: #selector(unlockPins), keyEquivalent: "")
+        menu.addItem(withTitle: "Hide / Show Overlays", action: #selector(toggleOverlays), keyEquivalent: "").tag = 12
+        menu.addItem(withTitle: "Toggle Desktop Icons", action: #selector(toggleDesktop), keyEquivalent: "").tag = 11
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         menu.addItem(withTitle: "Settings…", action: #selector(settings), keyEquivalent: "")
         menu.addItem(.separator())
@@ -647,7 +651,7 @@ extension AppController {
     /// Gives the menu bar menu its icons and shows each capture's shortcut in the native right-hand column.
     private func decorateMenu() {
         let symbols = ["Capture Bar": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
-                       "Record / Stop Recording": "record.circle", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
+                       "Record Screen": "record.circle", "Timed Capture": "timer", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
                        "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward", "Show Last Link as QR Code": "qrcode",
                        "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Clipboard History": "doc.on.clipboard", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
