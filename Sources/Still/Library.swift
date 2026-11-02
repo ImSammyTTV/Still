@@ -211,6 +211,30 @@ final class Library: ObservableObject {
         if item.isVideo { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([url(item) as NSURL]); toast("Copied recording file") }
         else if let image = ImageRenderer.load(url(item)) { copy(image) }
     }
+    /// Fingerprints already worked out, with the file's modification date, so a second Find Similar is instant.
+    private var fingerprints: [UUID: (Date, UInt64)] = [:]
+    /// Find Similar: the other screenshots that look like this one, closest first.
+    func similar(to item: CaptureItem) async -> [UUID] {
+        let files = items.filter { !$0.isVideo }.map { ($0.id, url($0)) }, known = fingerprints
+        let computed: [(UUID, Date, UInt64)] = await Task.detached(priority: .userInitiated) {
+            files.compactMap { id, file in
+                let stamp = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                if let saved = known[id], saved.0 == stamp { return (id, stamp, saved.1) }
+                return ImageFingerprint.fingerprint(of: file).map { (id, stamp, $0) }
+            }
+        }.value
+        for (id, stamp, print) in computed { fingerprints[id] = (stamp, print) }
+        guard let target = computed.first(where: { $0.0 == item.id })?.2 else { return [] }
+        return ImageFingerprint.rank(target, computed.filter { $0.0 != item.id }.map { ($0.0, $0.2) }, limit: 60).map(\.0)
+    }
+    /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
+    /// search. Nothing is uploaded until it's pasted there.
+    func searchWeb(_ item: CaptureItem) {
+        guard let image = ImageRenderer.load(url(item)), let data = try? ImageRenderer.data(image) else { toast("Couldn’t read this screenshot"); return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setData(data, forType: .png)
+        if let page = URL(string: "https://images.google.com/") { NSWorkspace.shared.open(page) }
+        toast("Image copied. Paste it on the search page (⌘V) to search.")
+    }
     func export(_ item: CaptureItem) {
         if item.isVideo {
             let panel = NSSavePanel(); panel.allowedContentTypes = item.filename.lowercased().hasSuffix(".gif") ? [.gif] : [.mpeg4Movie]; panel.nameFieldStringValue = "\(item.title).\(item.filename.lowercased().hasSuffix(".gif") ? "gif" : "mp4")"

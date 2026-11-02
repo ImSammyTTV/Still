@@ -17,10 +17,20 @@ struct HistoryView: View {
         picks = []; AppController.shared.combine(chosen, vertical: vertical); dismiss()
     }
     @State private var query = ""
+    /// Find Similar: the screenshot the grid is showing look-alikes of, and what was found.
+    @State private var similarTo: CaptureItem?
+    @State private var similarIDs: [UUID] = []
+    private func findSimilar(_ item: CaptureItem) {
+        similarTo = item; similarIDs = []; selected = item.id
+        Task { let found = await library.similar(to: item); if similarTo?.id == item.id { similarIDs = found } }
+    }
     @State private var pendingDelete: CaptureItem?
     @State private var renaming: CaptureItem?
     @State private var title = ""
-    private var items: [CaptureItem] { library.items.filter { (filter == "All" || (filter == "Starred" && $0.isStarred) || (filter == "Screenshots" && !$0.isVideo) || (filter == "Recordings" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) } }
+    private var items: [CaptureItem] {
+        if let target = similarTo { let all = library.items; return [target] + similarIDs.compactMap { id in all.first { $0.id == id } } }
+        return library.items.filter { (filter == "All" || (filter == "Starred" && $0.isStarred) || (filter == "Screenshots" && !$0.isVideo) || (filter == "Recordings" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) }
+    }
     var body: some View {
         // Filtered once here: every grid cell asks for `current`, and a search looks through recognized text.
         let items = self.items, current = items.first(where: { $0.id == selected }) ?? items.first
@@ -29,8 +39,17 @@ struct HistoryView: View {
                 Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close capture history")
                 Text("Capture History").font(Studio.heading)
                 Spacer()
-                ForEach(["All", "Screenshots", "Recordings", "GIFs", "Starred"], id: \.self) { title in Button { filter = title; selected = nil } label: { Text(title).font(.system(size: 16, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 7).background(filter == title ? Color.accentColor : Color.white.opacity(0.12), in: Capsule()) }.buttonStyle(.plain) }
+                ForEach(["All", "Screenshots", "Recordings", "GIFs", "Starred"], id: \.self) { title in Button { filter = title; selected = nil; similarTo = nil } label: { Text(title).font(.system(size: 16, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 7).background(filter == title ? Color.accentColor : Color.white.opacity(0.12), in: Capsule()) }.buttonStyle(.plain) }
                 Spacer()
+            }
+            if let target = similarTo {
+                HStack(spacing: 10) {
+                    Image(systemName: "square.on.square").foregroundStyle(Color.accentColor)
+                    let count = items.count - 1
+                    Text(count > 0 ? "\(count) \(count == 1 ? "screenshot looks" : "screenshots look") like “\(target.title)”" : "Looking for screenshots like “\(target.title)”…")
+                    Spacer()
+                    Button("Show All") { similarTo = nil }
+                }.padding(.horizontal, 14).padding(.vertical, 8).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
             if items.isEmpty {
                 VStack(spacing: 15) { Image(systemName: "clock.arrow.circlepath").font(.system(size: 38, weight: .light)); Text(!query.isEmpty ? "No matching captures" : filter == "Starred" ? "No starred captures" : "No captures yet").font(.system(size: 18)); Text(filter == "Starred" ? "Right-click a capture and choose Star to find it here." : "Take a screenshot to see it in your capture history.").foregroundStyle(.secondary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,7 +77,7 @@ struct HistoryView: View {
                                         Text(item.title).lineLimit(1).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 245)
                                     }
                                 }.buttonStyle(.plain).id(item.id).simultaneousGesture(TapGesture(count: 2).onEnded { AppController.shared.openItem(item); dismiss() })
-                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button(item.isStarred ? "Unstar" : "Star") { library.setStarred(item, !item.isStarred) }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; Button("Upload and Copy Link") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
+                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button(item.isStarred ? "Unstar" : "Star") { library.setStarred(item, !item.isStarred) }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; if !item.isVideo { Button("Find Similar") { findSimilar(item) }; Button("Search the Web for This Image") { library.searchWeb(item) } }; Button("Upload and Copy Link") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
                                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
                             }
                         }.padding(.horizontal, 10).padding(.vertical, 8)
@@ -77,7 +96,7 @@ struct HistoryView: View {
                 }
                 HStack { Spacer(); Button { if let current { AppController.shared.showPreview(current); dismiss() } } label: { Label("Restore", systemImage: "return.left").font(.system(size: 16, weight: .semibold)) }.buttonStyle(.borderedProminent).clipShape(Capsule()).keyboardShortcut(.defaultAction); Spacer() }
             }
-            HStack { TextField("Search captures", text: $query).textFieldStyle(.roundedBorder).frame(width: 220); Spacer(); Text("\(items.count) captures").foregroundStyle(.secondary).font(.system(size: 11)); if let current { Text(current.date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary).font(.system(size: 11)) } }
+            HStack { TextField("Search captures", text: $query).onChange(of: query) { _, _ in similarTo = nil }.textFieldStyle(.roundedBorder).frame(width: 220); Spacer(); Text("\(items.count) captures").foregroundStyle(.secondary).font(.system(size: 11)); if let current { Text(current.date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary).font(.system(size: 11)) } }
         }.padding(28).frame(width: 880, height: 580).background(Studio.paper).tint(Studio.accent)
         .focusable().onMoveCommand { direction in guard let current, let index = items.firstIndex(where: { $0.id == current.id }) else { return }; if direction == .left { selected = items[max(0, index-1)].id }; if direction == .right { selected = items[min(items.count-1, index+1)].id } }
         .sheet(isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
