@@ -1,4 +1,4 @@
-const G = StillGeometry, M = StillMarks;
+const G = StillGeometry, M = StillMarks, S = StillSizes;
 const stage = $('#stage'), ctx = stage.getContext('2d');
 const scroller = $('#scroller');
 const itemId = params.get('id') || null;
@@ -25,7 +25,7 @@ const styles = { arrow: 'filled', text: 'shadow', stamp: '✅' };
 // Images the document uses, by id: their data URLs, and decoded copies because drawing has to be synchronous.
 let assets = {};
 const decoded = new Map();
-let selected = null, drag = null, pendingCrop = null, history = [], future = [], dirty = false, saveTimer = null;
+let selected = null, drag = null, pendingCrop = null, cropSize = null, history = [], future = [], dirty = false, saveTimer = null;
 const isRectLike = (m) => ['rect', 'filled', 'ellipse', 'highlight', 'redact', 'blur', 'pixelate', 'spotlight', 'loupe', 'stamp', 'image'].includes(m.type);
 // How much a Loupe enlarges what's under it.
 const LOUPE_ZOOM = 2;
@@ -228,6 +228,12 @@ function drawCropOverlay(t) {
   for (const f of [1 / 3, 2 / 3]) { t.moveTo(r.x + r.w * f, r.y); t.lineTo(r.x + r.w * f, r.y + r.h); t.moveTo(r.x, r.y + r.h * f); t.lineTo(r.x + r.w, r.y + r.h * f); }
   t.stroke(); t.globalAlpha = 1; t.fillStyle = '#fff';
   for (const [x, y] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]) t.fillRect(x - 5 * s, y - 5 * s, 10 * s, 10 * s);
+  // The part every phone and TV shows, for sizes that are cut down on smaller screens.
+  const safe = S.safeArea(r, cropSize);
+  if (safe) {
+    t.setLineDash([6 * s, 4 * s]); t.lineWidth = 1.5 * s; t.strokeRect(safe.x, safe.y, safe.w, safe.h); t.setLineDash([]);
+    t.font = `600 ${12 * s}px system-ui, sans-serif`; t.textBaseline = 'top'; t.fillText('Shown on every device', safe.x + 6 * s, safe.y + 6 * s);
+  }
   t.restore();
 }
 
@@ -319,15 +325,17 @@ addEventListener('mousemove', (e) => {
     resizeMark(selected, drag.orig, drag.handle, p, selected.type === 'image' ? !e.shiftKey : e.shiftKey);
   } else if (drag.kind.startsWith('crop')) {
     const full = { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight };
-    if (drag.kind === 'crop-new') pendingCrop = G.dragRect(drag.start, p, { square: e.shiftKey, bounds: full });
+    const aspect = cropSize && cropSize.w / cropSize.h;
+    if (drag.kind === 'crop-new') pendingCrop = aspect ? S.dragged(drag.start, p, aspect, full) : G.dragRect(drag.start, p, { square: e.shiftKey, bounds: full });
     else if (drag.kind === 'crop-move') pendingCrop = G.nudge(drag.orig, dx, dy, { bounds: full });
+    else if (aspect) pendingCrop = S.cornered(drag.orig, drag.corner, p, aspect, full);
     else {
       const o = drag.orig, c = drag.corner;
       const x1 = c.includes('w') ? o.x + dx : o.x, y1 = c.includes('n') ? o.y + dy : o.y;
       const x2 = c.includes('e') ? o.x + o.w + dx : o.x + o.w, y2 = c.includes('s') ? o.y + o.h + dy : o.y + o.h;
       pendingCrop = G.intersect(G.normalize({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }), full);
     }
-    $('#cropBar').classList.add('show');
+    $('#cropBar').classList.add('show'); showCropNote();
   }
   render();
 });
@@ -405,19 +413,37 @@ function setTool(next) {
   tool = next; selected = null;
   stage.className = `tool-${tool}`;
   $$('#tools button').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
-  if (tool === 'crop') { pendingCrop = doc.crop ? { ...doc.crop } : null; $('#cropBar').classList.add('show'); }
+  if (tool === 'crop') { pendingCrop = doc.crop ? { ...doc.crop } : null; $('#cropBar').classList.add('show'); showCropNote(); }
   render();
 }
 function applyCrop() {
-  if (pendingCrop && pendingCrop.w > 4 && pendingCrop.h > 4) { doc.crop = G.normalize(pendingCrop); commit(); }
+  const size = cropSize, r = pendingCrop && G.normalize(pendingCrop);
   pendingCrop = null; $('#cropBar').classList.remove('show'); tool = 'select'; setTool('select');
+  if (!r || r.w <= 4 || r.h <= 4) return;
+  if (!size) { doc.crop = r; commit(); return; }
+  // A size crops and then scales to exactly its pixels, as one step that one undo takes back.
+  doc.crop = r;
+  bake((content) => ({ w: size.w, h: size.h, paint: (t) => t.drawImage(content, 0, 0, size.w, size.h) }));
+  toast(`${size.group} ${size.name}: ${size.w} × ${size.h}`);
 }
 function cancelCrop() { pendingCrop = null; $('#cropBar').classList.remove('show'); }
+function showCropNote() { $('#cropNote').textContent = S.note(pendingCrop, cropSize); }
+function chooseCropSize(id) {
+  cropSize = S.byId(id);
+  if (cropSize) pendingCrop = S.centered({ x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight }, cropSize.w / cropSize.h);
+  showCropNote(); render();
+}
+for (const group of [...new Set(S.SIZES.map((x) => x.group))]) {
+  const g = el('optgroup', { label: group });
+  for (const x of S.SIZES.filter((y) => y.group === group)) g.append(el('option', { value: x.id }, `${x.group} ${x.name}`));
+  $('#cropSize').append(g);
+}
+$('#cropSize').addEventListener('change', (e) => { chooseCropSize(e.target.value); e.target.blur(); });
 
 $('#tools').append(...TOOLS.map(([id, iconName, title, key]) => el('button', { 'data-tool': id, title: `${title} (${key.toUpperCase()})`, html: icon(iconName), onclick: () => setTool(id) })));
 $('#cropApply').onclick = applyCrop;
 $('#cropCancel').onclick = () => setTool('select');
-$('#cropReset').onclick = () => { pendingCrop = null; if (doc.crop) { doc.crop = null; commit(); } render(); };
+$('#cropReset').onclick = () => { pendingCrop = null; cropSize = null; $('#cropSize').value = ''; showCropNote(); if (doc.crop) { doc.crop = null; commit(); } render(); };
 
 function setColor(next) { color = next; $('#swatch').style.background = next; if (selected && selected.type !== 'image') { selected.color = next; commit(); render(); } still.invoke('settings:set', { annotate: { color: next } }); }
 $('#color').onclick = (e) => {
