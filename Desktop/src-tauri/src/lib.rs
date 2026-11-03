@@ -47,6 +47,9 @@ struct Session {
     warm: Vec<String>,
     /// The pre-warmed page that has just been given a screen and hasn't answered yet.
     handing: Option<String>,
+    /// Overlays waiting to show until their page has drawn the frozen screen, and the one that takes the keyboard.
+    unshown: Vec<String>,
+    focus_overlay: Option<String>,
     from_shortcut: bool,
     previews: Vec<(String, String)>,
     recording: Option<Value>,
@@ -344,7 +347,6 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
             jobs.into_iter().map(|job| job.join().unwrap_or_default()).collect()
         });
         let mut labels = Vec::new();
-        let mut focused: Option<WebviewWindow> = None;
         for (i, g) in grabs.iter().enumerate() {
             let file = temp.join(format!("still-overlay-{}-{}.jpg", std::process::id(), i));
             let _ = std::fs::write(&file, &pictures[i]);
@@ -369,18 +371,43 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                     (label, built)
                 }
             };
-            if let Ok(win) = built {
-                let _ = win.show();
-                if under_cursor { take_focus(&win); focused = Some(win.clone()); }
+            if built.is_ok() {
+                // Shown by overlay_drawn once its page has the picture on it.
+                let mut s = st(&app).session.lock().unwrap();
+                s.unshown.push(label.clone());
+                if under_cursor { s.focus_overlay = Some(label.clone()); }
                 labels.push(label);
             }
         }
-        // The page may not be ready for keys on the first try; a second attempt a moment later is cheap.
-        if let Some(win) = focused { std::thread::sleep(Duration::from_millis(60)); let _ = win.set_focus(); }
         watch_escape(&app);
-        let mut s = st(&app).session.lock().unwrap();
-        s.grabs = grabs; s.overlays = labels;
+        {
+            let mut s = st(&app).session.lock().unwrap();
+            s.grabs = grabs; s.overlays = labels;
+        }
+        // A page that never says it has drawn (a picture that fails to load) is shown anyway, so the capture isn't stuck invisible.
+        std::thread::sleep(Duration::from_millis(800));
+        let late: Vec<String> = std::mem::take(&mut st(&app).session.lock().unwrap().unshown);
+        for label in late { show_overlay(&app, &label); }
     });
+}
+/// Puts an overlay on screen, with the keyboard if the pointer is on its display.
+fn show_overlay(app: &AppHandle, label: &str) {
+    let Some(win) = app.get_webview_window(label) else { return };
+    let focus = st(app).session.lock().unwrap().focus_overlay.as_deref() == Some(label);
+    let _ = win.show();
+    if focus {
+        take_focus(&win);
+        // The page may not be ready for keys on the first try; a second attempt a moment later is cheap.
+        let win = win.clone();
+        std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(60)); let _ = win.set_focus(); });
+    }
+}
+/// The overlay page has drawn the frozen screen, so its window can appear without a flash.
+#[tauri::command]
+async fn overlay_drawn(app: AppHandle, window: tauri::Window) {
+    let label = window.label().to_string();
+    let waiting = { let mut s = st(&app).session.lock().unwrap(); let found = s.unshown.iter().position(|l| *l == label); found.map(|i| s.unshown.remove(i)).is_some() };
+    if waiting { show_overlay(&app, &label); }
 }
 
 /// Set by a click on the countdown, which calls the timed capture off.
@@ -420,7 +447,7 @@ async fn countdown_cancel() { COUNTDOWN_CANCELLED.store(true, std::sync::atomic:
 
 fn end_selection(app: &AppHandle) {
     let _ = app.global_shortcut().unregister("Escape");
-    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.grabs.clear(); std::mem::take(&mut s.overlays) };
+    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
     for i in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}.jpg", std::process::id(), i))); }
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
@@ -2003,7 +2030,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
-            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready,
+            overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,

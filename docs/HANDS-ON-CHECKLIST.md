@@ -8,7 +8,8 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 ## Capture
 
 1. **Area capture, twice in a row.** Take an area screenshot, then another straight away. The overlay should appear
-   at once both times, with no flash of the old picture.
+   at once both times, with no flash of black or of the old picture. Move the mouse quickly in circles with the
+   magnifier on: the pointer keeps up.
 2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the
    screenshot taken at zero has no countdown in it.
 3. **Move the Capture Bar.** Drag it by the Still icon, take a capture, then start a new one. It should be back in
