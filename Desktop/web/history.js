@@ -2,6 +2,36 @@ let kind = 'all';
 // Find Similar: the screenshot the grid is showing look-alikes of, or null for the usual History.
 let similarTo = null;
 function findSimilar(item) { similarTo = item; $('#grid').scrollTop = 0; load(); }
+// Find Similar in a Folder: pictures anywhere in a folder the user picks that look like this capture.
+let folderMatches = null;
+async function findSimilarInFolder(item) {
+  toast('Choose a folder to look in…');
+  try {
+    const result = await still.invoke('library:similarInFolder', item.id);
+    if (!result) return; // No folder chosen.
+    folderMatches = { item, ...result }; $('#grid').scrollTop = 0; load();
+  } catch (error) { toast(explain(error)); }
+}
+function showFolderMatches(grid) {
+  const m = folderMatches, folderName = m.folder.split(/[\\/]/).filter(Boolean).pop() || m.folder;
+  grid.replaceChildren(el('div', { class: 'similar-bar' }, [
+    el('span', { html: icon('folder-open') }),
+    el('span', {}, `${m.found.length ? `${m.found.length} ${m.found.length === 1 ? 'picture' : 'pictures'} in “${folderName}” look like` : `Nothing in “${folderName}” looks like`} “${m.item.title}”${m.capped ? ' (the first 5,000 pictures were checked)' : ` (${m.scanned} checked)`}`),
+    el('button', { class: 'btn', onclick: () => { folderMatches = null; load(); } }, 'Show All')
+  ]));
+  for (const f of m.found) {
+    const tile = el('div', { class: 'tile', title: f.path }, [
+      el('div', { class: 'thumb' }, [el('img', { src: still.fileUrl(f.path), loading: 'lazy', decoding: 'async', draggable: 'false' })]),
+      el('div', { class: 'meta' }, [el('div', { class: 'title' }, f.name), el('div', { class: 'sub' }, f.distance === 0 ? 'Same picture' : f.distance <= 4 ? 'Very close' : 'Similar')])
+    ]);
+    tile.addEventListener('dblclick', () => still.invoke('library:folderMatch', f.index, false).catch((e) => toast(explain(e))));
+    tile.addEventListener('contextmenu', (e) => { e.preventDefault(); popupMenu({ x: e.clientX, y: e.clientY }, [
+      { label: 'Open', icon: 'image', action: () => still.invoke('library:folderMatch', f.index, false) },
+      { label: 'Show in Folder', icon: 'folder-open', action: () => still.invoke('library:folderMatch', f.index, true) }]); });
+    grid.append(tile);
+  }
+  refreshIcons();
+}
 function searchWeb(item) {
   still.invoke('library:searchWeb', item.id).then(() => toast('Image copied. Paste it on the search page (Ctrl+V) to search.')).catch((error) => toast(explain(error)));
 }
@@ -44,6 +74,7 @@ const nearby = new IntersectionObserver((entries) => {
 }, { rootMargin: '400px' });
 
 async function load() {
+  if (folderMatches) { images.clear(); tiles.clear(); nearby.disconnect(); return showFolderMatches($('#grid')); }
   let items = await still.invoke('library:list', { query: similarTo ? '' : $('#search').value, kind: similarTo ? 'screenshot' : kind });
   let banner = null;
   if (similarTo) {
@@ -102,6 +133,7 @@ async function load() {
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
         ...(item.kind === 'recording' ? [] : [
           { label: 'Find Similar', icon: 'images', action: () => findSimilar(item) },
+          { label: 'Find Similar in a Folder…', icon: 'folder-open', action: () => findSimilarInFolder(item) },
           { label: 'Search the Web for This Image', icon: 'globe', action: () => searchWeb(item) }]),
         { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(explain(error))) },
         { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(explain(error))) },
@@ -122,10 +154,10 @@ async function load() {
 
 $('#filter').addEventListener('click', (e) => {
   const b = e.target.closest('[data-kind]'); if (!b) return;
-  kind = b.dataset.kind; similarTo = null; $$('#filter button').forEach((x) => x.classList.toggle('active', x === b)); load();
+  kind = b.dataset.kind; similarTo = null; folderMatches = null; $$('#filter button').forEach((x) => x.classList.toggle('active', x === b)); load();
 });
 let searchTimer;
-$('#search').addEventListener('input', () => { similarTo = null; clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
+$('#search').addEventListener('input', () => { similarTo = null; folderMatches = null; clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
 still.on('library:changed', load);
 still.on('library:thumb', ({ id, thumb }) => { const image = images.get(id); if (image) image.src = `${still.fileUrl(thumb)}?t=${Date.now()}`; });
 applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); load(); });

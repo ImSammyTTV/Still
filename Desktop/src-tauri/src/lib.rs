@@ -1251,6 +1251,54 @@ async fn library_similar(app: AppHandle, id: String) -> Result<Vec<Value>, Strin
 }
 /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
 /// search. Nothing is uploaded until the person pastes it there.
+/// Find Similar in a folder: the pictures in a folder the user picks (and the folders inside it) that look like this
+/// capture, closest first. Only the files found are remembered, so History can open or show only those.
+static FOLDER_MATCHES: std::sync::OnceLock<Mutex<Vec<PathBuf>>> = std::sync::OnceLock::new();
+const FOLDER_SCAN_LIMIT: usize = 5000;
+#[tauri::command]
+async fn library_similar_in_folder(app: AppHandle, id: String) -> Result<Value, String> {
+    let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be compared.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
+    let Some(folder) = app.dialog().file().set_title("Find Similar Pictures In…").blocking_pick_folder().and_then(|f| f.into_path().ok()) else { return Ok(Value::Null) };
+    let scan = folder.clone();
+    let (found, scanned, capped) = tauri::async_runtime::spawn_blocking(move || -> Result<(Vec<(PathBuf, u32)>, usize, bool), String> {
+        let target = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).map(|i| similar::fingerprint(&i)).ok_or("Couldn’t read this screenshot.")?;
+        let mut files = Vec::new();
+        let mut stack = vec![scan];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let hidden = path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.'));
+                if hidden { continue; }
+                if path.is_dir() { stack.push(path); continue; }
+                let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+                if matches!(ext.as_str(), "png" | "jpg" | "jpeg") { files.push(path); }
+                if files.len() >= FOLDER_SCAN_LIMIT { break; }
+            }
+            if files.len() >= FOLDER_SCAN_LIMIT { break; }
+        }
+        let capped = files.len() >= FOLDER_SCAN_LIMIT;
+        let prints: Vec<(String, u64)> = files.iter().filter_map(|f| {
+            // Big photos are slow to decode in full; anything over 40 MB is passed over.
+            if std::fs::metadata(f).map(|m| m.len() > 40_000_000).unwrap_or(true) { return None; }
+            std::fs::read(f).ok().and_then(|b| capture::decode(&b)).map(|i| (f.to_string_lossy().to_string(), similar::fingerprint(&i)))
+        }).collect();
+        let ranked = similar::rank(target, &prints, 60).into_iter().map(|(p, d)| (PathBuf::from(p), d)).collect();
+        Ok((ranked, files.len(), capped))
+    }).await.map_err(|e| e.to_string())??;
+    // History shows the matches as pictures, so it may read them (and only the folder picked).
+    let _ = app.asset_protocol_scope().allow_directory(&folder, true);
+    *FOLDER_MATCHES.get_or_init(Default::default).lock().unwrap() = found.iter().map(|(p, _)| p.clone()).collect();
+    Ok(json!({ "folder": folder.to_string_lossy(), "scanned": scanned, "capped": capped,
+        "found": found.iter().enumerate().map(|(i, (p, d))| json!({ "index": i, "path": p.to_string_lossy(), "name": p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), "distance": d })).collect::<Vec<_>>() }))
+}
+/// Opens, or shows in its folder, one of the files the last folder search found.
+#[tauri::command]
+async fn library_folder_match(index: usize, reveal_it: bool) -> Result<(), String> {
+    let file = FOLDER_MATCHES.get_or_init(Default::default).lock().unwrap().get(index).cloned().ok_or("That picture is no longer in the list.")?;
+    if reveal_it { reveal(&file) } else { open_path(&file) }
+    Ok(())
+}
 #[tauri::command]
 async fn library_search_web(app: AppHandle, id: String) -> Result<(), String> {
     library_copy(app, id).await?;
@@ -2056,7 +2104,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_search_web, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

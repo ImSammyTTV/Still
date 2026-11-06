@@ -20,6 +20,10 @@
     "allow-cloud-upload",
     "allow-library-qr",
     "allow-library-combine",
-    "allow-library-star"
+    "allow-library-star",
+    "allow-library-similar",
+    "allow-library-similar-in-folder",
+    "allow-library-folder-match",
+    "allow-library-search-web"
   ]
 }

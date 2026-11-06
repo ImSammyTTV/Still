@@ -53,6 +53,9 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 
 ## History and sharing
 
+- **Find Similar in a Folder.** Right-click a screenshot in History, choose Find Similar in a Folder…, and pick a
+  folder that holds a copy of it (even resized). The copy is listed first; double-click opens it.
+
 18. **A long History.** With 50+ captures, open History and scroll quickly. Nothing should stutter, and recordings
     should show their first frame as they come into view.
 19. **A moved file.** Move one capture's file out of Still's folder in Explorer or Finder, then open History. Its

@@ -227,6 +227,26 @@ final class Library: ObservableObject {
         guard let target = computed.first(where: { $0.0 == item.id })?.2 else { return [] }
         return ImageFingerprint.rank(target, computed.filter { $0.0 != item.id }.map { ($0.0, $0.2) }, limit: 60).map(\.0)
     }
+    /// Find Similar in a Folder: the pictures in `folder` (and the folders inside it) that look like this capture,
+    /// closest first. At most 5,000 pictures are checked; hidden folders and very large files are passed over.
+    struct FolderMatch: Identifiable { let id = UUID(); let url: URL; let distance: Int }
+    func similar(to item: CaptureItem, inFolder folder: URL) async -> (matches: [FolderMatch], scanned: Int, capped: Bool) {
+        let file = url(item)
+        return await Task.detached(priority: .userInitiated) {
+            guard let target = ImageFingerprint.fingerprint(of: file) else { return ([], 0, false) }
+            let kinds: Set<String> = ["png", "jpg", "jpeg", "heic", "tiff", "tif", "gif", "webp", "bmp"]
+            var files: [URL] = []
+            let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles, .skipsPackageDescendants])
+            while let next = walk?.nextObject() as? URL, files.count < 5000 {
+                guard kinds.contains(next.pathExtension.lowercased()), next.standardizedFileURL != file.standardizedFileURL else { continue }
+                let size = (try? next.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if size > 0 && size < 40_000_000 { files.append(next) }
+            }
+            let prints = files.compactMap { f in ImageFingerprint.fingerprint(of: f).map { (f, $0) } }
+            let ranked = ImageFingerprint.rank(target, prints, limit: 60).map { FolderMatch(url: $0.0, distance: $0.1) }
+            return (ranked, files.count, files.count >= 5000)
+        }.value
+    }
     /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
     /// search. Nothing is uploaded until it's pasted there.
     func searchWeb(_ item: CaptureItem) {
