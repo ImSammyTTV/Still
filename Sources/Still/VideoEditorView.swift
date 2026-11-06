@@ -486,7 +486,7 @@ struct VideoEditorView: View {
                 Button("Add Zoom") { model.addZoom() }.help("Zoom in at the playhead (Z)"); Button("Auto Zoom") { model.smartZooms() }
                 if !model.pickedZooms.isEmpty { Spacer(); Button(model.pickedZooms.count == 1 ? "Remove Zoom" : "Remove \(model.pickedZooms.count) Zooms", role: .destructive) { model.removePickedZooms() }.keyboardShortcut(.delete, modifiers: []) }
             }
-            if !model.settings.zooms.isEmpty { Text("Click zooms on the trim bar to pick them; ⌘-click picks several.").font(.system(size: 10)).foregroundStyle(.secondary) }
+            if !model.settings.zooms.isEmpty { Text("Click zooms on the trim bar to pick them; ⌘-click picks several. With the playhead in a zoom, drag the target on the video, or click the picture, to choose where it points.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             ForEach($model.settings.zooms) { $zoom in
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { Text("Zoom \(Int(zoom.scale*100))%").fontWeight(.medium); Spacer(); Button { model.settings.zooms.removeAll { $0.id == zoom.id } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove zoom") }
