@@ -309,6 +309,16 @@ function renderView() {
     for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) { ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
     ctx.restore();
   }
+  if (selectedCallout >= 0 && callouts[selectedCallout]) {
+    // The picked callout's handles: an arrow's two ends, a box's four corners.
+    const c = callouts[selectedCallout], k = fx.width / vw, r = 6 * (devicePixelRatio || 1);
+    const at = (x, y) => [(x * vw - src.x) * z.scale * k, (y * vh - src.y) * z.scale * k];
+    const points = c.kind === 'arrow' ? [at(c.x, c.y), at(c.x2 ?? 0.38, c.y2 ?? 0.36)]
+      : [at(c.x, c.y), at(c.x + (c.w ?? 0.3), c.y), at(c.x, c.y + (c.h ?? 0.3)), at(c.x + (c.w ?? 0.3), c.y + (c.h ?? 0.3))];
+    ctx.save();
+    for (const [cx, cy] of points) { ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+  }
 }
 
 // Blur boxes: each part of the picture shrunk to a few pixels and smoothed back up, which reads as a soft blur
@@ -607,7 +617,7 @@ function renderCallouts(save = true) {
   });
   const c = callouts[selectedCallout];
   $('#calloutTools').hidden = !c;
-  if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag on the video from the tail to the tip.' : 'Drag on the video to place it.'; }
+  if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag its ends or its line on the video, or draw a new one from tail to tip.' : 'Drag it or its corners on the video, or draw a new one.'; }
   $('#pointClicks').hidden = !clicks().length;
   $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
   renderView(); if (save) saveProject();
@@ -636,9 +646,24 @@ $('#clip').addEventListener('pointerdown', (down) => {
   const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
   const share = (e) => ({ x: Math.min(1, Math.max(0, (src.x + (e.clientX - r.left) / r.width * src.w) / vw)), y: Math.min(1, Math.max(0, (src.y + (e.clientY - r.top) / r.height * src.h) / vh)) });
   const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
+  // Grab a box's corner to resize it or its inside to move it; an arrow's tip or tail to move that end, or its line to
+  // move the whole arrow. Anywhere else draws it afresh.
+  const original = callouts[selectedCallout], tol = 12 / r.width * src.w / vw;
+  const near = (x, y) => Math.abs(from.x - x) <= tol && Math.abs(from.y - y) <= tol;
+  let grab = null;
+  if (original.kind === 'arrow') {
+    const tx = original.x2 ?? 0.38, ty = original.y2 ?? 0.36;
+    grab = near(original.x, original.y) ? 'tip' : near(tx, ty) ? 'tail' : toLine(from, { x: tx, y: ty }, { x: original.x, y: original.y }) <= tol ? 'line' : null;
+  } else grab = StillBlurs.handleAt({ x: original.x, y: original.y, w: original.w ?? 0.3, h: original.h ?? 0.3 }, from, tol);
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  function toLine(p, a, b) { const dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy, u = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0; return Math.hypot(p.x - (a.x + u * dx), p.y - (a.y + u * dy)); }
   const move = (e) => {
-    const to = share(e), c = callouts[selectedCallout];
-    callouts[selectedCallout] = c.kind === 'arrow' ? { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y } : { ...c, ...StillBlurs.fromDrag(from, to) };
+    const to = share(e), c = original, dx = to.x - from.x, dy = to.y - from.y;
+    if (c.kind === 'arrow') {
+      const tx = c.x2 ?? 0.38, ty = c.y2 ?? 0.36;
+      callouts[selectedCallout] = grab === 'tip' ? { ...c, x: to.x, y: to.y } : grab === 'tail' ? { ...c, x2: to.x, y2: to.y }
+        : grab === 'line' ? { ...c, x: clamp01(c.x + dx), y: clamp01(c.y + dy), x2: clamp01(tx + dx), y2: clamp01(ty + dy) } : { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y };
+    } else callouts[selectedCallout] = { ...c, ...(grab ? StillBlurs.dragBox({ x: c.x, y: c.y, w: c.w ?? 0.3, h: c.h ?? 0.3 }, grab, dx, dy) : StillBlurs.fromDrag(from, to)) };
     renderView();
   };
   const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderCallouts(); };

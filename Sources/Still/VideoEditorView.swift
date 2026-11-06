@@ -23,6 +23,17 @@ import StillCore
     @Published var error: String?
     @Published var dirty = false
     @Published var panel = "Background"
+    /// The exported frame's size and the recording's picture inside it, from the last preview build.
+    @Published var outputSize: CGSize = .zero
+    @Published var sourceSize: CGSize = .zero
+    func updateBlur(_ id: UUID, _ change: (inout VideoBlur) -> Void) {
+        guard var list = settings.blurs, let i = list.firstIndex(where: { $0.id == id }) else { return }
+        change(&list[i]); settings.blurs = list.sorted { $0.start < $1.start }
+    }
+    func updateCallout(_ id: UUID, _ change: (inout VideoCallout) -> Void) {
+        guard var list = settings.callouts, let i = list.firstIndex(where: { $0.id == id }) else { return }
+        change(&list[i]); settings.callouts = list
+    }
     private var prepared: PreparedVideo?
     private var observer: Any?
     private var previewTask: Task<Void, Never>?
@@ -62,7 +73,7 @@ import StillCore
             let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
             let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: settings, metadata: metadata, cameraURL: camera, musicURL: musicURL)
             guard !Task.isCancelled else { return }
-            prepared = result
+            prepared = result; outputSize = result.size; sourceSize = result.sourceSize
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
             player.replaceCurrentItem(with: playerItem)
             await player.seek(to: CMTime(seconds: max(0, min(result.duration, VideoTimeline.outputTime(at: position, kept: settings.kept))), preferredTimescale: 600))
@@ -397,7 +408,7 @@ struct VideoEditorView: View {
             HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export Video…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) }; Divider(); Button("Save Frame to History") { model.saveFrame() }.keyboardShortcut("f", modifiers: []); Button("Make Storyboard") { model.storyboard() } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if !model.loading { PreviewHandles(model: model) }; if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     HStack { Button { model.togglePlay() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 25) }.buttonStyle(.plain).keyboardShortcut(.space, modifiers: []); Text(time(model.playhead)).monospacedDigit(); Slider(value: Binding(get: { model.playhead }, set: { model.seek($0) }), in: model.settings.start...max(model.settings.start+0.01, model.settings.end)); Text(time(model.settings.end)).monospacedDigit(); Button { model.settings.muted.toggle() } label: { Image(systemName: model.settings.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.buttonStyle(.plain) }.font(.system(size: 11)).padding(13)
                 }
                 inspector.frame(width: 265).background(Studio.paper).overlay(alignment: .leading) { Divider() }
@@ -484,11 +495,24 @@ struct VideoEditorView: View {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack { Text("Blur").fontWeight(.medium); Spacer(); Button { model.settings.blurs?.removeAll { $0.id == blur.id }; if model.settings.blurs?.isEmpty == true { model.settings.blurs = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove blur") }
                     HStack { TextField("Start", value: $blur.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $blur.end, format: .number.precision(.fractionLength(2))) }
-                    HStack { Text("X"); Slider(value: $blur.x, in: 0...1); Text("Y"); Slider(value: $blur.y, in: 0...1) }
-                    HStack { Text("W"); Slider(value: $blur.w, in: 0.01...1); Text("H"); Slider(value: $blur.h, in: 0.01...1) }
+                    // Drag it on the video; these are for fine adjustment, at the playhead when it has keyframes.
+                    let at = model.playhead
+                    let part = { (get: @escaping (CGRect) -> Double, set: @escaping (inout CGRect, Double) -> Void) in Binding<Double>(get: { get(blur.box(at: at)) }, set: { v in var r = blur.box(at: at); set(&r, v); blur = blur.placing(at: at, r) }) }
+                    HStack { Text("X"); Slider(value: part({ $0.minX }, { $0.origin.x = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.minY }, { $0.origin.y = $1 }), in: 0...1) }
+                    HStack { Text("W"); Slider(value: part({ $0.width }, { $0.size.width = $1 }), in: 0.01...1); Text("H"); Slider(value: part({ $0.height }, { $0.size.height = $1 }), in: 0.01...1) }
+                    HStack {
+                        Text("Strength"); Slider(value: Binding(get: { blur.opacity ?? 1 }, set: { blur.opacity = $0 >= 0.995 ? nil : $0 }), in: 0.1...1); Text("\(Int(((blur.opacity ?? 1)*100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
+                    }.help("How much of the picture shows through")
+                    HStack {
+                        Picker("Fade", selection: Binding(get: { blur.fade ?? 0 }, set: { blur.fade = $0 > 0 ? $0 : nil })) { Text("None").tag(0.0); Text("0.25 s").tag(0.25); Text("0.5 s").tag(0.5); Text("1 s").tag(1.0) }.fixedSize()
+                        Spacer()
+                        Button(blur.hasKey(near: at) ? "Remove Keyframe" : "Add Keyframe") { blur = blur.hasKey(near: at) ? blur.removingKey(near: at) : blur.addingKey(at: at) }
+                            .help("Make the blur follow something moving: add a keyframe, then drag the blur to where it should be at this moment")
+                    }
+                    if let keys = blur.keys { Text("\(keys.count) keyframes: it glides between them").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
             }
-            if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if (model.settings.blurs ?? []).isEmpty { Text("Hide a password, a name or an address that shows on screen. Drag a blur on the video to place it and its corners to resize it. Find Private Info reads the frame at the playhead and blurs what it finds.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Chapters":
             VStack(alignment: .leading, spacing: 8) {
                 Button(model.listening ? "Looking…" : "Find Chapters") { model.findChapters() }.disabled(model.listening).help("Look for big changes on screen (another app, a new page) and mark a chapter at each, named from the screen")
@@ -535,7 +559,7 @@ struct VideoEditorView: View {
                     else { HStack { Text("W"); Slider(value: Binding(get: { callout.w ?? 0.3 }, set: { callout.w = $0 }), in: 0.02...1); Text("H"); Slider(value: Binding(get: { callout.h ?? 0.3 }, set: { callout.h = $0 }), in: 0.02...1) } }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
             }
-            if (model.settings.callouts ?? []).isEmpty { Text("Point things out: an arrow, a box, or a spotlight that dims everything else. Point at Clicks adds an arrow for each click you made while recording.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if (model.settings.callouts ?? []).isEmpty { Text("Point things out: an arrow, a box, or a spotlight that dims everything else. Drag it on the video to place it. Point at Clicks adds an arrow for each click you made while recording.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         case "Cursor":
             if model.metadata.cursorIncludedInVideo { Text("This video has its cursor baked in. Record with Still’s cursor tracking to edit its appearance.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             slider("Cursor Size", value: $model.settings.cursorScale, range: 0...3)
@@ -606,6 +630,7 @@ struct VideoEditorView: View {
                             .onTapGesture { model.pickZoom(zoom, adding: !NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty) }
                             .help("Zoom \(time(zoom.start)) to \(time(zoom.end)). ⌘-click to pick several.")
                     }
+                    BlurLane(model: model, width: width, total: total).offset(y: -20)
                     // Dim what gets cut.
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, startX), height: 52).allowsHitTesting(false)
                     Rectangle().fill(.black.opacity(0.6)).frame(width: max(0, width-endX), height: 52).offset(x: endX).allowsHitTesting(false)
