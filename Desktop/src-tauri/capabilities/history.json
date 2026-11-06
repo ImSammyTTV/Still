@@ -26,6 +26,7 @@
     "allow-library-folder-match",
     "allow-library-search-web",
     "allow-library-describe",
-    "allow-open-settings-cmd"
+    "allow-open-settings-cmd",
+    "allow-library-send-to-claude"
   ]
 }

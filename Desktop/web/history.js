@@ -147,6 +147,7 @@ async function load() {
         ...(item.kind === 'recording' ? [] : [
           { label: 'Find Similar', icon: 'images', action: () => findSimilar(item) },
           { label: 'Find Similar in a Folder…', icon: 'folder-open', action: () => findSimilarInFolder(item) },
+          { label: 'Send to Claude', icon: 'message-circle', action: () => still.invoke('library:sendToClaude', item.id).then((app) => toast(`Image copied. Paste it into ${app ? 'Claude' : 'the new Claude chat'} (Ctrl+V).`)).catch((error) => toast(explain(error))) },
           { label: item.description ? 'Describe Again' : 'Describe Image', icon: 'sparkles', action: () => describe(item) },
           ...(item.description ? [{ label: 'Copy Description', icon: 'copy', action: () => navigator.clipboard.writeText(item.description).then(() => toast('Description copied')) }] : []),
           { label: 'Search the Web for This Image', icon: 'globe', action: () => searchWeb(item) }]),

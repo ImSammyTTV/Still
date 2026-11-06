@@ -275,6 +275,19 @@ final class Library: ObservableObject {
         ctx.interpolationQuality = .high; ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         return ctx.makeImage() ?? image
     }
+    /// Send to Claude: copies the screenshot and opens Claude (the desktop app when it's installed, otherwise
+    /// claude.ai), ready to paste into a chat. Nothing is sent until it's pasted there.
+    @MainActor func sendToClaude(_ item: CaptureItem) {
+        guard let image = ImageRenderer.load(url(item)), let data = try? ImageRenderer.data(image) else { toast("Couldn’t read this screenshot"); return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setData(data, forType: .png)
+        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+            toast("Image copied. Paste it into Claude (⌘V).")
+        } else {
+            if let page = URL(string: "https://claude.ai/new") { NSWorkspace.shared.open(page) }
+            toast("Image copied. Paste it into the new Claude chat (⌘V).")
+        }
+    }
     /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
     /// search. Nothing is uploaded until it's pasted there.
     func searchWeb(_ item: CaptureItem) {
