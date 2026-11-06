@@ -1,7 +1,7 @@
 import Foundation
 
 /// Describe Image: a short description of a screenshot, from Google's Gemini API with the user's own free key (from
-/// Google AI Studio). Only the picture asked about is sent, and only then. Follows Desktop/src-tauri/src/describe.rs
+/// Google AI Studio), or from Claude with the user's own Anthropic API key. Only the picture asked about is sent, and only then. Follows Desktop/src-tauri/src/describe.rs
 /// and shares its test cases.
 public enum ImageDescriber {
     static let base = "https://generativelanguage.googleapis.com/v1beta"
@@ -73,5 +73,59 @@ public enum ImageDescriber {
     public static func check(key: String) async throws {
         let (status, response) = try await json(request("models?pageSize=1", key: key.trimmingCharacters(in: .whitespaces)))
         guard status == 200 else { throw Failure(message: explain(status, (response["error"] as? [String: Any])?["message"] as? String ?? "")) }
+    }
+
+    // ---- Claude ---------------------------------------------------------------------------------------
+    static let claudeURL = "https://api.anthropic.com/v1"
+    public static let claudeModel = "claude-opus-5-5"
+    /// Lets the API hand a request it declines on safety grounds to another model in the same call.
+    static let fallbackBeta = "server-side-fallback-2026-07-01"
+
+    /// The Messages API request for one picture: the image first, then the prompt. A short task, so low effort.
+    public static func claudeBody(mime: String, data: Data) -> [String: Any] {
+        ["model": claudeModel, "max_tokens": 2048, "output_config": ["effort": "low"], "fallbacks": "default",
+         "messages": [["role": "user", "content": [
+            ["type": "image", "source": ["type": "base64", "media_type": mime, "data": data.base64EncodedString()]],
+            ["type": "text", "text": prompt]]]]]
+    }
+    /// The description in a Messages API response: its text blocks joined, or why there isn't one.
+    public static func claudeText(status: Int, _ response: [String: Any]) -> Result<String, Failure> {
+        if response["type"] as? String == "error" || status >= 400 {
+            let message = (response["error"] as? [String: Any])?["message"] as? String ?? ""
+            switch status {
+            case 401: return .failure(Failure(message: "That Anthropic API key isn’t valid. Copy it again from the Claude Console."))
+            case 403: return .failure(Failure(message: "Claude refused the key (it may not have access to this model)."))
+            case 429: return .failure(Failure(message: "Claude’s rate limit is reached for now. Try again in a minute."))
+            case 529: return .failure(Failure(message: "Claude is busy right now. Try again in a minute."))
+            default: return .failure(Failure(message: message.isEmpty ? "Claude answered with an error (\(status))." : "Claude: \(message)"))
+            }
+        }
+        if response["stop_reason"] as? String == "refusal" { return .failure(Failure(message: "Claude declined to describe this picture.")) }
+        let blocks = response["content"] as? [[String: Any]] ?? []
+        let text = blocks.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? .failure(Failure(message: "Claude didn’t describe this picture.")) : .success(text)
+    }
+    private static func claudeRequest(_ path: String, key: String, body: [String: Any]? = nil) -> URLRequest {
+        var r = URLRequest(url: URL(string: "\(claudeURL)/\(path)")!, timeoutInterval: 60)
+        r.setValue(key.trimmingCharacters(in: .whitespaces), forHTTPHeaderField: "x-api-key")
+        r.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
+        if let body {
+            r.httpMethod = "POST"; r.setValue("application/json", forHTTPHeaderField: "Content-Type"); r.setValue(fallbackBeta, forHTTPHeaderField: "anthropic-beta")
+            r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        return r
+    }
+    public static func describeWithClaude(key: String, mime: String, data: Data) async throws -> String {
+        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add an Anthropic API key in Settings → Cloud → Describe Image first.") }
+        do {
+            let (status, response) = try await json(claudeRequest("messages", key: key, body: claudeBody(mime: mime, data: data)))
+            return try claudeText(status: status, response).get()
+        } catch let failure as Failure { throw failure }
+        catch { throw Failure(message: "Couldn’t reach Claude: \(error.localizedDescription)") }
+    }
+    /// Checks an Anthropic key by listing one model, so Settings can say straight away whether it works.
+    public static func checkClaude(key: String) async throws {
+        let (status, response) = try await json(claudeRequest("models?limit=1", key: key))
+        guard status == 200 else { _ = try claudeText(status: status, response).get(); return }
     }
 }

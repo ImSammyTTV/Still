@@ -250,7 +250,7 @@ final class Library: ObservableObject {
     /// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search
     /// and copied to the clipboard.
     @MainActor func describe(_ item: CaptureItem) {
-        guard let key = GeminiKey.value else { toast("Add a free Gemini key in Settings → Cloud → Describe Image first"); AppController.shared.showMain(); page = "Cloud"; return }
+        guard let key = GeminiKey.value else { toast("Add a key in Settings → Cloud → Describe Image first"); AppController.shared.showMain(); page = "Cloud"; return }
         guard let image = ImageRenderer.load(url(item)) else { toast("Couldn’t read this screenshot"); return }
         // A big screenshot is scaled down first: smaller to send, and plenty for a description.
         let scaled = Self.scaledDown(image, maxSide: 1600)
@@ -258,7 +258,9 @@ final class Library: ObservableObject {
         toast("Describing…")
         Task { @MainActor in
             do {
-                let text = try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
+                let text = Preferences.shared.describeProvider == "claude"
+                    ? try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
+                    : try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
                 if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].imageDescription = text; try? persist() }
                 NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 toast("\(text.components(separatedBy: "\n").first ?? text) (copied)")

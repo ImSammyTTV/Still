@@ -38,14 +38,19 @@ struct CloudSettingsView: View {
                 Button("Copy Saved Token") { if let secret = CloudKeychain.token(for: prefs.cloudEndpoint) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(secret, forType: .string); NSPasteboard.general.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")); library.toast("Personal token copied") } }.buttonStyle(.link).font(.system(size: 10)).disabled(prefs.cloudEndpoint.isEmpty)
             }
             card("Describe Image") {
-                SecureField("Gemini API Key", text: $geminiKey, prompt: Text(geminiSaved ? "Saved in Keychain — paste a new one to replace it" : "Gemini API key")).textFieldStyle(.roundedBorder)
+                HStack { Text("Describe with"); Spacer(); Picker("Describe with", selection: $prefs.describeProvider) { Text("Google Gemini (free key)").tag("gemini"); Text("Claude (Anthropic API key)").tag("claude") }.labelsHidden().fixedSize() }
+                    .onChange(of: prefs.describeProvider) { _, _ in geminiSaved = GeminiKey.value != nil; geminiKey = ""; geminiStatus = "" }
+                let claude = prefs.describeProvider == "claude"
+                SecureField(claude ? "Anthropic API Key" : "Gemini API Key", text: $geminiKey, prompt: Text(geminiSaved ? "Saved in Keychain — paste a new one to replace it" : claude ? "Anthropic API key" : "Gemini API key")).textFieldStyle(.roundedBorder)
                 HStack {
                     Button("Save") { saveGemini() }.disabled(geminiKey.trimmingCharacters(in: .whitespaces).isEmpty)
                     if geminiSaved { Button("Remove") { GeminiKey.remove(); geminiSaved = false; geminiStatus = "Key removed" } }
-                    Spacer(); Button("Get a Free Key") { if let url = URL(string: "https://aistudio.google.com/apikey") { NSWorkspace.shared.open(url) } }
+                    Spacer(); Button(claude ? "Get an API Key" : "Get a Free Key") { if let url = URL(string: claude ? "https://console.anthropic.com/settings/keys" : "https://aistudio.google.com/apikey") { NSWorkspace.shared.open(url) } }
                 }
                 if !geminiStatus.isEmpty { Text(geminiStatus).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                Text("Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. It uses Google’s Gemini with your own key, free from Google AI Studio. Only the picture you describe is sent, and only then. On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. Only the picture you describe is sent, and only then. " + (claude
+                    ? "Claude uses your own Anthropic API key and is billed to that account: about a cent per picture."
+                    : "Gemini uses your own key, free from Google AI Studio. On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.")).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             card("Upload") {
                 Toggle("Ask for name & show advanced options", isOn: $prefs.askUploadOptions)
@@ -63,7 +68,10 @@ struct CloudSettingsView: View {
     private func saveGemini() {
         let key = geminiKey.trimmingCharacters(in: .whitespaces); geminiStatus = "Checking…"
         Task {
-            do { try await ImageDescriber.check(key: key); try GeminiKey.save(key); geminiSaved = true; geminiKey = ""; geminiStatus = "Key saved" }
+            do {
+                if prefs.describeProvider == "claude" { try await ImageDescriber.checkClaude(key: key) } else { try await ImageDescriber.check(key: key) }
+                try GeminiKey.save(key); geminiSaved = true; geminiKey = ""; geminiStatus = "Key saved"
+            }
             catch { geminiStatus = error.localizedDescription }
         }
     }

@@ -8,7 +8,7 @@ async function describe(item) {
   try { const text = await still.invoke('library:describe', item.id); await navigator.clipboard.writeText(text).catch(() => {}); toast(`${text.split('\n')[0]} (copied)`); }
   catch (error) {
     const why = explain(error);
-    toast(/Settings/.test(why) ? 'Add a free Gemini key in Settings → Cloud → Describe Image first' : why);
+    toast(/Settings/.test(why) ? 'Add a key in Settings → Cloud → Describe Image first' : why);
     if (/Settings/.test(why)) still.invoke('open:settings', 'Cloud').catch(() => {});
   }
 }

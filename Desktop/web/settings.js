@@ -8,7 +8,7 @@ const SHORTCUTS = [
   ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
-let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' }, aiState = { hasKey: false };
+let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' }, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' };
 let searchBox = null;
 
 // Setup is a one-time guide: once finished it leaves the sidebar, and General offers to bring it back.
@@ -222,15 +222,18 @@ const pages = {
       else { event.target.disabled = true; event.target.textContent = 'Waiting for your browser…'; try { await still.invoke('drive:connect'); } catch (error) { toast(explain(error)); } }
       driveState = await still.invoke('drive:get'); prefs = await still.invoke('settings:get'); render();
     } }, driveState.connected ? 'Disconnect' : 'Connect');
-    // Describe Image: the user's own free key from Google AI Studio.
-    const aiStatus = el('span', { style: 'color:var(--text-2)' }, aiState.hasKey ? 'Key saved' : 'No key');
-    const aiKey = el('input', { class: 'field', style: 'width:300px', type: 'password', autocomplete: 'off', placeholder: aiState.hasKey ? 'Saved — paste a new one to replace it' : 'Gemini API key' });
+    // Describe Image: Google's Gemini with the user's own free key, or Claude with their Anthropic API key.
+    const claude = (prefs.ai && prefs.ai.provider) === 'claude', provider = claude ? 'claude' : 'gemini';
+    const saved = claude ? aiState.hasClaudeKey : aiState.hasKey;
+    const aiStatus = el('span', { style: 'color:var(--text-2)' }, saved ? 'Key saved' : 'No key');
+    const aiKey = el('input', { class: 'field', style: 'width:300px', type: 'password', autocomplete: 'off', placeholder: saved ? 'Saved — paste a new one to replace it' : claude ? 'Anthropic API key' : 'Gemini API key' });
+    const refreshAi = async () => { aiState = await still.invoke('ai:get').catch(() => aiState); render(); };
     const aiSave = el('button', { class: 'btn primary', onclick: async () => {
       aiStatus.textContent = 'Checking…'; aiStatus.style.color = 'var(--text-2)';
-      try { await still.invoke('ai:setKey', aiKey.value); aiState = { hasKey: !!aiKey.value.trim() }; render(); toast(aiState.hasKey ? 'Gemini key saved' : 'Gemini key removed'); }
+      try { await still.invoke('ai:setKey', provider, aiKey.value); toast(aiKey.value.trim() ? 'Key saved' : 'Key removed'); await refreshAi(); }
       catch (error) { aiStatus.textContent = explain(error); aiStatus.style.color = 'var(--red)'; }
     } }, 'Save');
-    const aiForget = el('button', { class: 'btn', onclick: async () => { await still.invoke('ai:setKey', ''); aiState = { hasKey: false }; render(); } }, 'Remove');
+    const aiForget = el('button', { class: 'btn', onclick: async () => { await still.invoke('ai:setKey', provider, ''); await refreshAi(); } }, 'Remove');
     const disconnect = el('button', { class: 'btn', onclick: async () => { await still.invoke('cloud:disconnect'); cloudState = { connected: false, hasToken: false }; prefs = await still.invoke('settings:get'); render(); } }, 'Disconnect');
     return [
       group('Upload to', [
@@ -240,8 +243,11 @@ const pages = {
       ], prefs.cloud.provider === 'icloud' ? 'Upload saves into a Still folder in iCloud Drive. iCloud has no share link, so nothing is copied to your clipboard.' : 'Files go into a Still folder in your Drive. Still can only see files it put there.'),
       group('Server', [row('Server URL', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
         'Run your own Still Cloud server (see Cloud/README.md in the project). Uploads only happen when you press Upload or turn on automatic upload. The token is stored in your user profile, readable only by you.'),
-      group('Describe Image', [row('Gemini API key', aiKey), row(aiStatus, el('div', { style: 'display:flex;gap:8px' }, [aiState.hasKey ? aiForget : null, aiSave]))],
-        'Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. It uses Google’s Gemini with your own key: make one free at aistudio.google.com (Get API key). Only the picture you describe is sent, and only then. On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private. The key is stored in your user profile, readable only by you.'),
+      group('Describe Image', [row('Describe with', el('select', { class: 'field', 'aria-label': 'Describe with', onchange: async (e) => { await set({ ai: { provider: e.target.value } }); render(); } },
+          [['gemini', 'Google Gemini (free key)'], ['claude', 'Claude (Anthropic API key)']].map(([value, text]) => el('option', { value, selected: provider === value }, text)))), row(claude ? 'Anthropic API key' : 'Gemini API key', aiKey), row(aiStatus, el('div', { style: 'display:flex;gap:8px' }, [saved ? aiForget : null, aiSave]))],
+        `Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. Only the picture you describe is sent, and only then. ${claude
+          ? 'Claude uses your own Anthropic API key (from console.anthropic.com → API Keys) and is billed to that account: about a cent per picture.'
+          : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`),
       group('Uploads', [
         select('Links expire after', 'cloud.expiryDays', [[1, '1 day'], [7, '7 days'], [30, '30 days'], [0, 'Never']], true),
         select('Who can open links', 'cloud.visibility', [['link', 'Anyone with the link'], ['team', 'My team'], ['private', 'Only me']]),

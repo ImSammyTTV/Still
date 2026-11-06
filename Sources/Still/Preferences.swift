@@ -104,6 +104,8 @@ import StillCore
     @AppStorage("cloudExpiry") var cloudExpiry = 7
     /// Where Upload sends files: "still" (a Still Cloud server), "drive" (Google Drive) or "icloud" (iCloud Drive).
     @AppStorage("cloudProvider") var cloudProvider = "still"
+    /// Describe Image: "gemini" (Google, free key) or "claude" (Anthropic API key).
+    @AppStorage("describeProvider") var describeProvider = "gemini"
     @AppStorage("driveAccess") var driveAccess = "link"
     @AppStorage("driveEmail") var driveEmail = ""
     @AppStorage("driveFolder") var driveFolder = ""

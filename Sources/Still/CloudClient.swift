@@ -21,9 +21,12 @@ enum CloudError: LocalizedError {
     case connection, token, response(String)
     var errorDescription: String? { switch self { case .connection: return "Enter an HTTPS server URL, or use http://127.0.0.1 for your local server."; case .token: return "Save a personal access token in Cloud settings."; case .response(let message): return message } }
 }
-/// The Gemini key for Describe Image, kept in Keychain like the Cloud token.
-enum GeminiKey {
-    private static let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "local.sam.Still.gemini", kSecAttrAccount: "default"]
+/// Describe Image keys, kept in Keychain like the Cloud token: Gemini's and Claude's (an Anthropic API key).
+@MainActor enum GeminiKey {
+    static let gemini = "local.sam.Still.gemini", claude = "local.sam.Still.anthropic"
+    /// The key for the service Settings picked.
+    static var service: String { Preferences.shared.describeProvider == "claude" ? claude : gemini }
+    private static var query: [CFString: Any] { [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: "default"] }
     static var value: String? {
         var q = query; q[kSecReturnData] = true; q[kSecMatchLimit] = kSecMatchLimitOne
         var result: CFTypeRef?

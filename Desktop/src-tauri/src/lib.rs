@@ -1319,17 +1319,26 @@ async fn library_folder_match(index: usize, reveal_it: bool) -> Result<(), Strin
     Ok(())
 }
 /// Describe Image (Settings → AI): the user's own Gemini key lives in a private file, like the Cloud token.
-fn gemini_key_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("gemini-key")) }
-fn gemini_key(app: &AppHandle) -> String { gemini_key_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
+/// Claude's key (an Anthropic API key) sits in its own file beside it.
+fn ai_key_file(app: &AppHandle, provider: &str) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join(if provider == "claude" { "anthropic-key" } else { "gemini-key" })) }
+fn ai_key(app: &AppHandle, provider: &str) -> String { ai_key_file(app, provider).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
+fn ai_provider(app: &AppHandle) -> String { if setting(app, "ai.provider").as_str() == Some("claude") { "claude".into() } else { "gemini".into() } }
 #[tauri::command]
-async fn ai_get(app: AppHandle) -> Value { json!({ "hasKey": !gemini_key(&app).is_empty() }) }
-/// Saves a key once Gemini accepts it; an empty key forgets the saved one.
+async fn ai_get(app: AppHandle) -> Value { json!({ "hasKey": !ai_key(&app, "gemini").is_empty(), "hasClaudeKey": !ai_key(&app, "claude").is_empty(), "provider": ai_provider(&app) }) }
+/// Saves a key once its service accepts it; an empty key forgets the saved one.
 #[tauri::command]
-async fn ai_set_key(app: AppHandle, key: String) -> Result<(), String> {
-    let file = gemini_key_file(&app).ok_or("No settings folder")?;
+async fn ai_set_key(app: AppHandle, provider: Option<String>, key: String) -> Result<(), String> {
+    let provider = provider.unwrap_or_else(|| "gemini".into());
+    let file = ai_key_file(&app, &provider).ok_or("No settings folder")?;
     if key.trim().is_empty() { let _ = std::fs::remove_file(file); return Ok(()); }
-    describe::check(&key).await?;
+    if provider == "claude" { describe::check_claude(&key).await? } else { describe::check(&key).await? }
     write_private(&file, key.trim())
+}
+/// Describes a picture with whichever service Settings picked.
+async fn describe_bytes(app: &AppHandle, mime: &str, bytes: &[u8]) -> Result<String, String> {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+    if ai_provider(app) == "claude" { describe::describe_with_claude(&ai_key(app, "claude"), mime, &data).await } else { describe::describe(&ai_key(app, "gemini"), mime, &data).await }
 }
 /// Sends the screenshot to Gemini and keeps the description with it. Only this picture is sent, and only now.
 #[tauri::command]
@@ -1337,8 +1346,7 @@ async fn library_describe(app: AppHandle, id: String) -> Result<String, String> 
     let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be described.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
     let bytes = std::fs::read(&file).map_err(|e| format!("Couldn’t read the screenshot: {e}"))?;
     let mime = if file.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) { "image/jpeg" } else { "image/png" };
-    use base64::Engine;
-    let text = describe::describe(&gemini_key(&app), mime, &base64::engine::general_purpose::STANDARD.encode(bytes)).await?;
+    let text = describe_bytes(&app, mime, &bytes).await?;
     st(&app).library.lock().unwrap().update(&id, |i| i.description = text.clone());
     broadcast(&app, "library:changed", Value::Null);
     Ok(text)
