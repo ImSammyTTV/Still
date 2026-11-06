@@ -25,6 +25,18 @@ struct PreviewHandles: View {
                         }
                     }
                 }
+                if model.panel == "Text", model.outputSize.width > 0 {
+                    // Captions sit on the video area itself, steady through zooms, so they use the unzoomed picture.
+                    let plain = VideoGeometry.pictureRect(output: model.outputSize, source: model.sourceSize, padding: model.settings.frame == "none" ? 0 : model.settings.padding, zooms: [], time: model.playhead)
+                    let area = CGRect(x: frame.minX+plain.minX*k, y: frame.minY+plain.minY*k, width: plain.width*k, height: plain.height*k)
+                    ForEach(model.settings.captions ?? []) { caption in
+                        if caption.alpha(at: model.playhead) != nil {
+                            CaptionHandle(caption: caption, area: area) { moved in
+                                model.liveEdit(); if let i = model.settings.captions?.firstIndex(where: { $0.id == caption.id }) { model.settings.captions?[i] = moved }
+                            }
+                        }
+                    }
+                }
                 if model.panel == "Callouts", model.outputSize.width > 0 {
                     ForEach(model.settings.callouts ?? []) { callout in
                         if model.playhead >= callout.start && model.playhead <= callout.end {
@@ -76,6 +88,38 @@ struct BoxHandles: View {
                 let moved = VideoBlur.dragged(start ?? box, handle: handle, dx: Double(v.translation.width/max(1, screen.width)), dy: Double(v.translation.height/max(1, screen.height)))
                 DispatchQueue.main.async { commit(moved) }
             }
+    }
+}
+
+/// A caption's pill on the video: drag it to put the text anywhere (the Place menu puts it back at the top,
+/// middle or bottom).
+struct CaptionHandle: View {
+    let caption: VideoCaption, area: CGRect
+    let commit: (VideoCaption) -> Void
+    @GestureState private var origin: VideoCaption?
+
+    var body: some View {
+        let at = caption.layout(width: Double(area.width), height: Double(area.height)), size = pillSize(at.fontSize)
+        let c = VideoCaption.centre(x: at.x, y: at.y, boxWidth: Double(size.width), boxHeight: Double(size.height), width: Double(area.width), height: Double(area.height))
+        let radius = CGFloat(min(Double(size.height)/2, at.fontSize*0.6))
+        RoundedRectangle(cornerRadius: radius).fill(Color.white.opacity(0.001))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(.white, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
+            .frame(width: size.width, height: size.height).position(x: area.minX+CGFloat(c.x), y: area.minY+CGFloat(c.y))
+            .gesture(DragGesture(minimumDistance: 1).updating($origin) { v, start, _ in
+                if start == nil { start = caption }
+                let moved = (start ?? caption).moved(dx: Double(v.translation.width/max(1, area.width)), dy: Double(v.translation.height/max(1, area.height)), width: Double(area.width), height: Double(area.height))
+                DispatchQueue.main.async { commit(moved) }
+            })
+            .onHover { inside in if inside { NSCursor.openHand.push() } else { NSCursor.pop() } }
+            .help("Drag to move the text").accessibilityLabel("Move text")
+    }
+    /// The pill's size, worked out the same way as the Windows and Linux editor's.
+    private func pillSize(_ fontSize: Double) -> CGSize {
+        let lines = caption.text.split(separator: "\n", omittingEmptySubsequences: false).prefix(3).map(String.init)
+        let font = NSFont.systemFont(ofSize: CGFloat(fontSize), weight: .semibold)
+        let widest = lines.map { Double(($0 as NSString).size(withAttributes: [.font: font]).width) }.max() ?? 0
+        let text = min(Double(area.width)*0.9, widest)
+        return CGSize(width: text+fontSize*1.6, height: fontSize*1.25*Double(max(1, lines.count))+fontSize*0.9)
     }
 }
 

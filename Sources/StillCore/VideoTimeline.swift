@@ -140,9 +140,12 @@ public struct VideoCaption: Codable, Equatable, Hashable, Identifiable {
     public var text: String
     public var position: String
     public var size: String
-    public init(start: Double, end: Double, text: String = "Your text", position: String = "bottom", size: String = "medium") {
-        self.start = start; self.end = end; self.text = text; self.position = position; self.size = size
+    /// Where it was dragged to, as shares of the video area (its centre). Nil keeps it at `position`.
+    public var x: Double?, y: Double?
+    public init(start: Double, end: Double, text: String = "Your text", position: String = "bottom", size: String = "medium", x: Double? = nil, y: Double? = nil) {
+        self.start = start; self.end = end; self.text = text; self.position = position; self.size = size; self.x = x; self.y = y
     }
+    public var placed: Bool { x != nil && y != nil }
     public static let sizes: [String: Double] = ["small": 0.045, "medium": 0.06, "large": 0.08]
     public static let places: [String: Double] = ["top": 0.1, "middle": 0.5, "bottom": 0.88]
 
@@ -158,8 +161,19 @@ public struct VideoCaption: Codable, Equatable, Hashable, Identifiable {
 
     /// Font size and the point the pill is centred on (from the top left) in a video area `width` × `height`.
     public func layout(width: Double, height: Double) -> (fontSize: Double, x: Double, y: Double) {
-        ((max(12, min(width, height) * (Self.sizes[size] ?? 0.06))).rounded(), width / 2, height * (Self.places[position] ?? 0.88))
+        ((max(12, min(width, height) * (Self.sizes[size] ?? 0.06))).rounded(), width * (placed ? x ?? 0.5 : 0.5), height * (placed ? y ?? 0.88 : (Self.places[position] ?? 0.88)))
     }
+    /// Where the pill's centre ends up: at the layout point, but never past the video's edges (4 px in from them).
+    public static func centre(x: Double, y: Double, boxWidth: Double, boxHeight: Double, width: Double, height: Double) -> (x: Double, y: Double) {
+        (min(width - boxWidth / 2 - 4, max(boxWidth / 2 + 4, x)), min(height - boxHeight / 2 - 4, max(boxHeight / 2 + 4, y)))
+    }
+    /// Moved by (dx, dy), as shares of the video area, kept on the picture.
+    public func moved(dx: Double, dy: Double, width: Double = 1, height: Double = 1) -> VideoCaption {
+        let at = layout(width: width, height: height), clamp = { (v: Double) in min(0.98, max(0.02, v)) }
+        var c = self; c.x = clamp(at.x / width + dx); c.y = clamp(at.y / height + dy); return c
+    }
+    /// Back at one of the fixed places, forgetting where it was dragged.
+    public func at(place: String) -> VideoCaption { var c = self; c.position = place; c.x = nil; c.y = nil; return c }
 }
 
 /// How a video opens and closes: "fade" eases the picture and sound in from nothing and out again, and "rise" does

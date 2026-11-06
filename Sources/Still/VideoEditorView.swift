@@ -504,7 +504,10 @@ struct VideoEditorView: View {
                     HStack { TextField("Text", text: $caption.text, axis: .vertical).lineLimit(1...3); Button { model.settings.captions?.removeAll { $0.id == caption.id }; if model.settings.captions?.isEmpty == true { model.settings.captions = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove text") }
                     HStack { TextField("Start", value: $caption.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $caption.end, format: .number.precision(.fractionLength(2))) }
                     HStack {
-                        Picker("Place", selection: $caption.position) { Text("Top").tag("top"); Text("Middle").tag("middle"); Text("Bottom").tag("bottom") }.labelsHidden()
+                        Picker("Place", selection: Binding(get: { caption.placed ? "custom" : caption.position }, set: { if $0 != "custom" { caption = caption.at(place: $0) } })) {
+                            Text("Top").tag("top"); Text("Middle").tag("middle"); Text("Bottom").tag("bottom")
+                            if caption.placed { Text("Where you put it").tag("custom") }
+                        }.labelsHidden().help("Or drag the text on the video to put it anywhere")
                         Picker("Size", selection: $caption.size) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.labelsHidden()
                     }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))

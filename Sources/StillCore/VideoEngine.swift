@@ -353,9 +353,9 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             guard let alpha = caption.alpha(at: time) else { continue }
             let at = caption.layout(width: contentRect.width, height: contentRect.height)
             let pill = captionImage(caption.text, fontSize: at.fontSize, maxWidth: contentRect.width*0.9)
-            let x = contentRect.minX+at.x-pill.extent.width/2
-            let centre = min(contentRect.height-pill.extent.height/2-4, max(pill.extent.height/2+4, at.y))
-            let y = contentRect.maxY-centre-pill.extent.height/2
+            let centre = VideoCaption.centre(x: at.x, y: at.y, boxWidth: pill.extent.width, boxHeight: pill.extent.height, width: contentRect.width, height: contentRect.height)
+            let x = contentRect.minX+centre.x-pill.extent.width/2
+            let y = contentRect.maxY-centre.y-pill.extent.height/2
             result = pill.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
                 .transformed(by: CGAffineTransform(translationX: x, y: y)).composited(over: result)
         }
