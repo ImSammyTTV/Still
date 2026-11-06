@@ -52,7 +52,10 @@ function init(data) {
   if (data.last) region = data.last;
   $('.mode[data-mode="scroll"]').hidden = !data.canScroll;
   // The window stays hidden until the frozen screen is on it, so it never flashes black or shows a half-drawn page.
-  const shown = () => requestAnimationFrame(() => requestAnimationFrame(() => still.send('overlay:drawn')));
+  // Two frames normally; a hidden window may get no frames at all, so a timer makes sure it is shown anyway.
+  let told = false;
+  const tell = () => { if (!told) { told = true; still.send('overlay:drawn'); } };
+  const shown = () => { requestAnimationFrame(() => requestAnimationFrame(tell)); setTimeout(tell, 120); };
   loadPicture(data).then(() => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); shown(); }, shown);
   refreshIcons();
   window.focus();
@@ -199,23 +202,29 @@ const onBar = (e) => $('#bar').contains(e.target) || e.target.closest('.menu');
 
 // A mouse can report a thousand moves a second. The page keeps only the latest and draws once per screen refresh,
 // and tells the other screens just once when the pointer arrives here, so the pointer never waits on the overlay.
-let here = false, frame = 0, square = false;
-function onFrame() {
-  frame = 0;
+let here = false, frame = 0, backup = 0, square = false;
+// What's selected follows the pointer at once, on every move; only the drawing waits for the next frame. Windows'
+// web view can hand a full-screen window few or no frames, so a timer draws if no frame comes within 50 ms.
+function follow() {
   if (!config) return;
   if (windowMode) hovered = G.windowAt(config.windows, pointer);
   else if (anchor) {
     if (fixed) region = G.intersect({ x: pointer.x, y: pointer.y, w: fixed.w, h: fixed.h }, bounds());
     else region = G.dragRect(anchor, pointer, { aspect, square, bounds: bounds() });
-    updateBar();
   }
+}
+function paint() {
+  cancelAnimationFrame(frame); clearTimeout(backup); frame = backup = 0;
+  if (!config) return;
+  if (anchor) updateBar();
   draw();
 }
 addEventListener('mousemove', (e) => {
   if (onBar(e)) return;
   pointer = point(e); square = e.shiftKey;
   if (!here) { here = true; still.send('overlay:pointer'); }
-  if (!frame) frame = requestAnimationFrame(onFrame);
+  follow();
+  if (!frame) { frame = requestAnimationFrame(paint); backup = setTimeout(paint, 50); }
 });
 
 addEventListener('mousedown', (e) => {
@@ -231,6 +240,8 @@ addEventListener('mousedown', (e) => {
 
 addEventListener('mouseup', (e) => {
   if (!anchor || windowMode) return;
+  // Where the button came up is the selection, whether or not a frame was drawn since the last move.
+  pointer = point(e); square = e.shiftKey; follow();
   anchor = null;
   if (region && region.w > 2 && region.h > 2) finish(region);
   else draw();
