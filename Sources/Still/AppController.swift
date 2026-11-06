@@ -702,7 +702,14 @@ extension AppController {
     private func restoreOverlays() { if !overlaysHidden { for panel in Array(previewPanels.values)+Array(pins.values) { panel.orderFrontRegardless() } } }
     @objc func showLastLinkQR() {
         if let link = library.lastLink ?? library.items.first(where: { $0.cloudURL != nil })?.cloudURL { QRCodePanel.show(link) }
-        else { library.toast("Upload a capture first, then its link can be shown as a QR code") }
+        else {
+            // From the menu bar no Still window is open, so a toast would go unseen: say it in an alert instead.
+            let alert = NSAlert(); alert.messageText = "No share link yet"
+            alert.informativeText = Preferences.shared.cloudProvider == "icloud"
+                ? "Saving to iCloud Drive doesn’t make a share link. Choose Still Cloud or Google Drive in Cloud settings, then upload a capture."
+                : "Upload a capture first (Upload and Copy Link), then its link can be shown here as a QR code."
+            alert.addButton(withTitle: "OK"); NSApp.activate(ignoringOtherApps: true); alert.runModal()
+        }
     }
     @objc func restoreLastCapture() { if let item = lastPreviewItem ?? library.items.first { showPreview(item) } }
     @objc func showHistory() {

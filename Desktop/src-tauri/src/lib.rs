@@ -162,7 +162,20 @@ fn open_settings(app: &AppHandle, page: Option<&str>) {
 /// A share link as a QR code, to open on a phone by pointing its camera at the screen.
 fn show_qr(app: &AppHandle, link: &str) {
     if let Some(w) = app.get_webview_window("qr") { let _ = w.destroy(); }
-    let _ = glass(builder(app, "qr", "qr.html", json!({ "link": link }))).title("Open on Phone").inner_size(340.0, 440.0).resizable(false).decorations(false).always_on_top(true).build();
+    // Built hidden like every Still window, so it has to be shown (it never was, so the code never appeared).
+    if let Ok(w) = glass(builder(app, "qr", "qr.html", json!({ "link": link }))).title("Open on Phone").inner_size(340.0, 440.0).resizable(false).decorations(false).always_on_top(true).center().build() {
+        let _ = w.show(); let _ = w.set_focus();
+    }
+}
+/// The last share link is kept in a small file, so "Show Last Link as QR Code" still works after Still restarts.
+fn last_link_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("last-link")) }
+fn remember_link(app: &AppHandle, link: &str) {
+    st(app).session.lock().unwrap().last_link = Some(link.to_string());
+    if let Some(f) = last_link_file(app) { let _ = std::fs::write(f, link); }
+}
+fn saved_link(app: &AppHandle) -> Option<String> {
+    let f = last_link_file(app)?;
+    std::fs::read_to_string(f).ok().map(|s| s.trim().to_string()).filter(|s| s.starts_with("http"))
 }
 #[tauri::command]
 async fn qr_svg(link: String) -> Result<String, String> { qr::svg(&link) }
@@ -1742,7 +1755,7 @@ async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> R
             let format = setting(app, "cloud.linkFormat").as_str().unwrap_or("url").to_string();
             let copied = if link.starts_with("http") { cloud::link_text(link, &title, image, &format) } else { link.clone() };
             let _ = app.clipboard().write_text(copied); notify(app, "Link copied", link);
-            if link.starts_with("http") { st(app).session.lock().unwrap().last_link = Some(link.clone()); build_tray_menu(app); }
+            if link.starts_with("http") { remember_link(app, link); build_tray_menu(app); }
         }
         Err(e) => notify(app, "Upload failed", e),
     }
@@ -2000,6 +2013,7 @@ pub fn run() {
                 library: Mutex::new(Library::open(data.join("Library"))),
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
+            let saved = saved_link(&handle); st(&handle).session.lock().unwrap().last_link = saved;
             apply_name_pattern(&handle);
             apply_history_days(&handle);
             let menu = tray_menu(&handle)?;

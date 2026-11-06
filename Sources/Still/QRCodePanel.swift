@@ -11,8 +11,11 @@ import SwiftUI
         let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 420), styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
         window.title = "Open on Phone"; window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false; window.level = .floating; window.isMovableByWindowBackground = true
+        // A panel hides whenever its app isn't active, and Still (a menu bar app) often isn't once its menu closes,
+        // so without this the code vanished the moment it appeared.
+        window.hidesOnDeactivate = false; window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.contentView = NSHostingView(rootView: QRCodeCard(link: link, image: image(for: link)) { panel?.close(); panel = nil })
-        window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        window.center(); NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil); window.orderFrontRegardless()
         panel = window
     }
 
