@@ -115,6 +115,24 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(centre.x, 946); XCTAssertEqual(centre.y, 24)
     }
 
+    // The same cases are in Desktop/test/callouts.test.js.
+    func testCalloutKeyframesFadeAndStrength() {
+        let arrow = VideoCallout(kind: "arrow", start: 0, end: 4, color: "FF453A", x: 0.5, y: 0.5, x2: 0.4, y2: 0.4)
+        let keyed = arrow.addingKey(at: 2).placing(at: 2) { $0.x = 0.9; $0.y = 0.1 }
+        XCTAssertEqual(keyed.keys, [VideoCalloutKey(t: 0, x: 0.5, y: 0.5, x2: 0.4, y2: 0.4), VideoCalloutKey(t: 2, x: 0.9, y: 0.1, x2: 0.4, y2: 0.4)])
+        let mid = keyed.shape(at: 1)
+        XCTAssertEqual(mid.x, 0.7, accuracy: 1e-9); XCTAssertEqual(mid.y, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(keyed.shape(at: 3).x, 0.9)
+        XCTAssertTrue(keyed.hasKey(near: 2.1))
+        let still = keyed.removingKey(near: 2).removingKey(near: 0)
+        XCTAssertNil(still.keys); XCTAssertEqual(still.x, 0.5); XCTAssertEqual(still.y, 0.5)
+        XCTAssertEqual(arrow.alpha(at: 0.1)!, 0.5, accuracy: 1e-9)
+        var soft = arrow; soft.fade = 1; soft.opacity = 0.5
+        XCTAssertEqual(soft.alpha(at: 0.5)!, 0.25, accuracy: 1e-9)
+        XCTAssertEqual(soft.alpha(at: 2)!, 0.5, accuracy: 1e-9)
+        XCTAssertNil(soft.alpha(at: 5))
+    }
+
     func testCaptionSizeAndPlaceFollowTheVideoArea() {
         let a = VideoCaption(start: 0, end: 1).layout(width: 1920, height: 1080)
         XCTAssertEqual(a.fontSize, 65); XCTAssertEqual(a.x, 960); XCTAssertEqual(a.y, 950.4, accuracy: 0.001)

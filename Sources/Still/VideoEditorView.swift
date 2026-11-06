@@ -581,9 +581,22 @@ struct VideoEditorView: View {
                         Spacer(); Button { model.settings.callouts?.removeAll { $0.id == callout.id }; if model.settings.callouts?.isEmpty == true { model.settings.callouts = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove callout")
                     }
                     HStack { TextField("Start", value: $callout.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $callout.end, format: .number.precision(.fractionLength(2))) }
-                    HStack { Text(callout.kind == "arrow" ? "Tip X" : "X"); Slider(value: $callout.x, in: 0...1); Text("Y"); Slider(value: $callout.y, in: 0...1) }
-                    if callout.kind == "arrow" { HStack { Text("Tail X"); Slider(value: Binding(get: { callout.x2 ?? 0.38 }, set: { callout.x2 = $0 }), in: 0...1); Text("Y"); Slider(value: Binding(get: { callout.y2 ?? 0.36 }, set: { callout.y2 = $0 }), in: 0...1) } }
-                    else { HStack { Text("W"); Slider(value: Binding(get: { callout.w ?? 0.3 }, set: { callout.w = $0 }), in: 0.02...1); Text("H"); Slider(value: Binding(get: { callout.h ?? 0.3 }, set: { callout.h = $0 }), in: 0.02...1) } }
+                    // Drag it on the video; these are for fine adjustment, at the playhead when it has keyframes.
+                    let at = model.playhead, here = callout.shape(at: at)
+                    let part = { (get: @escaping (VideoCallout) -> Double, set: @escaping (inout VideoCallout, Double) -> Void) in Binding<Double>(get: { get(here) }, set: { v in callout = callout.placing(at: at) { set(&$0, v) } }) }
+                    HStack { Text(callout.kind == "arrow" ? "Tip X" : "X"); Slider(value: part({ $0.x }, { $0.x = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.y }, { $0.y = $1 }), in: 0...1) }
+                    if callout.kind == "arrow" { HStack { Text("Tail X"); Slider(value: part({ $0.x2 ?? 0.38 }, { $0.x2 = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.y2 ?? 0.36 }, { $0.y2 = $1 }), in: 0...1) } }
+                    else { HStack { Text("W"); Slider(value: part({ $0.w ?? 0.3 }, { $0.w = $1 }), in: 0.02...1); Text("H"); Slider(value: part({ $0.h ?? 0.3 }, { $0.h = $1 }), in: 0.02...1) } }
+                    HStack {
+                        Text("Strength"); Slider(value: Binding(get: { callout.opacity ?? 1 }, set: { callout.opacity = $0 >= 0.995 ? nil : $0 }), in: 0.1...1); Text("\(Int(((callout.opacity ?? 1)*100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
+                    }.help("How solid it is")
+                    HStack {
+                        Picker("Fade", selection: Binding(get: { callout.fade ?? -1 }, set: { callout.fade = $0 < 0 ? nil : $0 })) { Text("Quick").tag(-1.0); Text("None").tag(0.0); Text("0.25 s").tag(0.25); Text("0.5 s").tag(0.5); Text("1 s").tag(1.0) }.fixedSize()
+                        Spacer()
+                        Button(callout.hasKey(near: at) ? "Remove Keyframe" : "Add Keyframe") { callout = callout.hasKey(near: at) ? callout.removingKey(near: at) : callout.addingKey(at: at) }
+                            .help("Make it follow something moving: add a keyframe, then drag it to where it should be at this moment")
+                    }
+                    if let keys = callout.keys { Text("\(keys.count) keyframes: it glides between them").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
             }
             if (model.settings.callouts ?? []).isEmpty { Text("Point things out: an arrow, a box, or a spotlight that dims everything else. Drag it on the video to place it. Point at Clicks adds an arrow for each click you made while recording.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }

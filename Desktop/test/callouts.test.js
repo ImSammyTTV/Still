@@ -26,3 +26,25 @@ test('the arrow head sits either side of the tip', () => {
   const [a, b] = C.head({ x: 0, y: 0 }, { x: 10, y: 0 }, 4);
   assert.ok(a.x < 10 && b.x < 10 && Math.abs(a.y + b.y) < 1e-9);
 });
+
+// The same cases are in the Mac app's VideoCalloutTests (testCalloutKeyframesFadeAndStrength).
+test('a keyed callout glides between keyframes, fades over its own time and can be see-through', () => {
+  const arrow = { kind: 'arrow', start: 0, end: 4, color: '#FF453A', x: 0.5, y: 0.5, x2: 0.4, y2: 0.4 };
+  const keyed = C.placeAt(C.addKey(arrow, 2), 2, { x: 0.9, y: 0.1 });
+  assert.deepEqual(keyed.keys, [{ t: 0, x: 0.5, y: 0.5, x2: 0.4, y2: 0.4 }, { t: 2, x: 0.9, y: 0.1, x2: 0.4, y2: 0.4 }]);
+  const mid = C.shapeAt(keyed, 1);
+  assert.ok(Math.abs(mid.x - 0.7) < 1e-9 && Math.abs(mid.y - 0.3) < 1e-9, 'halfway, eased');
+  assert.deepEqual(C.shapeAt(keyed, 3), { x: 0.9, y: 0.1, x2: 0.4, y2: 0.4 }, 'stays at the last key');
+  assert.equal(C.at([keyed], 3)[0].callout.x, 0.9);
+  assert.equal(C.hasKey(keyed, 2.1), true);
+  assert.deepEqual(C.removeKey(C.removeKey(keyed, 2), 0), { ...arrow, x: 0.5, y: 0.5 });
+  // Unset fade keeps the quick 0.2 s ramp; a set fade eases over that time; strength scales it.
+  assert.equal(C.alphaAt(arrow, 0.1), 0.5);
+  const soft = { ...arrow, fade: 1, opacity: 0.5 };
+  assert.equal(C.alphaAt(soft, 0.5), 0.25);
+  assert.equal(C.alphaAt(soft, 2), 0.5);
+  assert.equal(C.alphaAt(soft, 5), 0);
+  // An unkeyed box just moves.
+  const box = { kind: 'box', start: 0, end: 3, color: '#fff', x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
+  assert.deepEqual(C.placeAt(box, 1, { x: 0.3 }), { ...box, x: 0.3 });
+});

@@ -38,15 +38,17 @@ struct PreviewHandles: View {
                     }
                 }
                 if model.panel == "Callouts", model.outputSize.width > 0 {
-                    ForEach(model.settings.callouts ?? []) { callout in
-                        if model.playhead >= callout.start && model.playhead <= callout.end {
+                    ForEach(model.settings.callouts ?? []) { stored in
+                        if model.playhead >= stored.start && model.playhead <= stored.end {
+                            // A keyed callout is shown and moved where it is at the playhead; the move becomes a keyframe.
+                            let callout = stored.shape(at: model.playhead), t = model.playhead
                             if callout.kind == "arrow" {
                                 ArrowHandles(tip: CGPoint(x: callout.x, y: callout.y), tail: CGPoint(x: callout.x2 ?? 0.38, y: callout.y2 ?? 0.36), screen: screen) { tip, tail in
-                                    model.liveEdit(); model.updateCallout(callout.id) { $0.x = tip.x; $0.y = tip.y; $0.x2 = tail.x; $0.y2 = tail.y }
+                                    model.liveEdit(); model.updateCallout(stored.id) { $0 = $0.placing(at: t) { $0.x = tip.x; $0.y = tip.y; $0.x2 = tail.x; $0.y2 = tail.y } }
                                 }
                             } else {
-                                BoxHandles(box: CGRect(x: callout.x, y: callout.y, width: callout.w ?? 0.3, height: callout.h ?? 0.3), screen: screen, tint: Color(nsColor: NSColor(hex: callout.color)), label: nil) { box in
-                                    model.liveEdit(); model.updateCallout(callout.id) { $0.x = box.minX; $0.y = box.minY; $0.w = box.width; $0.h = box.height }
+                                BoxHandles(box: CGRect(x: callout.x, y: callout.y, width: callout.w ?? 0.3, height: callout.h ?? 0.3), screen: screen, tint: Color(nsColor: NSColor(hex: callout.color)), label: stored.keys == nil ? nil : "keyframed") { box in
+                                    model.liveEdit(); model.updateCallout(stored.id) { $0 = $0.placing(at: t) { $0.x = box.minX; $0.y = box.minY; $0.w = box.width; $0.h = box.height } }
                                 }
                             }
                         }

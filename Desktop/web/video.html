@@ -83,7 +83,7 @@
   .lane.blurs button .grip.from { left: -4px; }
   .lane.blurs button .grip.to { right: -4px; }
   .lane.blurs button.selected .grip::after { content: ""; position: absolute; left: 3px; top: 1px; bottom: 1px; width: 2px; border-radius: 1px; background: var(--text); }
-  .lane.blurs button .key { position: absolute; top: 2px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); background: var(--text); border-radius: 1px; pointer-events: none; }
+  .lane.blurs button .key, .lane.callouts button .key { position: absolute; top: 2px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); background: var(--text); border-radius: 1px; pointer-events: none; }
   /* Fast-forwards: dashes, like motion lines. */
   .lane.skims button { background: repeating-linear-gradient(90deg, var(--text) 0 5px, transparent 5px 9px); opacity: .45; }
   .lane.skims button.selected { opacity: .95; }
@@ -210,6 +210,9 @@
     <span class="grow"></span>
     <span class="zoom-tools" id="calloutTools" hidden>
       <span class="dim" id="calloutHint">Drag on the video to place it.</span>
+      <button class="btn" id="calloutKey" title="Make it follow something moving"><i data-lucide="diamond-plus"></i>Add Keyframe</button>
+      <label class="dim" title="How long it takes to appear and to go">Fade <select class="field" id="calloutFade" aria-label="Fade"><option value="auto">Quick</option><option value="0">None</option><option value="0.25">0.25 s</option><option value="0.5">0.5 s</option><option value="1">1 s</option></select></label>
+      <label class="dim" title="How solid it is">Strength <input type="range" id="calloutOpacity" min="10" max="100" step="5" value="100" aria-label="Callout strength"><span id="calloutOpacityValue">100%</span></label>
       <select class="field" id="calloutColor" aria-label="Color"><option value="#FF453A">Red</option><option value="#FFD60A">Yellow</option><option value="#32D74B">Green</option><option value="#0A84FF">Blue</option><option value="#FFFFFF">White</option></select>
       <button class="btn" id="calloutIn" title="Start this callout at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
       <button class="btn" id="calloutOut" title="End this callout at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
