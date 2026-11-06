@@ -324,7 +324,7 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
             }
         }
         // Callouts: arrows, boxes and spotlights on the recording's picture, so they follow it through zooms.
-        let showing = (s.callouts ?? []).compactMap { c in c.alpha(at: time).map { (c, $0) } }
+        let showing = (s.callouts ?? []).compactMap { c in c.alpha(at: time).map { (c.shape(at: time), $0) } }
         if !showing.isEmpty, let ctx = CGContext(data: nil, width: Int(i.size.width), height: Int(i.size.height), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
             let unit = max(1, min(contentSize.width, contentSize.height)/360)*min(2, zoom)
             ctx.setLineCap(.round); ctx.setLineJoin(.round)

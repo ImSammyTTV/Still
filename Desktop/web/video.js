@@ -311,7 +311,7 @@ function renderView() {
   }
   if (selectedCallout >= 0 && callouts[selectedCallout]) {
     // The picked callout's handles: an arrow's two ends, a box's four corners.
-    const c = callouts[selectedCallout], k = fx.width / vw, r = 6 * (devicePixelRatio || 1);
+    const picked = callouts[selectedCallout], c = { ...picked, ...StillCallouts.shapeAt(picked, video.currentTime) }, k = fx.width / vw, r = 6 * (devicePixelRatio || 1);
     const at = (x, y) => [(x * vw - src.x) * z.scale * k, (y * vh - src.y) * z.scale * k];
     const points = c.kind === 'arrow' ? [at(c.x, c.y), at(c.x2 ?? 0.38, c.y2 ?? 0.36)]
       : [at(c.x, c.y), at(c.x + (c.w ?? 0.3), c.y), at(c.x, c.y + (c.h ?? 0.3)), at(c.x + (c.w ?? 0.3), c.y + (c.h ?? 0.3))];
@@ -612,11 +612,13 @@ function renderCallouts(save = true) {
   const lane = $('#calloutLane'); lane.replaceChildren();
   callouts.forEach((c, i) => {
     const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
+    const keys = (c.keys || []).map((k) => el('span', { class: 'key', style: `left:${(k.t - c.start) / Math.max(0.001, c.end - c.start) * 100}%`, title: `Keyframe at ${StillTrim.clock(k.t)}` }));
     lane.append(el('button', { class: i === selectedCallout ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `${c.kind[0].toUpperCase()}${c.kind.slice(1)} ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}`, 'aria-pressed': String(i === selectedCallout),
-      onclick: () => { pickCallout(i === selectedCallout ? -1 : i); if (selectedCallout >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); } }));
+      onclick: () => { pickCallout(i === selectedCallout ? -1 : i); if (selectedCallout >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); } }, keys));
   });
   const c = callouts[selectedCallout];
   $('#calloutTools').hidden = !c;
+  if (c) showCalloutTools();
   if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag its ends or its line on the video, or draw a new one from tail to tip.' : 'Drag it or its corners on the video, or draw a new one.'; }
   $('#pointClicks').hidden = !clicks().length;
   $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
@@ -634,6 +636,28 @@ $('#pointClicks').onclick = () => {
   toast(`${found.length} arrow${found.length === 1 ? '' : 's'} added, one for each click`);
 };
 $('#calloutColor').onchange = (e) => changeCallout({ color: e.target.value });
+// Keyframes, fade and strength, as for blurs.
+function showCalloutTools() {
+  const c = callouts[selectedCallout];
+  if (!c) return;
+  const keyHere = StillCallouts.hasKey(c, video.currentTime);
+  if ($('#calloutKey').dataset.here !== String(keyHere)) { $('#calloutKey').dataset.here = String(keyHere); $('#calloutKey').innerHTML = keyHere ? `${icon('diamond-minus')}Remove Keyframe` : `${icon('diamond-plus')}Add Keyframe`; refreshIcons(); }
+  $('#calloutKey').title = keyHere ? 'Take away the keyframe at the playhead' : 'Make it follow something moving: drag it to a new place here, and it glides there from its last keyframe';
+  $('#calloutFade').value = c.fade == null ? 'auto' : String(c.fade);
+  $('#calloutOpacity').value = String(Math.round((c.opacity == null ? 1 : c.opacity) * 100));
+  $('#calloutOpacityValue').textContent = `${$('#calloutOpacity').value}%`;
+}
+$('#calloutKey').onclick = () => {
+  const c = callouts[selectedCallout]; if (!c) return;
+  const keyHere = StillCallouts.hasKey(c, video.currentTime);
+  callouts[selectedCallout] = keyHere ? StillCallouts.removeKey(c, video.currentTime) : StillCallouts.addKey(c, video.currentTime);
+  if (!keyHere) toast('Keyframe added. Drag it to where it should be at this moment.');
+  renderCallouts();
+};
+$('#calloutFade').addEventListener('change', (e) => { const v = e.target.value; changeCallout({ fade: v === 'auto' ? undefined : Number(v) }); });
+$('#calloutOpacity').addEventListener('input', (e) => { const c = callouts[selectedCallout]; if (!c) return; const v = Number(e.target.value) / 100; callouts[selectedCallout] = { ...c, opacity: v >= 1 ? undefined : v }; $('#calloutOpacityValue').textContent = `${e.target.value}%`; renderView(); });
+$('#calloutOpacity').addEventListener('change', () => renderCallouts());
+video.addEventListener('timeupdate', () => { if (selectedCallout >= 0) showCalloutTools(); });
 $('#calloutIn').onclick = () => { const c = callouts[selectedCallout]; if (c && video.currentTime < c.end - 0.2) changeCallout({ start: video.currentTime }); };
 $('#calloutOut').onclick = () => { const c = callouts[selectedCallout]; if (c && video.currentTime > c.start + 0.2) changeCallout({ end: video.currentTime }); };
 $('#calloutRemove').onclick = () => { callouts = callouts.filter((_, i) => i !== selectedCallout); selectedCallout = -1; renderCallouts(); };
@@ -648,7 +672,8 @@ $('#clip').addEventListener('pointerdown', (down) => {
   const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
   // Grab a box's corner to resize it or its inside to move it; an arrow's tip or tail to move that end, or its line to
   // move the whole arrow. Anywhere else draws it afresh.
-  const original = callouts[selectedCallout], tol = 12 / r.width * src.w / vw;
+  // A keyed callout is moved where it is at the playhead, and the move becomes a keyframe there.
+  const keyed = callouts[selectedCallout], time = video.currentTime, original = { ...keyed, ...StillCallouts.shapeAt(keyed, time) }, tol = 12 / r.width * src.w / vw;
   const near = (x, y) => Math.abs(from.x - x) <= tol && Math.abs(from.y - y) <= tol;
   let grab = null;
   if (original.kind === 'arrow') {
@@ -659,11 +684,13 @@ $('#clip').addEventListener('pointerdown', (down) => {
   function toLine(p, a, b) { const dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy, u = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0; return Math.hypot(p.x - (a.x + u * dx), p.y - (a.y + u * dy)); }
   const move = (e) => {
     const to = share(e), c = original, dx = to.x - from.x, dy = to.y - from.y;
+    let shape;
     if (c.kind === 'arrow') {
       const tx = c.x2 ?? 0.38, ty = c.y2 ?? 0.36;
-      callouts[selectedCallout] = grab === 'tip' ? { ...c, x: to.x, y: to.y } : grab === 'tail' ? { ...c, x2: to.x, y2: to.y }
-        : grab === 'line' ? { ...c, x: clamp01(c.x + dx), y: clamp01(c.y + dy), x2: clamp01(tx + dx), y2: clamp01(ty + dy) } : { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y };
-    } else callouts[selectedCallout] = { ...c, ...(grab ? StillBlurs.dragBox({ x: c.x, y: c.y, w: c.w ?? 0.3, h: c.h ?? 0.3 }, grab, dx, dy) : StillBlurs.fromDrag(from, to)) };
+      shape = grab === 'tip' ? { x: to.x, y: to.y } : grab === 'tail' ? { x2: to.x, y2: to.y }
+        : grab === 'line' ? { x: clamp01(c.x + dx), y: clamp01(c.y + dy), x2: clamp01(tx + dx), y2: clamp01(ty + dy) } : { x2: from.x, y2: from.y, x: to.x, y: to.y };
+    } else shape = grab ? StillBlurs.dragBox({ x: c.x, y: c.y, w: c.w ?? 0.3, h: c.h ?? 0.3 }, grab, dx, dy) : StillBlurs.fromDrag(from, to);
+    callouts[selectedCallout] = StillCallouts.placeAt(keyed, time, shape);
     renderView();
   };
   const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderCallouts(); };

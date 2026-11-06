@@ -17,7 +17,7 @@ struct MainView: View {
     private let categories: [(String, String, Color)] = [
         ("General", "gearshape.fill", .gray), ("Shortcuts", "command", .gray), ("Floating Preview", "rectangle.bottomthird.inset.filled", .green),
         ("Wallpaper", "photo.fill", .cyan), ("Screenshots", "camera.fill", .blue), ("Screen Recording", "video.fill", .pink),
-        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Advanced", "wand.and.stars", .purple)
+        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Claude", "sparkles", .orange), ("Advanced", "wand.and.stars", .purple)
     ]
     private var selected: String { categories.map(\.0).contains(library.page) || library.page == "About" ? library.page : "General" }
     @State private var sidebarSearch = ""
@@ -93,6 +93,7 @@ struct MainView: View {
         case "Annotate": annotate
         case "Clipboard": ClipboardSettings()
         case "Cloud": CloudSettingsView(library: library)
+        case "Claude": ClaudeSettingsView()
         case "Advanced": advanced
         default: about
         }
@@ -108,6 +109,7 @@ struct MainView: View {
             }
             section("Capture") { Toggle("Hide desktop icons while capturing", isOn: $prefs.hideDesktop) }
             section("Sounds") { Toggle("Play sounds", isOn: $library.captureSound) }
+            section("Capture History") { choice("Keep history", selection: $prefs.retentionDays) { Text("Forever").tag(0); Text("1 day").tag(1); Text("3 days").tag(3); Text("1 week").tag(7); Text("1 month").tag(30); Text("3 months").tag(90) } }
             section("Export") {
                 HStack { Text("Export location"); Spacer(); Text(library.exportFolder.isEmpty ? "Documents › Still" : URL(fileURLWithPath: library.exportFolder).lastPathComponent).foregroundStyle(.secondary); Button("Choose…") { chooseFolder() } }
                 Text("Where Save, the Floating Preview and After Capture put files. Unless you choose a folder, it’s Still in your Documents folder.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -185,9 +187,10 @@ struct MainView: View {
                 Toggle("Capture Still’s own windows", isOn: $prefs.captureOwnWindows)
                 Text("Still’s Floating Previews, pins and recording controls never appear in captures.").font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            section("Crosshair") {
-                choice("Crosshair Mode", selection: $prefs.crosshair) { Text("Disabled").tag("disabled"); Text("Cross").tag("cross"); Text("Full Screen").tag("full") }
+            section("Selection") {
+                choice("Crosshair", selection: $prefs.crosshair) { Text("Small").tag("cross"); Text("Full Screen").tag("full"); Text("Off").tag("disabled") }
                 Toggle("Show magnifier", isOn: $prefs.magnifier)
+                Toggle("Remember last selection", isOn: $prefs.rememberSelection)
             }
         }
     }
@@ -239,19 +242,18 @@ struct MainView: View {
             section("Hosting") {
                 Text("Connect your own Still Cloud server to upload captures and copy shareable links.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 TextField("Server URL", text: $prefs.cloudEndpoint).textFieldStyle(.roundedBorder)
-                choice("Default link expiration", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }
+                choice("Links expire after", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }
                 Text("No file is uploaded until you use an upload action. Connect your own Still server to share captures.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
     private var advanced: some View {
         Group {
-            section("Capture History") { choice("Keep history", selection: $prefs.retentionDays) { Text("Forever").tag(0); Text("1 day").tag(1); Text("3 days").tag(3); Text("1 week").tag(7); Text("1 month").tag(30); Text("3 months").tag(90) }; Button("Open Capture History") { AppController.shared.showHistory() }; Button("Open Storage Folder") { NSWorkspace.shared.open(library.root) } }
+            section("Capture History") { Button("Open Capture History") { AppController.shared.showHistory() }; Button("Open Storage Folder") { NSWorkspace.shared.open(library.root) } }
             section("Text Recognition") {
                 choice("Language", selection: $prefs.ocrLanguage) { Text("Automatically Detect Language").tag("auto"); Text("English").tag("en-US"); Text("Chinese, Simplified").tag("zh-Hans"); Text("Chinese, Traditional").tag("zh-Hant"); Text("French").tag("fr-FR"); Text("German").tag("de-DE"); Text("Japanese").tag("ja-JP"); Text("Korean").tag("ko-KR"); Text("Spanish").tag("es-ES"); Text("Portuguese").tag("pt-BR") }
                 Toggle("Keep line breaks", isOn: $prefs.ocrLineBreaks)
             }
-            section("Capture Bar") { Toggle("Remember last selection", isOn: $prefs.rememberSelection) }
             section("Pinned Screenshots") { Toggle("Rounded corners", isOn: $prefs.pinRounded); Toggle("Shadow", isOn: $prefs.pinShadow); Toggle("Border", isOn: $prefs.pinBorder) }
             section("API") { Toggle("Allow URL scheme API", isOn: $prefs.allowURLScheme) }
             section("Permissions") { Button("Screen Recording Settings…") { AppController.shared.openPermissionSettings() }; Button("Refresh Permissions") { AppController.shared.requestPermission() } }

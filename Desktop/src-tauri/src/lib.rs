@@ -11,6 +11,9 @@ mod record;
 mod scroll;
 mod settings;
 mod similar;
+mod describe;
+mod trash;
+mod mcp;
 mod video;
 
 use capture::Grab;
@@ -1087,6 +1090,7 @@ fn after_settings(app: &AppHandle, patch: &Value) {
     if patch.get("shortcuts").is_some() { register_shortcuts(app); }
     if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
     if patch.get("quickAccess").is_some() { layout_previews(app); }
+    if patch.get("claude").is_some() { apply_connector(app); }
     build_tray_menu(app);
     let values = st(app).settings.lock().unwrap().values.clone();
     broadcast(app, "settings:changed", values);
@@ -1196,7 +1200,24 @@ async fn library_rename(app: AppHandle, id: String, title: String) { st(&app).li
 #[tauri::command]
 async fn library_star(app: AppHandle, id: String, starred: bool) { st(&app).library.lock().unwrap().update(&id, |i| i.starred = starred); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
-async fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
+async fn library_delete(app: AppHandle, id: String) -> Result<(), String> {
+    close_preview(&app, &id);
+    // The capture goes to the Recycle Bin / Trash under its title, so it can be put back; the rest of its folder
+    // (thumbnail, project) goes with it from History.
+    let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (lib.file(&i), i.title.clone())) };
+    if let Some((file, title)) = found {
+        if file.exists() {
+            let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+            let named = file.with_file_name(trash::file_name(&title, &ext));
+            let target = if std::fs::rename(&file, &named).is_ok() { named } else { file.clone() };
+            // If it can't go to the bin, nothing is lost: the file goes back and the capture stays in History.
+            if let Err(e) = trash::move_to_trash(&target) { let _ = std::fs::rename(&target, &file); return Err(e); }
+        }
+    }
+    st(&app).library.lock().unwrap().remove(&id);
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(())
+}
 #[tauri::command]
 async fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
     let (file, kind) = { let lib = st(&app).library.lock().unwrap(); let item = lib.get(&id).ok_or("Missing capture")?; (lib.file(&item), item.kind) };
@@ -1251,6 +1272,206 @@ async fn library_similar(app: AppHandle, id: String) -> Result<Vec<Value>, Strin
 }
 /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
 /// search. Nothing is uploaded until the person pastes it there.
+/// Find Similar in a folder: the pictures in a folder the user picks (and the folders inside it) that look like this
+/// capture, closest first. Only the files found are remembered, so History can open or show only those.
+static FOLDER_MATCHES: std::sync::OnceLock<Mutex<Vec<PathBuf>>> = std::sync::OnceLock::new();
+const FOLDER_SCAN_LIMIT: usize = 5000;
+#[tauri::command]
+async fn library_similar_in_folder(app: AppHandle, id: String) -> Result<Value, String> {
+    let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be compared.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
+    let Some(folder) = app.dialog().file().set_title("Find Similar Pictures In…").blocking_pick_folder().and_then(|f| f.into_path().ok()) else { return Ok(Value::Null) };
+    let scan = folder.clone();
+    let (found, scanned, capped) = tauri::async_runtime::spawn_blocking(move || -> Result<(Vec<(PathBuf, u32)>, usize, bool), String> {
+        let target = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).map(|i| similar::fingerprint(&i)).ok_or("Couldn’t read this screenshot.")?;
+        let mut files = Vec::new();
+        let mut stack = vec![scan];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let hidden = path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.'));
+                if hidden { continue; }
+                if path.is_dir() { stack.push(path); continue; }
+                let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+                if matches!(ext.as_str(), "png" | "jpg" | "jpeg") { files.push(path); }
+                if files.len() >= FOLDER_SCAN_LIMIT { break; }
+            }
+            if files.len() >= FOLDER_SCAN_LIMIT { break; }
+        }
+        let capped = files.len() >= FOLDER_SCAN_LIMIT;
+        let prints: Vec<(String, u64)> = files.iter().filter_map(|f| {
+            // Big photos are slow to decode in full; anything over 40 MB is passed over.
+            if std::fs::metadata(f).map(|m| m.len() > 40_000_000).unwrap_or(true) { return None; }
+            std::fs::read(f).ok().and_then(|b| capture::decode(&b)).map(|i| (f.to_string_lossy().to_string(), similar::fingerprint(&i)))
+        }).collect();
+        let ranked = similar::rank(target, &prints, 60).into_iter().map(|(p, d)| (PathBuf::from(p), d)).collect();
+        Ok((ranked, files.len(), capped))
+    }).await.map_err(|e| e.to_string())??;
+    // History shows the matches as pictures, so it may read them (and only the folder picked).
+    let _ = app.asset_protocol_scope().allow_directory(&folder, true);
+    *FOLDER_MATCHES.get_or_init(Default::default).lock().unwrap() = found.iter().map(|(p, _)| p.clone()).collect();
+    Ok(json!({ "folder": folder.to_string_lossy(), "scanned": scanned, "capped": capped,
+        "found": found.iter().enumerate().map(|(i, (p, d))| json!({ "index": i, "path": p.to_string_lossy(), "name": p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), "distance": d })).collect::<Vec<_>>() }))
+}
+/// Opens, or shows in its folder, one of the files the last folder search found.
+#[tauri::command]
+async fn library_folder_match(index: usize, reveal_it: bool) -> Result<(), String> {
+    let file = FOLDER_MATCHES.get_or_init(Default::default).lock().unwrap().get(index).cloned().ok_or("That picture is no longer in the list.")?;
+    if reveal_it { reveal(&file) } else { open_path(&file) }
+    Ok(())
+}
+/// Describe Image (Settings → AI): the user's own Gemini key lives in a private file, like the Cloud token.
+/// Claude's key (an Anthropic API key) sits in its own file beside it.
+fn ai_key_file(app: &AppHandle, provider: &str) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join(if provider == "claude" { "anthropic-key" } else { "gemini-key" })) }
+fn ai_key(app: &AppHandle, provider: &str) -> String { ai_key_file(app, provider).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
+fn ai_provider(app: &AppHandle) -> String { if setting(app, "ai.provider").as_str() == Some("claude") { "claude".into() } else { "gemini".into() } }
+#[tauri::command]
+async fn ai_get(app: AppHandle) -> Value { json!({ "hasKey": !ai_key(&app, "gemini").is_empty(), "hasClaudeKey": !ai_key(&app, "claude").is_empty(), "provider": ai_provider(&app) }) }
+/// Saves a key once its service accepts it; an empty key forgets the saved one.
+#[tauri::command]
+async fn ai_set_key(app: AppHandle, provider: Option<String>, key: String) -> Result<(), String> {
+    let provider = provider.unwrap_or_else(|| "gemini".into());
+    let file = ai_key_file(&app, &provider).ok_or("No settings folder")?;
+    if key.trim().is_empty() { let _ = std::fs::remove_file(file); return Ok(()); }
+    if provider == "claude" { describe::check_claude(&key).await? } else { describe::check(&key).await? }
+    write_private(&file, key.trim())
+}
+/// Describes a picture with whichever service Settings picked.
+async fn describe_bytes(app: &AppHandle, mime: &str, bytes: &[u8]) -> Result<String, String> {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+    if ai_provider(app) == "claude" { describe::describe_with_claude(&ai_key(app, "claude"), mime, &data).await } else { describe::describe(&ai_key(app, "gemini"), mime, &data).await }
+}
+/// Sends the screenshot to Gemini and keeps the description with it. Only this picture is sent, and only now.
+#[tauri::command]
+async fn library_describe(app: AppHandle, id: String) -> Result<String, String> {
+    let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be described.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
+    let bytes = std::fs::read(&file).map_err(|e| format!("Couldn’t read the screenshot: {e}"))?;
+    let mime = if file.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) { "image/jpeg" } else { "image/png" };
+    let text = describe_bytes(&app, mime, &bytes).await?;
+    st(&app).library.lock().unwrap().update(&id, |i| i.description = text.clone());
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(text)
+}
+/// Send to Claude: copies the screenshot and opens Claude (the desktop app when it's installed, otherwise claude.ai),
+/// ready to paste into a new chat. Nothing is sent until it's pasted there.
+#[tauri::command]
+async fn library_send_to_claude(app: AppHandle, id: String) -> Result<bool, String> {
+    library_copy(app, id).await?;
+    #[cfg(windows)] {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let exe = std::path::Path::new(&local).join("AnthropicClaude").join("claude.exe");
+            if exe.exists() && std::process::Command::new(&exe).spawn().is_ok() { return Ok(true); }
+        }
+    }
+    open_url("https://claude.ai/new");
+    Ok(false)
+}
+// ---- Still for Claude (MCP) ------------------------------------------------------------------------
+
+/// `Still --mcp`, started by Claude: speaks MCP on stdin/stdout and passes tool calls to the running app.
+pub fn mcp_bridge() { mcp::run_bridge() }
+
+/// The running app's end: listening while Settings → Claude → "Let Claude use Still" is on.
+static CONNECTOR: Mutex<Option<(u16, Arc<std::sync::atomic::AtomicBool>)>> = Mutex::new(None);
+fn connector_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join(mcp::FILE)) }
+fn apply_connector(app: &AppHandle) {
+    let wanted = setting(app, "claude.connector").as_bool().unwrap_or(false);
+    let mut running = CONNECTOR.lock().unwrap();
+    if !wanted {
+        if let Some((port, stop)) = running.take() { stop.store(true, std::sync::atomic::Ordering::SeqCst); let _ = std::net::TcpStream::connect(("127.0.0.1", port)); }
+        if let Some(f) = connector_file(app) { let _ = std::fs::remove_file(f); }
+        return;
+    }
+    if running.is_some() { return; }
+    let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) else { return };
+    let Ok(port) = listener.local_addr().map(|a| a.port()) else { return };
+    let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    if let Some(f) = connector_file(app) { let _ = write_private(&f, &json!({ "port": port, "token": token, "pid": std::process::id() }).to_string()); }
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *running = Some((port, stop.clone()));
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if stop.load(std::sync::atomic::Ordering::SeqCst) { break; }
+            let Ok(mut stream) = stream else { continue };
+            let (app, token) = (app.clone(), token.clone());
+            std::thread::spawn(move || {
+                let Some(request) = mcp::read_request(&mut stream) else { return };
+                let reply = if !mcp::same_secret(request["token"].as_str().unwrap_or(""), &token) { mcp::text_result("Still refused this connection.", true) }
+                    else { tauri::async_runtime::block_on(connector_call(&app, request["name"].as_str().unwrap_or(""), &request["arguments"])) };
+                use std::io::Write;
+                let _ = writeln!(stream, "{reply}");
+            });
+        }
+    });
+}
+/// A picture for Claude: at most 1568 pixels on its longest side, as JPEG.
+fn image_for_claude(image: &image::RgbaImage) -> Value {
+    let (w, h) = image.dimensions(); let k = 1568.0 / w.max(h) as f64;
+    let small = if k < 1.0 { image::imageops::resize(image, ((w as f64 * k) as u32).max(1), ((h as f64 * k) as u32).max(1), image::imageops::FilterType::Triangle) } else { image.clone() };
+    let rgb = image::DynamicImage::ImageRgba8(small).to_rgb8();
+    let mut out = Vec::new();
+    let _ = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&rgb);
+    use base64::Engine;
+    json!({ "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(out), "mimeType": "image/jpeg" })
+}
+fn capture_summary(lib: &Library, i: &Item, full: bool) -> Value {
+    let cut = |t: &str, n: usize| if t.chars().count() > n { format!("{}…", t.chars().take(n).collect::<String>()) } else { t.to_string() };
+    json!({ "id": i.id, "title": i.title, "kind": i.kind, "created": chrono::DateTime::from_timestamp_millis(i.created).map(|d| d.with_timezone(&chrono::Local).to_rfc3339()),
+        "width": i.width, "height": i.height, "seconds": if i.kind == "recording" { json!(i.duration) } else { Value::Null }, "starred": i.starred,
+        "description": if i.description.is_empty() { Value::Null } else { json!(i.description) },
+        "text": if i.text.is_empty() { Value::Null } else { json!(cut(&i.text, if full { 6000 } else { 200 })) },
+        "file": if full { json!(lib.file(i)) } else { Value::Null } })
+}
+async fn connector_call(app: &AppHandle, name: &str, args: &Value) -> Value {
+    let arg_id = args["id"].as_str().unwrap_or("").to_string();
+    let found = || { let lib = st(app).library.lock().unwrap(); lib.get(&arg_id) };
+    match name {
+        "still_capture_screen" => {
+            let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => return mcp::text_result(&e, true) };
+            let n = args["display"].as_u64().unwrap_or(1).max(1) as usize;
+            let Some(grab) = grabs.get(n - 1).or(grabs.first()) else { return mcp::text_result("No display to capture.", true) };
+            let (w, h) = grab.image.dimensions();
+            let item = match st(app).library.lock().unwrap().add(&capture::png(&grab.image), "screenshot", "png", None, w, h) { Ok(i) => i, Err(e) => return mcp::text_result(&e, true) };
+            make_thumb(app, &item); broadcast(app, "library:changed", Value::Null);
+            json!({ "content": [{ "type": "text", "text": format!("Screenshot saved in Still as “{}” (id {}), {w} × {h}, display {} of {}.", item.title, item.id, n.min(grabs.len()), grabs.len()) }, image_for_claude(&grab.image)], "isError": false })
+        }
+        "still_list_captures" => {
+            let lib = st(app).library.lock().unwrap();
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+            let items: Vec<Value> = lib.search(args["query"].as_str().unwrap_or(""), args["kind"].as_str().unwrap_or("all")).iter().take(limit).map(|i| capture_summary(&lib, i, false)).collect();
+            mcp::text_result(&serde_json::to_string_pretty(&items).unwrap_or_default(), false)
+        }
+        "still_get_capture" => {
+            let Some(item) = found() else { return mcp::text_result("No capture with that id. Use still_list_captures to find one.", true) };
+            let (summary, file) = { let lib = st(app).library.lock().unwrap(); (capture_summary(&lib, &item, true), lib.file(&item)) };
+            let mut content = vec![json!({ "type": "text", "text": serde_json::to_string_pretty(&summary).unwrap_or_default() })];
+            if item.kind != "recording" { if let Some(image) = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)) { content.push(image_for_claude(&image)); } }
+            json!({ "content": content, "isError": false })
+        }
+        "still_describe_capture" => match library_describe(app.clone(), arg_id).await { Ok(t) => mcp::text_result(&t, false), Err(e) => mcp::text_result(&e, true) },
+        "still_share_capture" => {
+            if found().is_none() { return mcp::text_result("No capture with that id.", true); }
+            match upload_item(app, &arg_id).await { Ok(link) => mcp::text_result(&link, false), Err(e) => mcp::text_result(&e, true) }
+        }
+        "still_open_capture" => {
+            let Some(item) = found() else { return mcp::text_result("No capture with that id.", true) };
+            let a = app.clone(); let id = item.id.clone(); let video = item.kind == "recording";
+            let _ = app.run_on_main_thread(move || if video { open_video(&a, &id) } else { open_editor(&a, Some(&id), false) });
+            mcp::text_result(&format!("Opened “{}” in Still.", item.title), false)
+        }
+        _ => mcp::text_result(&format!("Still has no tool called {name}."), true),
+    }
+}
+/// For Settings: the line to paste into Claude's settings, with this computer's path to Still.
+#[tauri::command]
+async fn connector_info() -> Value {
+    let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    json!({ "command": exe, "args": ["--mcp"],
+        "desktop": serde_json::to_string_pretty(&json!({ "mcpServers": { "still": { "command": exe, "args": ["--mcp"] } } })).unwrap_or_default(),
+        "code": format!("claude mcp add --scope user still -- \"{exe}\" --mcp") })
+}
 #[tauri::command]
 async fn library_search_web(app: AppHandle, id: String) -> Result<(), String> {
     library_copy(app, id).await?;
@@ -2020,6 +2241,7 @@ pub fn run() {
             let saved = saved_link(&handle); st(&handle).session.lock().unwrap().last_link = saved;
             apply_name_pattern(&handle);
             apply_history_days(&handle);
+            apply_connector(&handle);
             let menu = tray_menu(&handle)?;
             TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))
@@ -2056,7 +2278,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_search_web, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

@@ -2,10 +2,53 @@ let kind = 'all';
 // Find Similar: the screenshot the grid is showing look-alikes of, or null for the usual History.
 let similarTo = null;
 function findSimilar(item) { similarTo = item; $('#grid').scrollTop = 0; load(); }
+// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search.
+async function describe(item) {
+  toast('Describing…');
+  try { const text = await still.invoke('library:describe', item.id); await navigator.clipboard.writeText(text).catch(() => {}); toast(`${text.split('\n')[0]} (copied)`); }
+  catch (error) {
+    const why = explain(error);
+    toast(/Settings/.test(why) ? 'Add a key in Settings → Cloud → Describe Image first' : why);
+    if (/Settings/.test(why)) still.invoke('open:settings', 'Cloud').catch(() => {});
+  }
+}
+// Find Similar in a Folder: pictures anywhere in a folder the user picks that look like this capture.
+let folderMatches = null;
+async function findSimilarInFolder(item) {
+  toast('Choose a folder to look in…');
+  try {
+    const result = await still.invoke('library:similarInFolder', item.id);
+    if (!result) return; // No folder chosen.
+    folderMatches = { item, ...result }; $('#grid').scrollTop = 0; load();
+  } catch (error) { toast(explain(error)); }
+}
+function showFolderMatches(grid) {
+  const m = folderMatches, folderName = m.folder.split(/[\\/]/).filter(Boolean).pop() || m.folder;
+  grid.replaceChildren(el('div', { class: 'similar-bar' }, [
+    el('span', { html: icon('folder-open') }),
+    el('span', {}, `${m.found.length ? `${m.found.length} ${m.found.length === 1 ? 'picture' : 'pictures'} in “${folderName}” look like` : `Nothing in “${folderName}” looks like`} “${m.item.title}”${m.capped ? ' (the first 5,000 pictures were checked)' : ` (${m.scanned} checked)`}`),
+    el('button', { class: 'btn', onclick: () => { folderMatches = null; load(); } }, 'Show All')
+  ]));
+  for (const f of m.found) {
+    const tile = el('div', { class: 'tile', title: f.path }, [
+      el('div', { class: 'thumb' }, [el('img', { src: still.fileUrl(f.path), loading: 'lazy', decoding: 'async', draggable: 'false' })]),
+      el('div', { class: 'meta' }, [el('div', { class: 'title' }, f.name), el('div', { class: 'sub' }, f.distance === 0 ? 'Same picture' : f.distance <= 4 ? 'Very close' : 'Similar')])
+    ]);
+    tile.addEventListener('dblclick', () => still.invoke('library:folderMatch', f.index, false).catch((e) => toast(explain(e))));
+    tile.addEventListener('contextmenu', (e) => { e.preventDefault(); popupMenu({ x: e.clientX, y: e.clientY }, [
+      { label: 'Open', icon: 'image', action: () => still.invoke('library:folderMatch', f.index, false) },
+      { label: 'Show in Folder', icon: 'folder-open', action: () => still.invoke('library:folderMatch', f.index, true) }]); });
+    grid.append(tile);
+  }
+  refreshIcons();
+}
 function searchWeb(item) {
   still.invoke('library:searchWeb', item.id).then(() => toast('Image copied. Paste it on the search page (Ctrl+V) to search.')).catch((error) => toast(explain(error)));
 }
 const images = new Map();
+// Deleting moves a capture to the Recycle Bin / Trash, as on the Mac, so it can be put back from there.
+const binName = () => (still.platform === 'win32' ? 'Recycle Bin' : 'Trash');
+const remove = (item) => still.invoke('library:delete', item.id).then(() => toast(`Moved to the ${binName()}`)).catch((error) => toast(`Couldn’t delete it: ${explain(error)}`));
 // Screenshots picked with Ctrl/⌘-click (or Shift-click) to combine, in the order they were picked.
 let picks = [];
 const tiles = new Map();
@@ -44,6 +87,7 @@ const nearby = new IntersectionObserver((entries) => {
 }, { rootMargin: '400px' });
 
 async function load() {
+  if (folderMatches) { images.clear(); tiles.clear(); nearby.disconnect(); return showFolderMatches($('#grid')); }
   let items = await still.invoke('library:list', { query: similarTo ? '' : $('#search').value, kind: similarTo ? 'screenshot' : kind });
   let banner = null;
   if (similarTo) {
@@ -78,12 +122,12 @@ async function load() {
     const tools = el('div', { class: 'tools' }, [
       el('button', { title: 'Copy', html: icon('copy'), onclick: (e) => { e.stopPropagation(); still.invoke('library:copy', item.id).then(() => toast(item.kind === 'recording' ? 'Copied recording' : 'Copied image')); } }),
       el('button', { title: 'Show in folder', html: icon('folder-open'), onclick: (e) => { e.stopPropagation(); still.invoke('library:reveal', item.id); } }),
-      el('button', { title: 'Delete', html: icon('trash-2'), onclick: async (e) => { e.stopPropagation(); await still.invoke('library:delete', item.id); } })
+      el('button', { title: `Move to ${binName()}`, html: icon('trash-2'), onclick: (e) => { e.stopPropagation(); remove(item); } })
     ]);
     const tile = el('div', { class: 'tile' }, [
       el('div', { class: 'thumb' }, [media, el('span', { class: 'pick-number' }),
         el('button', { class: `star${item.starred ? ' on' : ''}`, title: item.starred ? 'Unstar' : 'Star to find it again quickly', 'aria-label': item.starred ? 'Unstar' : 'Star', 'aria-pressed': String(!!item.starred), html: icon('star'), onclick: (e) => { e.stopPropagation(); star(item, !item.starred); } }), el('span', { class: 'kind', html: `${icon(item.kind === 'recording' ? 'video' : 'image')}${item.kind === 'recording' ? 'Video' : 'Image'}` }), tools]),
-      el('div', { class: 'meta' }, [title, el('div', { class: 'sub' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}`)])
+      el('div', { class: 'meta' }, [title, el('div', { class: 'sub', title: item.description || '' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}${item.description ? ' · Described' : ''}`)])
     ]);
     // A capture whose file has gone (moved, renamed or deleted outside Still) says so instead of showing a broken picture.
     media.addEventListener('error', () => { if (media.getAttribute('src')) { tile.classList.add('missing'); tile.title = 'This file has been moved or deleted'; } });
@@ -102,6 +146,10 @@ async function load() {
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
         ...(item.kind === 'recording' ? [] : [
           { label: 'Find Similar', icon: 'images', action: () => findSimilar(item) },
+          { label: 'Find Similar in a Folder…', icon: 'folder-open', action: () => findSimilarInFolder(item) },
+          { label: 'Send to Claude', icon: 'message-circle', action: () => still.invoke('library:sendToClaude', item.id).then((app) => toast(`Image copied. Paste it into ${app ? 'Claude' : 'the new Claude chat'} (Ctrl+V).`)).catch((error) => toast(explain(error))) },
+          { label: item.description ? 'Describe Again' : 'Describe Image', icon: 'sparkles', action: () => describe(item) },
+          ...(item.description ? [{ label: 'Copy Description', icon: 'copy', action: () => navigator.clipboard.writeText(item.description).then(() => toast('Description copied')) }] : []),
           { label: 'Search the Web for This Image', icon: 'globe', action: () => searchWeb(item) }]),
         { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(explain(error))) },
         { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(explain(error))) },
@@ -111,7 +159,7 @@ async function load() {
         ...(item.kind === 'recording' ? [] : [{ label: 'Pin to Screen', icon: 'pin', action: () => still.invoke('library:pin', item.id) }]),
         { label: 'Show in Folder', icon: 'folder-open', action: () => still.invoke('library:reveal', item.id) },
         '-',
-        { label: 'Delete', icon: 'trash-2', action: () => still.invoke('library:delete', item.id) }
+        { label: `Move to ${binName()}`, icon: 'trash-2', action: () => remove(item) }
       ]);
     });
     grid.append(tile);
@@ -122,10 +170,10 @@ async function load() {
 
 $('#filter').addEventListener('click', (e) => {
   const b = e.target.closest('[data-kind]'); if (!b) return;
-  kind = b.dataset.kind; similarTo = null; $$('#filter button').forEach((x) => x.classList.toggle('active', x === b)); load();
+  kind = b.dataset.kind; similarTo = null; folderMatches = null; $$('#filter button').forEach((x) => x.classList.toggle('active', x === b)); load();
 });
 let searchTimer;
-$('#search').addEventListener('input', () => { similarTo = null; clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
+$('#search').addEventListener('input', () => { similarTo = null; folderMatches = null; clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
 still.on('library:changed', load);
 still.on('library:thumb', ({ id, thumb }) => { const image = images.get(id); if (image) image.src = `${still.fileUrl(thumb)}?t=${Date.now()}`; });
 applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); load(); });

@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 import StillCore
 
 struct HistoryView: View {
@@ -24,12 +25,21 @@ struct HistoryView: View {
         similarTo = item; similarIDs = []; selected = item.id
         Task { let found = await library.similar(to: item); if similarTo?.id == item.id { similarIDs = found } }
     }
+    /// Find Similar in a Folder: pictures on disk that look like a capture.
+    @State private var folderSearch: (item: CaptureItem, folder: URL, matches: [Library.FolderMatch], scanned: Int, capped: Bool, busy: Bool)?
+    private func findSimilarInFolder(_ item: CaptureItem) {
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder to look for pictures like “\(item.title)”"; panel.prompt = "Look Here"
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        folderSearch = (item, folder, [], 0, false, true)
+        Task { let r = await library.similar(to: item, inFolder: folder); if folderSearch?.item.id == item.id, folderSearch?.folder == folder { folderSearch = (item, folder, r.matches, r.scanned, r.capped, false) } }
+    }
     @State private var pendingDelete: CaptureItem?
     @State private var renaming: CaptureItem?
     @State private var title = ""
     private var items: [CaptureItem] {
         if let target = similarTo { let all = library.items; return [target] + similarIDs.compactMap { id in all.first { $0.id == id } } }
-        return library.items.filter { (filter == "All" || (filter == "Starred" && $0.isStarred) || (filter == "Screenshots" && !$0.isVideo) || (filter == "Recordings" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) }
+        return library.items.filter { (filter == "All" || (filter == "Starred" && $0.isStarred) || (filter == "Screenshots" && !$0.isVideo) || (filter == "Recordings" && $0.isVideo && !$0.filename.hasSuffix("gif")) || (filter == "GIFs" && $0.filename.hasSuffix("gif"))) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || ($0.recognizedText?.localizedCaseInsensitiveContains(query) ?? false) || ($0.imageDescription?.localizedCaseInsensitiveContains(query) ?? false) || ($0.tags?.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ?? false)) }
     }
     var body: some View {
         // Filtered once here: every grid cell asks for `current`, and a search looks through recognized text.
@@ -39,10 +49,24 @@ struct HistoryView: View {
                 Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close capture history")
                 Text("Capture History").font(Studio.heading)
                 Spacer()
-                ForEach(["All", "Screenshots", "Recordings", "GIFs", "Starred"], id: \.self) { title in Button { filter = title; selected = nil; similarTo = nil } label: { Text(title).font(.system(size: 16, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 7).background(filter == title ? Color.accentColor : Color.white.opacity(0.12), in: Capsule()) }.buttonStyle(.plain) }
+                ForEach(["All", "Screenshots", "Recordings", "GIFs", "Starred"], id: \.self) { title in Button { filter = title; selected = nil; similarTo = nil; folderSearch = nil } label: { Text(title).font(.system(size: 16, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 7).background(filter == title ? Color.accentColor : Color.white.opacity(0.12), in: Capsule()) }.buttonStyle(.plain) }
                 Spacer()
             }
-            if let target = similarTo {
+            if let search = folderSearch {
+                HStack(spacing: 10) {
+                    Image(systemName: "folder").foregroundStyle(Color.accentColor)
+                    Text(search.busy ? "Looking in “\(search.folder.lastPathComponent)” for pictures like “\(search.item.title)”…"
+                        : search.matches.isEmpty ? "Nothing in “\(search.folder.lastPathComponent)” looks like “\(search.item.title)” (\(search.scanned) checked)"
+                        : "\(search.matches.count) \(search.matches.count == 1 ? "picture" : "pictures") in “\(search.folder.lastPathComponent)” look like “\(search.item.title)”\(search.capped ? " (the first 5,000 checked)" : " (\(search.scanned) checked)")")
+                    Spacer()
+                    Button("Show All") { folderSearch = nil }
+                }.padding(.horizontal, 14).padding(.vertical, 8).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                ScrollView(.vertical) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 245))], spacing: 22) {
+                        ForEach(search.matches) { match in FolderMatchTile(match: match) }
+                    }.padding(.horizontal, 10).padding(.vertical, 8)
+                }.scrollIndicators(.hidden).frame(maxHeight: .infinity)
+            } else if let target = similarTo {
                 HStack(spacing: 10) {
                     Image(systemName: "square.on.square").foregroundStyle(Color.accentColor)
                     let count = items.count - 1
@@ -51,7 +75,9 @@ struct HistoryView: View {
                     Button("Show All") { similarTo = nil }
                 }.padding(.horizontal, 14).padding(.vertical, 8).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
-            if items.isEmpty {
+            if folderSearch != nil {
+                EmptyView()
+            } else if items.isEmpty {
                 VStack(spacing: 15) { Image(systemName: "clock.arrow.circlepath").font(.system(size: 38, weight: .light)); Text(!query.isEmpty ? "No matching captures" : filter == "Starred" ? "No starred captures" : "No captures yet").font(.system(size: 18)); Text(filter == "Starred" ? "Right-click a capture and choose Star to find it here." : "Take a screenshot to see it in your capture history.").foregroundStyle(.secondary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
@@ -77,7 +103,7 @@ struct HistoryView: View {
                                         Text(item.title).lineLimit(1).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 245)
                                     }
                                 }.buttonStyle(.plain).id(item.id).simultaneousGesture(TapGesture(count: 2).onEnded { AppController.shared.openItem(item); dismiss() })
-                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button(item.isStarred ? "Unstar" : "Star") { library.setStarred(item, !item.isStarred) }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; if !item.isVideo { Button("Find Similar") { findSimilar(item) }; Button("Search the Web for This Image") { library.searchWeb(item) } }; Button("Upload and Copy Link") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
+                                .contextMenu { Button("Restore") { AppController.shared.showPreview(item); dismiss() }; Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button(item.isStarred ? "Unstar" : "Star") { library.setStarred(item, !item.isStarred) }; Button("Copy") { library.copy(item) }; Button("Rename…") { title = item.title; renaming = item }; if !item.isVideo { Button("Find Similar") { findSimilar(item) }; Button("Find Similar in a Folder…") { findSimilarInFolder(item) }; Button("Send to Claude") { library.sendToClaude(item) }; Button(item.imageDescription == nil ? "Describe Image" : "Describe Again") { library.describe(item) }; if let text = item.imageDescription { Button("Copy Description") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) } }; Button("Search the Web for This Image") { library.searchWeb(item) } }; Button("Upload and Copy Link") { AppController.shared.upload(item) }; if let link = item.cloudURL { Button("Copy Cloud Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }; Button("Show QR Code") { QRCodePanel.show(link) } }; if !item.isVideo { if picks.count >= 2 && picks.contains(item.id) { Button("Combine \(picks.count) Side by Side") { combine(vertical: false) }; Button("Combine \(picks.count) Top to Bottom") { combine(vertical: true) } } else { Button(picks.contains(item.id) ? "Remove from Combine" : "Select to Combine") { togglePick(item) } } }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Divider(); Button("Move to Trash", role: .destructive) { pendingDelete = item } }
                                 .onDrag { NSItemProvider(contentsOf: library.url(item)) ?? NSItemProvider() }
                             }
                         }.padding(.horizontal, 10).padding(.vertical, 8)
@@ -103,5 +129,32 @@ struct HistoryView: View {
             VStack(alignment: .leading, spacing: 18) { Text("Rename Capture").font(.headline); TextField("Name", text: $title).textFieldStyle(.roundedBorder); HStack { Spacer(); Button("Cancel") { renaming = nil }.keyboardShortcut(.cancelAction); Button("Rename") { if let renaming { library.rename(renaming, title: title.trimmingCharacters(in: .whitespacesAndNewlines)) }; renaming = nil }.keyboardShortcut(.defaultAction).disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } }.padding(24).frame(width: 330)
         }
         .confirmationDialog("Move this capture to Trash?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) { Button("Move to Trash", role: .destructive) { if let pendingDelete { library.delete(pendingDelete) }; pendingDelete = nil } }
+    }
+}
+
+/// One picture a folder search found: its thumbnail and name. Double-click opens it; the menu shows it in Finder.
+private struct FolderMatchTile: View {
+    let match: Library.FolderMatch
+    @State private var image: NSImage?
+    var body: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.07))
+                if let image { Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).padding(3) }
+            }.frame(width: 250, height: 190)
+            Text(match.url.lastPathComponent).lineLimit(1).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 245)
+            Text(match.distance == 0 ? "Same picture" : match.distance <= 4 ? "Very close" : "Similar").font(.system(size: 10)).foregroundStyle(.tertiary)
+        }
+        .help(match.url.path)
+        .onTapGesture(count: 2) { NSWorkspace.shared.open(match.url) }
+        .contextMenu { Button("Open") { NSWorkspace.shared.open(match.url) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([match.url]) } }
+        .task {
+            let url = match.url
+            image = await Task.detached {
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 500, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
+                return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+            }.value
+        }
     }
 }

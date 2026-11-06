@@ -25,6 +25,13 @@ struct PreviewHandles: View {
                         }
                     }
                 }
+                if model.panel == "Zoom", model.outputSize.width > 0,
+                   let zoom = model.settings.zooms.first(where: { model.playhead >= $0.start && model.playhead <= $0.end && (model.pickedZooms.isEmpty || model.pickedZooms.contains($0.id)) }) {
+                    // Where the zoom points: drag the marker, or click the picture, to choose it.
+                    ZoomFocusHandle(point: CGPoint(x: zoom.x, y: zoom.y), screen: screen) { p in
+                        model.liveEdit(); if let i = model.settings.zooms.firstIndex(where: { $0.id == zoom.id }) { model.settings.zooms[i].x = Double(p.x); model.settings.zooms[i].y = Double(p.y) }
+                    }
+                }
                 if model.panel == "Text", model.outputSize.width > 0 {
                     // Captions sit on the video area itself, steady through zooms, so they use the unzoomed picture.
                     let plain = VideoGeometry.pictureRect(output: model.outputSize, source: model.sourceSize, padding: model.settings.frame == "none" ? 0 : model.settings.padding, zooms: [], time: model.playhead)
@@ -38,15 +45,17 @@ struct PreviewHandles: View {
                     }
                 }
                 if model.panel == "Callouts", model.outputSize.width > 0 {
-                    ForEach(model.settings.callouts ?? []) { callout in
-                        if model.playhead >= callout.start && model.playhead <= callout.end {
+                    ForEach(model.settings.callouts ?? []) { stored in
+                        if model.playhead >= stored.start && model.playhead <= stored.end {
+                            // A keyed callout is shown and moved where it is at the playhead; the move becomes a keyframe.
+                            let callout = stored.shape(at: model.playhead), t = model.playhead
                             if callout.kind == "arrow" {
                                 ArrowHandles(tip: CGPoint(x: callout.x, y: callout.y), tail: CGPoint(x: callout.x2 ?? 0.38, y: callout.y2 ?? 0.36), screen: screen) { tip, tail in
-                                    model.liveEdit(); model.updateCallout(callout.id) { $0.x = tip.x; $0.y = tip.y; $0.x2 = tail.x; $0.y2 = tail.y }
+                                    model.liveEdit(); model.updateCallout(stored.id) { $0 = $0.placing(at: t) { $0.x = tip.x; $0.y = tip.y; $0.x2 = tail.x; $0.y2 = tail.y } }
                                 }
                             } else {
-                                BoxHandles(box: CGRect(x: callout.x, y: callout.y, width: callout.w ?? 0.3, height: callout.h ?? 0.3), screen: screen, tint: Color(nsColor: NSColor(hex: callout.color)), label: nil) { box in
-                                    model.liveEdit(); model.updateCallout(callout.id) { $0.x = box.minX; $0.y = box.minY; $0.w = box.width; $0.h = box.height }
+                                BoxHandles(box: CGRect(x: callout.x, y: callout.y, width: callout.w ?? 0.3, height: callout.h ?? 0.3), screen: screen, tint: Color(nsColor: NSColor(hex: callout.color)), label: stored.keys == nil ? nil : "keyframed") { box in
+                                    model.liveEdit(); model.updateCallout(stored.id) { $0 = $0.placing(at: t) { $0.x = box.minX; $0.y = box.minY; $0.w = box.width; $0.h = box.height } }
                                 }
                             }
                         }
@@ -88,6 +97,36 @@ struct BoxHandles: View {
                 let moved = VideoBlur.dragged(start ?? box, handle: handle, dx: Double(v.translation.width/max(1, screen.width)), dy: Double(v.translation.height/max(1, screen.height)))
                 DispatchQueue.main.async { commit(moved) }
             }
+    }
+}
+
+/// The point a zoom is aimed at, as a target on the picture. Drag it, or click anywhere on the picture, to move it.
+/// The picture moves under it as the zoom re-aims, so a drag works from where the picture was when it began.
+struct ZoomFocusHandle: View {
+    let point: CGPoint, screen: CGRect
+    let commit: (CGPoint) -> Void
+    @GestureState private var origin: (CGPoint, CGRect)?
+
+    var body: some View {
+        let clamp = { (p: CGPoint) in CGPoint(x: min(1, max(0, p.x)), y: min(1, max(0, p.y))) }
+        ZStack(alignment: .topLeading) {
+            Rectangle().fill(Color.white.opacity(0.001)).frame(width: screen.width, height: screen.height)
+                .gesture(SpatialTapGesture().onEnded { v in commit(clamp(CGPoint(x: v.location.x/max(1, screen.width), y: v.location.y/max(1, screen.height)))) })
+                .position(x: screen.midX, y: screen.midY)
+            ZStack {
+                Circle().strokeBorder(.white, lineWidth: 2).frame(width: 26, height: 26)
+                Circle().fill(.white).frame(width: 5, height: 5)
+                Rectangle().fill(.white).frame(width: 1.5, height: 36); Rectangle().fill(.white).frame(width: 36, height: 1.5)
+            }.shadow(color: .black.opacity(0.6), radius: 2).contentShape(Circle().inset(by: -8))
+                .position(x: screen.minX+point.x*screen.width, y: screen.minY+point.y*screen.height)
+                .gesture(DragGesture(minimumDistance: 1).updating($origin) { v, start, _ in
+                    if start == nil { start = (point, screen) }
+                    let (p, r) = start ?? (point, screen)
+                    let moved = clamp(CGPoint(x: p.x+v.translation.width/max(1, r.width), y: p.y+v.translation.height/max(1, r.height)))
+                    DispatchQueue.main.async { commit(moved) }
+                })
+                .help("Where the zoom points: drag this, or click the picture").accessibilityLabel("Zoom focus")
+        }
     }
 }
 

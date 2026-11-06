@@ -53,6 +53,9 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 
 ## History and sharing
 
+- **Find Similar in a Folder.** Right-click a screenshot in History, choose Find Similar in a Folder…, and pick a
+  folder that holds a copy of it (even resized). The copy is listed first; double-click opens it.
+
 18. **A long History.** With 50+ captures, open History and scroll quickly. Nothing should stutter, and recordings
     should show their first frame as they come into view.
 19. **A moved file.** Move one capture's file out of Still's folder in Explorer or Finder, then open History. Its
@@ -70,6 +73,16 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     space on the disk", not a long technical error.
 24. **Recording with no sound.** Use Tighten Pauses on a recording made without a microphone. It should simply say
     the recording has no sound.
+
+## Claude
+
+- **Still for Claude.** In Settings → Claude, turn on Let Claude use Still and copy the Claude Desktop config (or
+  the Claude Code command). Restart Claude, then ask it to “take a screenshot with Still”, “find my screenshot
+  with the error message” and “describe it”. Each works, the screenshot appears in History, and turning the switch
+  off makes Claude say Still isn’t letting it in.
+- **Send to Claude.** Right-click a screenshot in History → Send to Claude. Claude opens; pasting adds the picture.
+- **Describe with Claude.** In Settings → Cloud → Describe Image, choose Claude and save an Anthropic API key, then
+  Describe Image on a screenshot.
 
 ## After the checklist
 

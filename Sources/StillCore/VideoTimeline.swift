@@ -463,6 +463,13 @@ public struct VideoMusic: Codable, Equatable, Hashable {
     }
 }
 
+/// A callout's shape at a moment of the recording.
+public struct VideoCalloutKey: Codable, Equatable, Hashable {
+    public var t: Double, x: Double, y: Double
+    public var x2: Double?, y2: Double?, w: Double?, h: Double?
+    public init(t: Double, x: Double, y: Double, x2: Double? = nil, y2: Double? = nil, w: Double? = nil, h: Double? = nil) { self.t = t; self.x = x; self.y = y; self.x2 = x2; self.y2 = y2; self.w = w; self.h = h }
+}
+
 /// An arrow, a box or a spotlight shown over a video for a stretch of the recording (in its own time). Places are
 /// shares of the video (0 to 1, from the top left); an arrow's tip is (x, y) and its tail (x2, y2). Windows and Linux
 /// follow the same rules (shared/callouts.js) and share the test cases.
@@ -475,6 +482,11 @@ public struct VideoCallout: Codable, Equatable, Hashable, Identifiable {
     public var x: Double, y: Double
     public var x2: Double?, y2: Double?
     public var w: Double?, h: Double?
+    /// Its shape at moments of the recording, to follow something moving (as blurs do); nil keeps it still.
+    public var keys: [VideoCalloutKey]?
+    /// Seconds to appear and to go (nil: the quick 0.2 s ramp), and how solid it is (nil: fully).
+    public var fade: Double?
+    public var opacity: Double?
     public static let kinds = ["arrow", "box", "spotlight"]
     public static let colors = ["FF453A", "FFD60A", "32D74B", "0A84FF", "FFFFFF"]
 
@@ -484,11 +496,56 @@ public struct VideoCallout: Codable, Equatable, Hashable, Identifiable {
             ? VideoCallout(kind: kind, start: max(start, time), end: min(end, time + 3), color: colors[0], x: 0.5, y: 0.5, x2: 0.38, y2: 0.36)
             : VideoCallout(kind: kind, start: max(start, time), end: min(end, time + 3), color: colors[0], x: 0.35, y: 0.35, w: 0.3, h: 0.3)
     }
-    /// How opaque it is at `time` (0 to 1), or nil when it isn't showing; it fades in and out over 0.2 s.
+    /// How opaque it is at `time` (0 to 1), or nil when it isn't showing. Without a fade of its own it fades in and
+    /// out over 0.2 s; with one it eases over that time. Its strength scales it.
     public func alpha(at time: Double) -> Double? {
         guard time >= start, time <= end else { return nil }
-        let ramp = min(0.2, (end - start) / 3)
-        return ramp > 0 ? min(1, (time - start) / ramp, (end - time) / ramp) : 1
+        let strength = min(1, max(0, opacity ?? 1))
+        guard let fade else {
+            let ramp = min(0.2, (end - start) / 3)
+            return strength * (ramp > 0 ? min(1, (time - start) / ramp, (end - time) / ramp) : 1)
+        }
+        let f = min(fade, (end - start) / 2), edge = f > 0 ? min(1, (time - start) / f, (end - time) / f) : 1, u = min(1, max(0, edge))
+        return strength * u*u*(3-2*u)
+    }
+    private var ownShape: VideoCalloutKey { VideoCalloutKey(t: start, x: x, y: y, x2: x2, y2: y2, w: w, h: h) }
+    /// The callout with its shape where it is at `time` (gliding between keys, easing in and out).
+    public func shape(at time: Double) -> VideoCallout {
+        guard let keys, let first = keys.first, let last = keys.last else { return self }
+        var c = self
+        func apply(_ k: VideoCalloutKey) { c.x = k.x; c.y = k.y; c.x2 = k.x2; c.y2 = k.y2; c.w = k.w; c.h = k.h }
+        if time <= first.t { apply(first); return c }
+        if time >= last.t { apply(last); return c }
+        guard let i = keys.firstIndex(where: { $0.t > time }), i > 0 else { apply(last); return c }
+        let a = keys[i-1], b = keys[i], v = (time-a.t)/(b.t-a.t), u = v*v*(3-2*v)
+        let mix = { (p: Double, q: Double) in p+(q-p)*u }
+        let opt = { (p: Double?, q: Double?) -> Double? in if let p, let q { return mix(p, q) } else { return p ?? q } }
+        c.x = mix(a.x, b.x); c.y = mix(a.y, b.y); c.x2 = opt(a.x2, b.x2); c.y2 = opt(a.y2, b.y2); c.w = opt(a.w, b.w); c.h = opt(a.h, b.h)
+        return c
+    }
+    /// The callout with its shape changed at `time` by `change`: a keyed one gets (or updates) a key there, an
+    /// unkeyed one just changes.
+    public func placing(at time: Double, _ change: (inout VideoCallout) -> Void) -> VideoCallout {
+        guard let keys, !keys.isEmpty else { var c = self; change(&c); return c }
+        var here = shape(at: time); change(&here)
+        var c = self
+        c.keys = (keys.filter { abs($0.t-time) >= 0.05 } + [VideoCalloutKey(t: time, x: here.x, y: here.y, x2: here.x2, y2: here.y2, w: here.w, h: here.h)]).sorted { $0.t < $1.t }
+        return c
+    }
+    /// Start following movement: a key at the start with its shape, and one at `time` with where it is then.
+    public func addingKey(at time: Double) -> VideoCallout {
+        var c = self
+        if c.keys?.isEmpty ?? true { c.keys = [ownShape] }
+        return c.placing(at: time) { _ in }
+    }
+    public func hasKey(near time: Double) -> Bool { keys?.contains { abs($0.t-time) <= 0.25 } ?? false }
+    /// Takes away the key nearest `time` (within a quarter second); the last one going makes it still again, there.
+    public func removingKey(near time: Double) -> VideoCallout {
+        guard let keys, let best = keys.indices.filter({ abs(keys[$0].t-time) <= 0.25 }).min(by: { abs(keys[$0].t-time) < abs(keys[$1].t-time) }) else { return self }
+        var c = self, rest = keys
+        let gone = rest.remove(at: best)
+        if rest.isEmpty { c.keys = nil; c.x = gone.x; c.y = gone.y; c.x2 = gone.x2; c.y2 = gone.y2; c.w = gone.w; c.h = gone.h } else { c.keys = rest }
+        return c
     }
     /// An arrow for each recorded click inside the clip: from 0.4 s before it to 1.2 s after, its tail up and to the
     /// left (or wherever there's room). Clicks within a second of the last are skipped.

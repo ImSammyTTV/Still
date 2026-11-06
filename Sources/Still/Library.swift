@@ -227,6 +227,72 @@ final class Library: ObservableObject {
         guard let target = computed.first(where: { $0.0 == item.id })?.2 else { return [] }
         return ImageFingerprint.rank(target, computed.filter { $0.0 != item.id }.map { ($0.0, $0.2) }, limit: 60).map(\.0)
     }
+    /// Find Similar in a Folder: the pictures in `folder` (and the folders inside it) that look like this capture,
+    /// closest first. At most 5,000 pictures are checked; hidden folders and very large files are passed over.
+    struct FolderMatch: Identifiable { let id = UUID(); let url: URL; let distance: Int }
+    func similar(to item: CaptureItem, inFolder folder: URL) async -> (matches: [FolderMatch], scanned: Int, capped: Bool) {
+        let file = url(item)
+        return await Task.detached(priority: .userInitiated) {
+            guard let target = ImageFingerprint.fingerprint(of: file) else { return ([], 0, false) }
+            let kinds: Set<String> = ["png", "jpg", "jpeg", "heic", "tiff", "tif", "gif", "webp", "bmp"]
+            var files: [URL] = []
+            let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles, .skipsPackageDescendants])
+            while let next = walk?.nextObject() as? URL, files.count < 5000 {
+                guard kinds.contains(next.pathExtension.lowercased()), next.standardizedFileURL != file.standardizedFileURL else { continue }
+                let size = (try? next.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if size > 0 && size < 40_000_000 { files.append(next) }
+            }
+            let prints = files.compactMap { f in ImageFingerprint.fingerprint(of: f).map { (f, $0) } }
+            let ranked = ImageFingerprint.rank(target, prints, limit: 60).map { FolderMatch(url: $0.0, distance: $0.1) }
+            return (ranked, files.count, files.count >= 5000)
+        }.value
+    }
+    /// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search
+    /// and copied to the clipboard.
+    @MainActor func describe(_ item: CaptureItem) {
+        guard GeminiKey.value != nil else { toast("Add a key in Settings → Cloud → Describe Image first"); AppController.shared.showMain(); page = "Cloud"; return }
+        toast("Describing…")
+        Task { @MainActor in
+            do {
+                let text = try await describedText(item)
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+                toast("\(text.components(separatedBy: "\n").first ?? text) (copied)")
+            } catch { toast(error.localizedDescription) }
+        }
+    }
+    /// Describes a screenshot with the service Settings picked and keeps the description with it.
+    @MainActor func describedText(_ item: CaptureItem) async throws -> String {
+        guard let key = GeminiKey.value else { throw ImageDescriber.Failure(message: "Add a key in Still’s Settings → Cloud → Describe Image first.") }
+        guard !item.isVideo, let image = ImageRenderer.load(url(item)) else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
+        // A big screenshot is scaled down first: smaller to send, and plenty for a description.
+        guard let data = try? ImageRenderer.data(Self.scaledDown(image, maxSide: 1600)) else { throw ImageDescriber.Failure(message: "Couldn’t read this screenshot.") }
+        let text = Preferences.shared.describeProvider == "claude"
+            ? try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
+            : try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
+        if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].imageDescription = text; try? persist() }
+        return text
+    }
+    static func scaledDown(_ image: CGImage, maxSide: Int) -> CGImage {
+        let side = max(image.width, image.height)
+        guard side > maxSide else { return image }
+        let k = Double(maxSide)/Double(side), w = max(1, Int(Double(image.width)*k)), h = max(1, Int(Double(image.height)*k))
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
+        ctx.interpolationQuality = .high; ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage() ?? image
+    }
+    /// Send to Claude: copies the screenshot and opens Claude (the desktop app when it's installed, otherwise
+    /// claude.ai), ready to paste into a chat. Nothing is sent until it's pasted there.
+    @MainActor func sendToClaude(_ item: CaptureItem) {
+        guard let image = ImageRenderer.load(url(item)), let data = try? ImageRenderer.data(image) else { toast("Couldn’t read this screenshot"); return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setData(data, forType: .png)
+        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+            toast("Image copied. Paste it into Claude (⌘V).")
+        } else {
+            if let page = URL(string: "https://claude.ai/new") { NSWorkspace.shared.open(page) }
+            toast("Image copied. Paste it into the new Claude chat (⌘V).")
+        }
+    }
     /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
     /// search. Nothing is uploaded until it's pasted there.
     func searchWeb(_ item: CaptureItem) {

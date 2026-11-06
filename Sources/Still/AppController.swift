@@ -50,6 +50,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.servicesProvider = self
         NSApp.setActivationPolicy(.accessory)
         applyAppearance()
+        ConnectorServer.shared.apply()
         setupMenu()
         hotkeys.handler = { [weak self] id in
             Task { @MainActor in
@@ -676,15 +677,12 @@ extension AppController {
     /// macOS keeps ⇧⌘4 for its own screenshot tool (symbolic hotkey 30) unless it is turned off in Keyboard settings.
     func checkSystemScreenshotShortcut() {
         guard let area = Shortcut.load().first(where: { $0.id == 1 }), area.keyCode == UInt32(kVK_ANSI_4), area.modifiers == UInt32(cmdKey|shiftKey) else { return }
-        let hotkeys = CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, "com.apple.symbolichotkeys" as CFString) as? [String: Any]
-        let entry = hotkeys?["30"] as? [String: Any]
-        let enabled = (entry?["enabled"] as? Bool) ?? ((entry?["enabled"] as? NSNumber)?.boolValue ?? true)
-        guard enabled, !UserDefaults.standard.bool(forKey: "systemShortcutNoticeDismissed") else { return }
+        guard ShortcutGuide.systemShortcutOn, !UserDefaults.standard.bool(forKey: "systemShortcutNoticeDismissed") else { return }
         let alert = NSAlert(); alert.messageText = "Turn off the macOS ⇧⌘4 shortcut"
-        alert.informativeText = "macOS still uses ⇧⌘4 for its own screenshot tool, so Still can’t receive it yet.\n\nIn Keyboard Shortcuts → Screenshots, turn off “Save picture of selected area as a file”. Still will then open on ⇧⌘4, and Space switches to window capture."
-        alert.addButton(withTitle: "Open Keyboard Shortcuts"); alert.addButton(withTitle: "Later"); alert.addButton(withTitle: "Don’t Ask Again")
+        alert.informativeText = "macOS still uses ⇧⌘4 for its own screenshot tool, so Still can’t receive it yet.\n\nShow Me How opens Keyboard settings with a small step-by-step guide that stays on screen while you turn it off."
+        alert.addButton(withTitle: "Show Me How"); alert.addButton(withTitle: "Later"); alert.addButton(withTitle: "Don’t Ask Again")
         switch alert.runModal() {
-        case .alertFirstButtonReturn: if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Shortcuts") { NSWorkspace.shared.open(url) }
+        case .alertFirstButtonReturn: ShortcutGuide.show()
         case .alertThirdButtonReturn: UserDefaults.standard.set(true, forKey: "systemShortcutNoticeDismissed")
         default: break
         }
