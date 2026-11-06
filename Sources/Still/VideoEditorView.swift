@@ -72,7 +72,13 @@ import StillCore
             for index in 0..<9 { guard !Task.isCancelled else { return }; if let result = try? await generator.image(at: CMTime(seconds: max(0, min(duration-0.01, duration*Double(index)/9)), preferredTimescale: 600)) { thumbnails.append(NSImage(cgImage: result.image, size: .zero)) } }
         } catch { self.error = error.localizedDescription; loading = false }
     }
+    /// What the preview's compositor draws from, so a change of look shows straight away.
+    private let live = LiveVideoSettings()
+    private var shownShape: VideoSettings?
     func schedulePreview() {
+        live.set(settings)
+        // Only the look changed (cursor, clicks, blurs, callouts, text, zooms, corners…): redraw the frame now.
+        if let shown = shownShape, shown.sameShape(as: settings) { previewTask?.cancel(); refreshFrame(); return }
         previewTask?.cancel()
         previewTask = Task { try? await Task.sleep(nanoseconds: 180_000_000); guard !Task.isCancelled else { return }; await rebuild() }
     }
@@ -80,8 +86,11 @@ import StillCore
         do {
             let wasPlaying = player.rate > 0, position = playhead
             let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
-            let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: settings, metadata: metadata, cameraURL: camera, musicURL: musicURL)
+            let building = settings
+            live.set(building)
+            let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: building, metadata: metadata, cameraURL: camera, musicURL: musicURL, live: live)
             guard !Task.isCancelled else { return }
+            shownShape = building; live.set(settings)
             prepared = result; outputSize = result.size; sourceSize = result.sourceSize
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
             player.replaceCurrentItem(with: playerItem)
@@ -89,6 +98,11 @@ import StillCore
             if wasPlaying { player.play() }
             loading = false
         } catch { self.error = error.localizedDescription; loading = false }
+    }
+    /// Draws the paused frame again with the current settings (a playing video picks them up on its next frame).
+    private func refreshFrame() {
+        guard player.rate == 0, let item = player.currentItem, let composition = item.videoComposition?.mutableCopy() as? AVVideoComposition else { return }
+        item.videoComposition = composition
     }
     func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; player.play(); playing = true } }
     func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, VideoTimeline.outputTime(at: value, kept: settings.kept)), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
