@@ -13,7 +13,7 @@ extension Color {
 }
 func defaulted<T>(_ binding: Binding<T?>, _ fallback: T) -> Binding<T> { Binding(get: { binding.wrappedValue ?? fallback }, set: { binding.wrappedValue = $0 }) }
 
-/// Still's palette: translucent space grey and white panels over the window's glass, with a graphite accent.
+/// Still's palette: space grey and white panels over the window background, with a graphite accent.
 enum Studio {
     /// Graphite: a neutral accent that reads well in light and dark mode.
     static let accent = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "98989D") : NSColor(hex: "6E6E73") })
@@ -26,12 +26,14 @@ enum Studio {
     static let surface = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: "3A3A3C").withAlphaComponent(0.45) : NSColor(hex: "FFFFFF").withAlphaComponent(0.55) })
     static let heading = Font.system(size: 26, weight: .semibold)
 
-    /// Puts a view on the native translucent window material, for Still's glassy look.
+    /// Puts a view on the solid window background. (It used to be see-through glass, but whatever was behind the
+    /// window showed through clearly enough to read, which made toolbars and lists hard to use.)
     /// Borderless panels pass a corner radius, since they have no window frame to round them.
     @MainActor static func glass(_ content: NSView, in window: NSWindow, cornerRadius: CGFloat = 0) -> NSView {
-        window.isOpaque = false; window.backgroundColor = .clear
+        // Only a borderless panel with rounded corners needs a clear window, so its corners stay round.
+        if cornerRadius > 0 { window.isOpaque = false; window.backgroundColor = .clear } else { window.isOpaque = true; window.backgroundColor = .windowBackgroundColor }
         let material = NSVisualEffectView()
-        material.material = .underWindowBackground; material.blendingMode = .behindWindow; material.state = .followsWindowActiveState
+        material.material = .windowBackground; material.blendingMode = .withinWindow; material.state = .active
         if cornerRadius > 0 { material.wantsLayer = true; material.layer?.cornerRadius = cornerRadius; material.layer?.cornerCurve = .continuous; material.layer?.masksToBounds = true }
         content.translatesAutoresizingMaskIntoConstraints = false
         material.addSubview(content)
