@@ -70,14 +70,17 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     var onError: ((Error) -> Void)?
     func begin(_ purpose: SelectionPurpose) {
         guard !active else { return }
-        self.purpose = purpose; active = true; windowMode = false; windows = OverlayWindow.onScreen()
+        self.purpose = purpose; active = true; windowMode = false
         installKeyboardMonitor()
         // Grab every display first, before Still takes focus, so open menus, Spotlight and hover states
         // are in the picture. The overlay then sits on that frozen image, like the system tool.
         captureTask = Task {
             var shots: [ObjectIdentifier: CGImage] = [:]
             var failures: [String] = []
-            let grabs = await ScreenCaptureAPI.images(screens: NSScreen.screens)
+            // The screen grab waits on the system, so the window list (for window mode) is read meanwhile.
+            async let grabbing = ScreenCaptureAPI.images(screens: NSScreen.screens)
+            windows = OverlayWindow.onScreen()
+            let grabs = await grabbing
             for screen in NSScreen.screens {
                 guard !Task.isCancelled else { return }
                 do { shots[ObjectIdentifier(screen)] = try grabs[ObjectIdentifier(screen)]?.get() }
@@ -117,20 +120,31 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     /// Builds the overlay's views once, unseen, so the first capture after launch doesn't pay for loading them.
     func prewarm() {
         guard !active, let screen = NSScreen.main else { return }
-        _ = FirstClickHostingView(rootView: CaptureBar(selection: self)).fittingSize
+        _ = barPanel()
         let panel = SelectionPanel(contentRect: CGRect(x: 0, y: 0, width: 1, height: 1), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.contentView = SelectionSurface(screen: screen, coordinator: self); panel.contentView?.layoutSubtreeIfNeeded()
     }
     /// Still's capture bar: a slim pill along the bottom of the screen the pointer is on.
     private func showBar() {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
+        let panel = barPanel()
+        let size = panel.contentView?.fittingSize ?? panel.frame.size
+        panel.setFrame(CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.minY+28, width: size.width, height: size.height), display: false)
+        panel.orderFrontRegardless(); bar = panel
+    }
+    /// The bar is built once and kept, hidden, between captures: laying out its SwiftUI view is a noticeable part of
+    /// the wait otherwise. It shows this coordinator's state, so nothing carries over from the last capture.
+    private var keptBar: NSPanel?
+    private func barPanel() -> NSPanel {
+        if let keptBar { return keptBar }
         let host = FirstClickHostingView(rootView: CaptureBar(selection: self))
         let size = host.fittingSize
-        let panel = SelectionPanel(contentRect: CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.minY+28, width: size.width, height: size.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "Capture Bar"
+        let panel = SelectionPanel(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.title = "Capture Bar"; panel.isReleasedWhenClosed = false
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue+1); panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.contentView = host; panel.hidesOnDeactivate = false
-        panel.orderFrontRegardless(); bar = panel
+        keptBar = panel
+        return panel
     }
     func setDimensions() {
         guard let width = Double(width), let height = Double(height), width > 1, height > 1 else { return }
@@ -200,7 +214,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         captureTask?.cancel(); captureTask = nil
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor); self.keyboardMonitor = nil }
         holdingSpace = false
-        active = false; for panel in panels { panel.close() }; panels = []; views = []; images = [:]; bar?.close(); bar = nil }
+        active = false; for panel in panels { panel.close() }; panels = []; views = []; images = [:]; bar?.orderOut(nil); bar = nil }
 }
 /// A normal-layer window from the Window Server list, front to back, in global top-left coordinates.
 struct OverlayWindow {

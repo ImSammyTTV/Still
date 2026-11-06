@@ -120,6 +120,21 @@ pub fn png(image: &RgbaImage) -> Vec<u8> {
     out
 }
 
+/// The picture as JPEG strips, top to bottom, each with the row it starts at and its height. Encoding is the slowest
+/// part of opening the capture overlay, and strips encode side by side on separate cores (about four times faster
+/// on a four-core machine); the overlay page puts them back together.
+pub fn jpeg_strips(image: &RgbaImage, quality: u8, strips: u32) -> Vec<(u32, u32, Vec<u8>)> {
+    let (w, h) = image.dimensions();
+    let strips = strips.clamp(1, 16).min(h.max(1));
+    let step = h.div_ceil(strips).max(1);
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = (0..strips).filter(|i| i * step < h).map(|i| {
+            let (y, rows) = (i * step, step.min(h - i * step));
+            scope.spawn(move || (y, rows, jpeg(&image::imageops::crop_imm(image, 0, y, w, rows).to_image(), quality)))
+        }).collect();
+        jobs.into_iter().filter_map(|job| job.join().ok()).collect()
+    })
+}
 pub fn jpeg(image: &RgbaImage, quality: u8) -> Vec<u8> {
     let mut out = Vec::new();
     let rgb: RgbImage = image.convert();
