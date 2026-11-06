@@ -1040,7 +1040,11 @@ fn install_update(app: &AppHandle) {
                 }
             }
         };
-        match update.download_and_install(on_chunk, || {}).await {
+        // The installer runs silently (installMode "quiet" in tauri.conf.json): the card is the only UI, and
+        // Still reopens by itself a few seconds after it closes.
+        let (finish_app, finish_version) = (app.clone(), update.version.clone());
+        let on_finish = move || set_update(&finish_app, json!({ "state": "installing", "version": finish_version }));
+        match update.download_and_install(on_chunk, on_finish).await {
             Ok(()) => app.restart(),
             Err(e) => { set_update(&app, json!({ "state": "error", "error": e.to_string() })); notify(&app, "Update failed", &e.to_string()); }
         }
