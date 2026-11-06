@@ -48,7 +48,7 @@ struct SetupView: View {
                     card("03", "Make your first capture", symbol: "cursorarrow") {
                         Text("Choose Capture Area below, drag over the screen, then release. Hold Space to select a window. You can also use Capture from the menu bar.")
                         Text("Want ⇧⌘4? Turn off the matching macOS shortcut in Keyboard → Keyboard Shortcuts → Screenshots. You can choose another shortcut in Still’s settings.").foregroundStyle(.secondary)
-                        Button("Open Keyboard Settings") { if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") { NSWorkspace.shared.open(url) } }
+                        Button("Show Me How") { ShortcutGuide.show() }.help("Opens Keyboard settings with a step-by-step guide that stays on screen")
                     }
                 }
             }
