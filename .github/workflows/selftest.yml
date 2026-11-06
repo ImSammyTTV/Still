@@ -26,7 +26,16 @@ jobs:
         with: { node-version: 22 }
       - name: Linux dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
+        # A package mirror sometimes hangs. Each attempt gets 6 minutes and apt gives up on a stalled download after
+        # 30 seconds, so a stuck mirror is tried again instead of holding the whole check up.
+        timeout-minutes: 20
+        run: |
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            if sudo timeout 360 apt-get $apt update && sudo timeout 360 apt-get $apt install -y $LINUX_DEPS; then exit 0; fi
+            echo "Package download stalled or failed (attempt $attempt); trying again."; sleep 10
+          done
+          exit 1
       - run: npm ci
       - run: npm test
       - name: Build
