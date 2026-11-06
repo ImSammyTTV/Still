@@ -250,24 +250,29 @@ final class Library: ObservableObject {
     /// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search
     /// and copied to the clipboard.
     @MainActor func describe(_ item: CaptureItem) {
-        guard let key = GeminiKey.value else { toast("Add a key in Settings → Cloud → Describe Image first"); AppController.shared.showMain(); page = "Cloud"; return }
-        guard let image = ImageRenderer.load(url(item)) else { toast("Couldn’t read this screenshot"); return }
-        // A big screenshot is scaled down first: smaller to send, and plenty for a description.
-        let scaled = Self.scaledDown(image, maxSide: 1600)
-        guard let data = try? ImageRenderer.data(scaled) else { toast("Couldn’t read this screenshot"); return }
+        guard GeminiKey.value != nil else { toast("Add a key in Settings → Cloud → Describe Image first"); AppController.shared.showMain(); page = "Cloud"; return }
         toast("Describing…")
         Task { @MainActor in
             do {
-                let text = Preferences.shared.describeProvider == "claude"
-                    ? try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
-                    : try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
-                if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].imageDescription = text; try? persist() }
+                let text = try await describedText(item)
                 NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 toast("\(text.components(separatedBy: "\n").first ?? text) (copied)")
             } catch { toast(error.localizedDescription) }
         }
     }
-    private static func scaledDown(_ image: CGImage, maxSide: Int) -> CGImage {
+    /// Describes a screenshot with the service Settings picked and keeps the description with it.
+    @MainActor func describedText(_ item: CaptureItem) async throws -> String {
+        guard let key = GeminiKey.value else { throw ImageDescriber.Failure(message: "Add a key in Still’s Settings → Cloud → Describe Image first.") }
+        guard !item.isVideo, let image = ImageRenderer.load(url(item)) else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
+        // A big screenshot is scaled down first: smaller to send, and plenty for a description.
+        guard let data = try? ImageRenderer.data(Self.scaledDown(image, maxSide: 1600)) else { throw ImageDescriber.Failure(message: "Couldn’t read this screenshot.") }
+        let text = Preferences.shared.describeProvider == "claude"
+            ? try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
+            : try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
+        if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].imageDescription = text; try? persist() }
+        return text
+    }
+    static func scaledDown(_ image: CGImage, maxSide: Int) -> CGImage {
         let side = max(image.width, image.height)
         guard side > maxSide else { return image }
         let k = Double(maxSide)/Double(side), w = max(1, Int(Double(image.width)*k)), h = max(1, Int(Double(image.height)*k))

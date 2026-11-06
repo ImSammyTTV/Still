@@ -17,7 +17,7 @@ struct MainView: View {
     private let categories: [(String, String, Color)] = [
         ("General", "gearshape.fill", .gray), ("Shortcuts", "command", .gray), ("Floating Preview", "rectangle.bottomthird.inset.filled", .green),
         ("Wallpaper", "photo.fill", .cyan), ("Screenshots", "camera.fill", .blue), ("Screen Recording", "video.fill", .pink),
-        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Advanced", "wand.and.stars", .purple)
+        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Claude", "sparkles", .orange), ("Advanced", "wand.and.stars", .purple)
     ]
     private var selected: String { categories.map(\.0).contains(library.page) || library.page == "About" ? library.page : "General" }
     @State private var sidebarSearch = ""
@@ -93,6 +93,7 @@ struct MainView: View {
         case "Annotate": annotate
         case "Clipboard": ClipboardSettings()
         case "Cloud": CloudSettingsView(library: library)
+        case "Claude": ClaudeSettingsView()
         case "Advanced": advanced
         default: about
         }

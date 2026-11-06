@@ -9,7 +9,7 @@ public enum ImageDescriber {
     public static let model = "gemini-flash-latest"
     public static let prompt = "Describe this screenshot in one or two plain sentences for someone who can't see it, as alt text: say what app or page it shows and what matters on it. Then, on a new line starting with \"Text: \", quote any short heading or button text that stands out. No preamble."
 
-    public struct Failure: LocalizedError { public let message: String; public var errorDescription: String? { message } }
+    public struct Failure: LocalizedError { public let message: String; public init(message: String) { self.message = message }; public var errorDescription: String? { message } }
 
     /// The request body for one picture (PNG or JPEG data).
     public static func body(mime: String, data: Data) -> [String: Any] {

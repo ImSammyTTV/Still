@@ -106,6 +106,8 @@ import StillCore
     @AppStorage("cloudProvider") var cloudProvider = "still"
     /// Describe Image: "gemini" (Google, free key) or "claude" (Anthropic API key).
     @AppStorage("describeProvider") var describeProvider = "gemini"
+    /// Still for Claude: whether Claude may use Still through its MCP connector (Settings → Claude).
+    @AppStorage("claudeConnector") var claudeConnector = false
     @AppStorage("driveAccess") var driveAccess = "link"
     @AppStorage("driveEmail") var driveEmail = ""
     @AppStorage("driveFolder") var driveFolder = ""

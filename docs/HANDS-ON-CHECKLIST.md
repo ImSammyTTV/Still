@@ -74,6 +74,16 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 24. **Recording with no sound.** Use Tighten Pauses on a recording made without a microphone. It should simply say
     the recording has no sound.
 
+## Claude
+
+- **Still for Claude.** In Settings → Claude, turn on Let Claude use Still and copy the Claude Desktop config (or
+  the Claude Code command). Restart Claude, then ask it to “take a screenshot with Still”, “find my screenshot
+  with the error message” and “describe it”. Each works, the screenshot appears in History, and turning the switch
+  off makes Claude say Still isn’t letting it in.
+- **Send to Claude.** Right-click a screenshot in History → Send to Claude. Claude opens; pasting adds the picture.
+- **Describe with Claude.** In Settings → Cloud → Describe Image, choose Claude and save an Anthropic API key, then
+  Describe Image on a screenshot.
+
 ## After the checklist
 
 Send back the numbers marked ⚠️ or ❌ with a sentence each (and a screenshot where it helps). Those become the next

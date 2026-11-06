@@ -50,6 +50,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.servicesProvider = self
         NSApp.setActivationPolicy(.accessory)
         applyAppearance()
+        ConnectorServer.shared.apply()
         setupMenu()
         hotkeys.handler = { [weak self] id in
             Task { @MainActor in
