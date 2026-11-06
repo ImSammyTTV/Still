@@ -171,7 +171,7 @@ const pages = {
     ]),
     watermarkGroup(),
     group('Selection', [
-      select('Crosshair', 'crosshair', [['partial', 'Partial'], ['full', 'Full screen'], ['disabled', 'Off']]),
+      select('Crosshair', 'crosshair', [['partial', 'Small'], ['full', 'Full screen'], ['disabled', 'Off']]),
       toggle('Show magnifier', 'magnifier'), toggle('Remember last selection', 'rememberSelection')
     ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it. Scroll to zoom the magnifier.'),
     prefs.platform === 'win32' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], 'Your icons come back as soon as the capture ends.') : null

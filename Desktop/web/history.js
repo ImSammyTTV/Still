@@ -46,6 +46,9 @@ function searchWeb(item) {
   still.invoke('library:searchWeb', item.id).then(() => toast('Image copied. Paste it on the search page (Ctrl+V) to search.')).catch((error) => toast(explain(error)));
 }
 const images = new Map();
+// Deleting moves a capture to the Recycle Bin / Trash, as on the Mac, so it can be put back from there.
+const binName = () => (still.platform === 'win32' ? 'Recycle Bin' : 'Trash');
+const remove = (item) => still.invoke('library:delete', item.id).then(() => toast(`Moved to the ${binName()}`)).catch((error) => toast(`Couldn’t delete it: ${explain(error)}`));
 // Screenshots picked with Ctrl/⌘-click (or Shift-click) to combine, in the order they were picked.
 let picks = [];
 const tiles = new Map();
@@ -119,7 +122,7 @@ async function load() {
     const tools = el('div', { class: 'tools' }, [
       el('button', { title: 'Copy', html: icon('copy'), onclick: (e) => { e.stopPropagation(); still.invoke('library:copy', item.id).then(() => toast(item.kind === 'recording' ? 'Copied recording' : 'Copied image')); } }),
       el('button', { title: 'Show in folder', html: icon('folder-open'), onclick: (e) => { e.stopPropagation(); still.invoke('library:reveal', item.id); } }),
-      el('button', { title: 'Delete', html: icon('trash-2'), onclick: async (e) => { e.stopPropagation(); await still.invoke('library:delete', item.id); } })
+      el('button', { title: `Move to ${binName()}`, html: icon('trash-2'), onclick: (e) => { e.stopPropagation(); remove(item); } })
     ]);
     const tile = el('div', { class: 'tile' }, [
       el('div', { class: 'thumb' }, [media, el('span', { class: 'pick-number' }),
@@ -155,7 +158,7 @@ async function load() {
         ...(item.kind === 'recording' ? [] : [{ label: 'Pin to Screen', icon: 'pin', action: () => still.invoke('library:pin', item.id) }]),
         { label: 'Show in Folder', icon: 'folder-open', action: () => still.invoke('library:reveal', item.id) },
         '-',
-        { label: 'Delete', icon: 'trash-2', action: () => still.invoke('library:delete', item.id) }
+        { label: `Move to ${binName()}`, icon: 'trash-2', action: () => remove(item) }
       ]);
     });
     grid.append(tile);

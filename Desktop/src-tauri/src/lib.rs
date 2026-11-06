@@ -12,6 +12,7 @@ mod scroll;
 mod settings;
 mod similar;
 mod describe;
+mod trash;
 mod video;
 
 use capture::Grab;
@@ -1197,7 +1198,24 @@ async fn library_rename(app: AppHandle, id: String, title: String) { st(&app).li
 #[tauri::command]
 async fn library_star(app: AppHandle, id: String, starred: bool) { st(&app).library.lock().unwrap().update(&id, |i| i.starred = starred); broadcast(&app, "library:changed", Value::Null); }
 #[tauri::command]
-async fn library_delete(app: AppHandle, id: String) { close_preview(&app, &id); st(&app).library.lock().unwrap().remove(&id); broadcast(&app, "library:changed", Value::Null); }
+async fn library_delete(app: AppHandle, id: String) -> Result<(), String> {
+    close_preview(&app, &id);
+    // The capture goes to the Recycle Bin / Trash under its title, so it can be put back; the rest of its folder
+    // (thumbnail, project) goes with it from History.
+    let found = { let lib = st(&app).library.lock().unwrap(); lib.get(&id).map(|i| (lib.file(&i), i.title.clone())) };
+    if let Some((file, title)) = found {
+        if file.exists() {
+            let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+            let named = file.with_file_name(trash::file_name(&title, &ext));
+            let target = if std::fs::rename(&file, &named).is_ok() { named } else { file.clone() };
+            // If it can't go to the bin, nothing is lost: the file goes back and the capture stays in History.
+            if let Err(e) = trash::move_to_trash(&target) { let _ = std::fs::rename(&target, &file); return Err(e); }
+        }
+    }
+    st(&app).library.lock().unwrap().remove(&id);
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(())
+}
 #[tauri::command]
 async fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
     let (file, kind) = { let lib = st(&app).library.lock().unwrap(); let item = lib.get(&id).ok_or("Missing capture")?; (lib.file(&item), item.kind) };

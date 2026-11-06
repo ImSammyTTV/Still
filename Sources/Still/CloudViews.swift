@@ -50,7 +50,7 @@ struct CloudSettingsView: View {
             card("Upload") {
                 Toggle("Ask for name & show advanced options", isOn: $prefs.askUploadOptions)
                 HStack { Text("Copy link as"); Spacer(); Picker("Copy link as", selection: $prefs.linkFormat) { Text("Link").tag("url"); Text("Markdown").tag("markdown"); Text("HTML").tag("html") }.labelsHidden().fixedSize() }
-                HStack { Text("Default link expiration"); Spacer(); Picker("Default link expiration", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }.labelsHidden().fixedSize() }
+                HStack { Text("Links expire after"); Spacer(); Picker("Links expire after", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }.labelsHidden().fixedSize() }
                 Text("Use Option while clicking Upload to set a password, access level, tags or view limit for a capture. Uploads include any text Still recognised in the capture and a recording’s transcript, so your server can search them.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             card("Local Server") {
