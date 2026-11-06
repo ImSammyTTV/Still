@@ -18,6 +18,8 @@ pub struct Item {
     #[serde(default)] pub height: u32,
     #[serde(default)] pub text: String,
     #[serde(default)] pub duration: f64,
+    /// Describe Image: what the picture shows, in words, so search can find it.
+    #[serde(default, skip_serializing_if = "String::is_empty")] pub description: String,
     /// Starred in History, to find it again quickly.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub starred: bool,
 }
@@ -105,7 +107,7 @@ impl Library {
             id: uuid::Uuid::new_v4().to_string(), kind: kind.into(),
             title: title.unwrap_or_else(|| self.default_title(kind, width, height)),
             file_name: format!("capture.{ext}"), original_name: format!("original.{ext}"),
-            created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0, starred: false,
+            created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0, starred: false, description: String::new(),
         };
         let written = fs::create_dir_all(self.folder(&item)).and_then(|_| fs::write(self.file(&item), bytes))
             .and_then(|_| if kind != "recording" { fs::write(self.original(&item), bytes) } else { Ok(()) });
@@ -158,7 +160,7 @@ impl Library {
     pub fn search(&self, query: &str, kind: &str) -> Vec<Item> {
         let q = query.trim().to_lowercase();
         self.items.iter().filter(|i| (kind == "all" || i.kind == kind || (kind == "screenshot" && i.kind != "recording") || (kind == "starred" && i.starred))
-            && (q.is_empty() || i.title.to_lowercase().contains(&q) || i.text.to_lowercase().contains(&q))).cloned().collect()
+            && (q.is_empty() || i.title.to_lowercase().contains(&q) || i.text.to_lowercase().contains(&q) || i.description.to_lowercase().contains(&q))).cloned().collect()
     }
 }
 
@@ -177,7 +179,7 @@ fn rebuild(dir: &Path) -> Vec<Item> {
         let created = entry.metadata().ok().and_then(|m| m.created().or_else(|_| m.modified()).ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or_else(now_ms);
         Some(Item { id: entry.file_name().to_string_lossy().to_string(), kind: if ["mp4", "webm"].contains(&ext.as_str()) { "recording".into() } else { "screenshot".into() },
-            title: "Recovered capture".into(), file_name, original_name, created, modified: None, width: 0, height: 0, text: String::new(), duration: 0.0, starred: false })
+            title: "Recovered capture".into(), file_name, original_name, created, modified: None, width: 0, height: 0, text: String::new(), duration: 0.0, starred: false, description: String::new() })
     }).collect();
     items.sort_by(|a, b| b.created.cmp(&a.created));
     items

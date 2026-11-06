@@ -12,6 +12,9 @@ struct CloudSettingsView: View {
     @State private var driveBusy = false
     @State private var driveConnected = GoogleDrive.refreshToken != nil
     @State private var driveStatus = ""
+    @State private var geminiKey = ""
+    @State private var geminiSaved = GeminiKey.value != nil
+    @State private var geminiStatus = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             card("Upload To") {
@@ -34,6 +37,16 @@ struct CloudSettingsView: View {
                 if !status.isEmpty { Text(status).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 Button("Copy Saved Token") { if let secret = CloudKeychain.token(for: prefs.cloudEndpoint) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(secret, forType: .string); NSPasteboard.general.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")); library.toast("Personal token copied") } }.buttonStyle(.link).font(.system(size: 10)).disabled(prefs.cloudEndpoint.isEmpty)
             }
+            card("Describe Image") {
+                SecureField("Gemini API Key", text: $geminiKey, prompt: Text(geminiSaved ? "Saved in Keychain — paste a new one to replace it" : "Gemini API key")).textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Save") { saveGemini() }.disabled(geminiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if geminiSaved { Button("Remove") { GeminiKey.remove(); geminiSaved = false; geminiStatus = "Key removed" } }
+                    Spacer(); Button("Get a Free Key") { if let url = URL(string: "https://aistudio.google.com/apikey") { NSWorkspace.shared.open(url) } }
+                }
+                if !geminiStatus.isEmpty { Text(geminiStatus).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                Text("Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. It uses Google’s Gemini with your own key, free from Google AI Studio. Only the picture you describe is sent, and only then. On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             card("Upload") {
                 Toggle("Ask for name & show advanced options", isOn: $prefs.askUploadOptions)
                 HStack { Text("Copy link as"); Spacer(); Picker("Copy link as", selection: $prefs.linkFormat) { Text("Link").tag("url"); Text("Markdown").tag("markdown"); Text("HTML").tag("html") }.labelsHidden().fixedSize() }
@@ -46,6 +59,13 @@ struct CloudSettingsView: View {
                 if let message = local.message { Text(message).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
         }.onAppear { endpoint = prefs.cloudEndpoint }.onChange(of: prefs.cloudEndpoint) { _, value in endpoint = value }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
+    }
+    private func saveGemini() {
+        let key = geminiKey.trimmingCharacters(in: .whitespaces); geminiStatus = "Checking…"
+        Task {
+            do { try await ImageDescriber.check(key: key); try GeminiKey.save(key); geminiSaved = true; geminiKey = ""; geminiStatus = "Key saved" }
+            catch { geminiStatus = error.localizedDescription }
+        }
     }
     private func toggleDrive() {
         driveBusy = true; driveStatus = ""

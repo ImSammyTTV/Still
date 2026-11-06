@@ -11,6 +11,7 @@ mod record;
 mod scroll;
 mod settings;
 mod similar;
+mod describe;
 mod video;
 
 use capture::Grab;
@@ -1299,6 +1300,31 @@ async fn library_folder_match(index: usize, reveal_it: bool) -> Result<(), Strin
     if reveal_it { reveal(&file) } else { open_path(&file) }
     Ok(())
 }
+/// Describe Image (Settings → AI): the user's own Gemini key lives in a private file, like the Cloud token.
+fn gemini_key_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("gemini-key")) }
+fn gemini_key(app: &AppHandle) -> String { gemini_key_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
+#[tauri::command]
+async fn ai_get(app: AppHandle) -> Value { json!({ "hasKey": !gemini_key(&app).is_empty() }) }
+/// Saves a key once Gemini accepts it; an empty key forgets the saved one.
+#[tauri::command]
+async fn ai_set_key(app: AppHandle, key: String) -> Result<(), String> {
+    let file = gemini_key_file(&app).ok_or("No settings folder")?;
+    if key.trim().is_empty() { let _ = std::fs::remove_file(file); return Ok(()); }
+    describe::check(&key).await?;
+    write_private(&file, key.trim())
+}
+/// Sends the screenshot to Gemini and keeps the description with it. Only this picture is sent, and only now.
+#[tauri::command]
+async fn library_describe(app: AppHandle, id: String) -> Result<String, String> {
+    let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be described.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
+    let bytes = std::fs::read(&file).map_err(|e| format!("Couldn’t read the screenshot: {e}"))?;
+    let mime = if file.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) { "image/jpeg" } else { "image/png" };
+    use base64::Engine;
+    let text = describe::describe(&gemini_key(&app), mime, &base64::engine::general_purpose::STANDARD.encode(bytes)).await?;
+    st(&app).library.lock().unwrap().update(&id, |i| i.description = text.clone());
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(text)
+}
 #[tauri::command]
 async fn library_search_web(app: AppHandle, id: String) -> Result<(), String> {
     library_copy(app, id).await?;
@@ -2104,7 +2130,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_search_web, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, ai_get, ai_set_key, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

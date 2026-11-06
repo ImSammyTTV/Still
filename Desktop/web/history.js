@@ -2,6 +2,16 @@ let kind = 'all';
 // Find Similar: the screenshot the grid is showing look-alikes of, or null for the usual History.
 let similarTo = null;
 function findSimilar(item) { similarTo = item; $('#grid').scrollTop = 0; load(); }
+// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search.
+async function describe(item) {
+  toast('Describing…');
+  try { const text = await still.invoke('library:describe', item.id); await navigator.clipboard.writeText(text).catch(() => {}); toast(`${text.split('\n')[0]} (copied)`); }
+  catch (error) {
+    const why = explain(error);
+    toast(/Settings/.test(why) ? 'Add a free Gemini key in Settings → Cloud → Describe Image first' : why);
+    if (/Settings/.test(why)) still.invoke('open:settings', 'Cloud').catch(() => {});
+  }
+}
 // Find Similar in a Folder: pictures anywhere in a folder the user picks that look like this capture.
 let folderMatches = null;
 async function findSimilarInFolder(item) {
@@ -114,7 +124,7 @@ async function load() {
     const tile = el('div', { class: 'tile' }, [
       el('div', { class: 'thumb' }, [media, el('span', { class: 'pick-number' }),
         el('button', { class: `star${item.starred ? ' on' : ''}`, title: item.starred ? 'Unstar' : 'Star to find it again quickly', 'aria-label': item.starred ? 'Unstar' : 'Star', 'aria-pressed': String(!!item.starred), html: icon('star'), onclick: (e) => { e.stopPropagation(); star(item, !item.starred); } }), el('span', { class: 'kind', html: `${icon(item.kind === 'recording' ? 'video' : 'image')}${item.kind === 'recording' ? 'Video' : 'Image'}` }), tools]),
-      el('div', { class: 'meta' }, [title, el('div', { class: 'sub' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}`)])
+      el('div', { class: 'meta' }, [title, el('div', { class: 'sub', title: item.description || '' }, `${when(item.created)}${sizeLabel(item) ? ' · ' + sizeLabel(item) : ''}${item.description ? ' · Described' : ''}`)])
     ]);
     // A capture whose file has gone (moved, renamed or deleted outside Still) says so instead of showing a broken picture.
     media.addEventListener('error', () => { if (media.getAttribute('src')) { tile.classList.add('missing'); tile.title = 'This file has been moved or deleted'; } });
@@ -134,6 +144,8 @@ async function load() {
         ...(item.kind === 'recording' ? [] : [
           { label: 'Find Similar', icon: 'images', action: () => findSimilar(item) },
           { label: 'Find Similar in a Folder…', icon: 'folder-open', action: () => findSimilarInFolder(item) },
+          { label: item.description ? 'Describe Again' : 'Describe Image', icon: 'sparkles', action: () => describe(item) },
+          ...(item.description ? [{ label: 'Copy Description', icon: 'copy', action: () => navigator.clipboard.writeText(item.description).then(() => toast('Description copied')) }] : []),
           { label: 'Search the Web for This Image', icon: 'globe', action: () => searchWeb(item) }]),
         { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(explain(error))) },
         { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(explain(error))) },

@@ -21,6 +21,23 @@ enum CloudError: LocalizedError {
     case connection, token, response(String)
     var errorDescription: String? { switch self { case .connection: return "Enter an HTTPS server URL, or use http://127.0.0.1 for your local server."; case .token: return "Save a personal access token in Cloud settings."; case .response(let message): return message } }
 }
+/// The Gemini key for Describe Image, kept in Keychain like the Cloud token.
+enum GeminiKey {
+    private static let query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "local.sam.Still.gemini", kSecAttrAccount: "default"]
+    static var value: String? {
+        var q = query; q[kSecReturnData] = true; q[kSecMatchLimit] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    static func remove() { SecItemDelete(query as CFDictionary) }
+    static func save(_ key: String) throws {
+        let data = Data(key.utf8)
+        var status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
+        if status == errSecItemNotFound { var entry = query; entry[kSecValueData] = data; status = SecItemAdd(entry as CFDictionary, nil) }
+        guard status == errSecSuccess else { throw CloudError.response("The Gemini key could not be saved in Keychain (\(status)).") }
+    }
+}
 enum CloudKeychain {
     private static let service = "local.sam.Still.cloud"
     static func token(for endpoint: String) -> String? {

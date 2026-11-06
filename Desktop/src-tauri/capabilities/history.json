@@ -24,6 +24,8 @@
     "allow-library-similar",
     "allow-library-similar-in-folder",
     "allow-library-folder-match",
-    "allow-library-search-web"
+    "allow-library-search-web",
+    "allow-library-describe",
+    "allow-open-settings-cmd"
   ]
 }
