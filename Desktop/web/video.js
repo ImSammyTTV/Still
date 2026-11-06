@@ -300,21 +300,39 @@ function renderView() {
   drawBlurs(ctx, video, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   drawCallouts(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
   drawOverlays(ctx, t, src, z.scale, fx.width / vw, 0, 0, vw, vh);
-  if (selectedBlur >= 0 && blurs[selectedBlur]) { const b = blurs[selectedBlur], k = fx.width / vw; ctx.save(); ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.strokeRect((b.x * vw - src.x) * z.scale * k, (b.y * vh - src.y) * z.scale * k, b.w * vw * z.scale * k, b.h * vh * z.scale * k); ctx.restore(); }
+  if (selectedBlur >= 0 && blurs[selectedBlur]) {
+    // The picked blur's box where it is at this moment, with a handle on each corner to drag.
+    const b = StillBlurs.boxAt(blurs[selectedBlur], t), k = fx.width / vw;
+    const x = (b.x * vw - src.x) * z.scale * k, y = (b.y * vh - src.y) * z.scale * k, w = b.w * vw * z.scale * k, h = b.h * vh * z.scale * k;
+    ctx.save(); ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+    const r = 6 * (devicePixelRatio || 1);
+    for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) { ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+  }
+  if (selectedCallout >= 0 && callouts[selectedCallout]) {
+    // The picked callout's handles: an arrow's two ends, a box's four corners.
+    const c = callouts[selectedCallout], k = fx.width / vw, r = 6 * (devicePixelRatio || 1);
+    const at = (x, y) => [(x * vw - src.x) * z.scale * k, (y * vh - src.y) * z.scale * k];
+    const points = c.kind === 'arrow' ? [at(c.x, c.y), at(c.x2 ?? 0.38, c.y2 ?? 0.36)]
+      : [at(c.x, c.y), at(c.x + (c.w ?? 0.3), c.y), at(c.x, c.y + (c.h ?? 0.3)), at(c.x + (c.w ?? 0.3), c.y + (c.h ?? 0.3))];
+    ctx.save();
+    for (const [cx, cy] of points) { ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+  }
 }
 
 // Blur boxes: each part of the picture shrunk to a few pixels and smoothed back up, which reads as a soft blur
 // and works in every web engine. `media` is the video element being shown or exported.
 const blurCanvas = document.createElement('canvas');
 function drawBlurs(ctx, media, t, src, scale, k, ox, oy, vw, vh) {
-  for (const b of StillBlurs.at(blurs, t)) {
+  for (const b of StillBlurs.frames(blurs, t)) {
     const sx = b.x * vw, sy = b.y * vh, sw = b.w * vw, sh = b.h * vh;
     const dx = ox + (sx - src.x) * scale * k, dy = oy + (sy - src.y) * scale * k, dw = sw * scale * k, dh = sh * scale * k;
     const small = Math.max(2, Math.round(Math.max(sw, sh) / 24));
     blurCanvas.width = Math.max(2, Math.round(small * sw / Math.max(sw, sh))); blurCanvas.height = Math.max(2, Math.round(small * sh / Math.max(sw, sh)));
     const b2 = blurCanvas.getContext('2d'); b2.imageSmoothingEnabled = true; b2.imageSmoothingQuality = 'high';
     b2.drawImage(media, sx, sy, sw, sh, 0, 0, blurCanvas.width, blurCanvas.height);
-    ctx.save(); ctx.beginPath(); ctx.roundRect(dx, dy, dw, dh, Math.min(dw, dh) * 0.12); ctx.clip();
+    ctx.save(); ctx.globalAlpha = b.alpha; ctx.beginPath(); ctx.roundRect(dx, dy, dw, dh, Math.min(dw, dh) * 0.12); ctx.clip();
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(blurCanvas, dx, dy, dw, dh);
     ctx.restore();
   }
@@ -599,7 +617,7 @@ function renderCallouts(save = true) {
   });
   const c = callouts[selectedCallout];
   $('#calloutTools').hidden = !c;
-  if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag on the video from the tail to the tip.' : 'Drag on the video to place it.'; }
+  if (c) { $('#calloutColor').value = c.color; $('#calloutHint').textContent = c.kind === 'arrow' ? 'Drag its ends or its line on the video, or draw a new one from tail to tip.' : 'Drag it or its corners on the video, or draw a new one.'; }
   $('#pointClicks').hidden = !clicks().length;
   $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
   renderView(); if (save) saveProject();
@@ -628,9 +646,24 @@ $('#clip').addEventListener('pointerdown', (down) => {
   const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
   const share = (e) => ({ x: Math.min(1, Math.max(0, (src.x + (e.clientX - r.left) / r.width * src.w) / vw)), y: Math.min(1, Math.max(0, (src.y + (e.clientY - r.top) / r.height * src.h) / vh)) });
   const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
+  // Grab a box's corner to resize it or its inside to move it; an arrow's tip or tail to move that end, or its line to
+  // move the whole arrow. Anywhere else draws it afresh.
+  const original = callouts[selectedCallout], tol = 12 / r.width * src.w / vw;
+  const near = (x, y) => Math.abs(from.x - x) <= tol && Math.abs(from.y - y) <= tol;
+  let grab = null;
+  if (original.kind === 'arrow') {
+    const tx = original.x2 ?? 0.38, ty = original.y2 ?? 0.36;
+    grab = near(original.x, original.y) ? 'tip' : near(tx, ty) ? 'tail' : toLine(from, { x: tx, y: ty }, { x: original.x, y: original.y }) <= tol ? 'line' : null;
+  } else grab = StillBlurs.handleAt({ x: original.x, y: original.y, w: original.w ?? 0.3, h: original.h ?? 0.3 }, from, tol);
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  function toLine(p, a, b) { const dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy, u = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0; return Math.hypot(p.x - (a.x + u * dx), p.y - (a.y + u * dy)); }
   const move = (e) => {
-    const to = share(e), c = callouts[selectedCallout];
-    callouts[selectedCallout] = c.kind === 'arrow' ? { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y } : { ...c, ...StillBlurs.fromDrag(from, to) };
+    const to = share(e), c = original, dx = to.x - from.x, dy = to.y - from.y;
+    if (c.kind === 'arrow') {
+      const tx = c.x2 ?? 0.38, ty = c.y2 ?? 0.36;
+      callouts[selectedCallout] = grab === 'tip' ? { ...c, x: to.x, y: to.y } : grab === 'tail' ? { ...c, x2: to.x, y2: to.y }
+        : grab === 'line' ? { ...c, x: clamp01(c.x + dx), y: clamp01(c.y + dy), x2: clamp01(tx + dx), y2: clamp01(ty + dy) } : { ...c, x2: from.x, y2: from.y, x: to.x, y: to.y };
+    } else callouts[selectedCallout] = { ...c, ...(grab ? StillBlurs.dragBox({ x: c.x, y: c.y, w: c.w ?? 0.3, h: c.h ?? 0.3 }, grab, dx, dy) : StillBlurs.fromDrag(from, to)) };
     renderView();
   };
   const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderCallouts(); };
@@ -644,10 +677,14 @@ function renderBlurs() {
   const lane = $('#blurLane'); lane.replaceChildren();
   blurs.forEach((b, i) => {
     const left = StillTrim.position(b.start, duration) * 100, width = StillTrim.position(b.end, duration) * 100 - left;
+    // The bar is the blur's time on screen: drag either end to change when it starts and stops. Diamonds are its keyframes.
+    const ends = ['start', 'end'].map((end) => el('span', { class: `grip ${end === 'start' ? 'from' : 'to'}`, title: end === 'start' ? 'Drag to change when it starts' : 'Drag to change when it ends', onpointerdown: (e) => retimeBlur(e, i, end) }));
+    const keys = (b.keys || []).map((k) => el('span', { class: 'key', style: `left:${(k.t - b.start) / Math.max(0.001, b.end - b.start) * 100}%`, title: `Keyframe at ${StillTrim.clock(k.t)}` }));
     lane.append(el('button', { class: i === selectedBlur ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `Blur ${StillTrim.clock(b.start)} to ${StillTrim.clock(b.end)}`, 'aria-pressed': String(i === selectedBlur),
-      onclick: () => { selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { selectedCallout = -1; renderCallouts(false); pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }));
+      onclick: () => { if (retiming) return; selectedBlur = i === selectedBlur ? -1 : i; if (selectedBlur >= 0) { selectedCallout = -1; renderCallouts(false); pickZoom(-1, false); jump(b.start + Math.min(0.5, (b.end - b.start) / 2)); renderZooms(); } renderBlurs(); } }, [...ends, ...keys]));
   });
   $('#blurTools').hidden = selectedBlur < 0;
+  showBlurTools();
   $('#clip').classList.toggle('placing', selectedBlur >= 0 || selectedCallout >= 0);
   renderView(); saveProject();
 }
@@ -656,15 +693,62 @@ $('#addBlur').onclick = () => { const before = new Set(blurs); blurs = StillBlur
 $('#blurIn').onclick = () => { const b = blurs[selectedBlur]; if (b && video.currentTime < b.end - 0.2) changeBlur({ start: video.currentTime }); };
 $('#blurOut').onclick = () => { const b = blurs[selectedBlur]; if (b && video.currentTime > b.start + 0.2) changeBlur({ end: video.currentTime }); };
 $('#blurRemove').onclick = () => { blurs = blurs.filter((_, i) => i !== selectedBlur); selectedBlur = -1; renderBlurs(); };
-// With a blur picked, dragging on the video draws its box (as shares of the video, through any zoom).
+// Drag an end of a blur's bar to change when it starts or stops; the playhead follows so the moment can be seen.
+let retiming = false; // A drag on a bar's end isn't also a click that picks or unpicks the blur.
+function retimeBlur(down, i, end) {
+  if (down.button !== 0) return;
+  retiming = true;
+  down.preventDefault(); down.stopPropagation();
+  const lane = $('#blurLane'), r = lane.getBoundingClientRect(), bar = down.currentTarget.parentElement;
+  selectedBlur = i;
+  // The bar moves in place while dragging; the lane is drawn again only at the end, so the handle isn't replaced mid-drag.
+  const move = (e) => {
+    const t = StillTrim.timeAt(e.clientX - r.left, r.width, duration), b = blurs[selectedBlur] = StillBlurs.retime(blurs[selectedBlur], end, t, trim);
+    const left = StillTrim.position(b.start, duration) * 100;
+    bar.style.left = `${left}%`; bar.style.width = `${StillTrim.position(b.end, duration) * 100 - left}%`;
+    jump(end === 'start' ? b.start : b.end);
+  };
+  const up = (e) => { move(e); removeEventListener('pointermove', move); removeEventListener('pointerup', up); setTimeout(() => { retiming = false; }, 0); const picked = blurs[selectedBlur]; blurs.sort((a, b) => a.start - b.start); selectedBlur = blurs.indexOf(picked); renderBlurs(); };
+  addEventListener('pointermove', move); addEventListener('pointerup', up);
+}
+// Keyframes, fade and see-through for the picked blur.
+function showBlurTools() {
+  const b = blurs[selectedBlur];
+  if (!b) return;
+  const keyHere = (b.keys || []).some((k) => Math.abs(k.t - video.currentTime) <= 0.25);
+  // Only when it changes: this runs as the video plays.
+  if ($('#blurKey').dataset.here !== String(keyHere)) { $('#blurKey').dataset.here = String(keyHere); $('#blurKey').innerHTML = keyHere ? `${icon('diamond-minus')}Remove Keyframe` : `${icon('diamond-plus')}Add Keyframe`; refreshIcons(); }
+  $('#blurKey').title = keyHere ? 'Take away the keyframe at the playhead' : 'Make the blur follow something moving: drag it to a new place here, and it glides there from its last keyframe';
+  $('#blurFade').value = String(b.fade || 0);
+  $('#blurOpacity').value = String(Math.round((b.opacity == null ? 1 : b.opacity) * 100));
+  $('#blurOpacityValue').textContent = `${$('#blurOpacity').value}%`;
+}
+$('#blurKey').onclick = () => {
+  const b = blurs[selectedBlur]; if (!b) return;
+  const keyHere = (b.keys || []).some((k) => Math.abs(k.t - video.currentTime) <= 0.25);
+  blurs[selectedBlur] = keyHere ? StillBlurs.removeKey(b, video.currentTime) : StillBlurs.addKey(b, video.currentTime);
+  if (!keyHere) toast('Keyframe added. Drag the blur to where it should be at this moment.');
+  renderBlurs();
+};
+$('#blurFade').addEventListener('change', (e) => changeBlur({ fade: Number(e.target.value) || undefined }));
+$('#blurOpacity').addEventListener('input', (e) => { const b = blurs[selectedBlur]; if (!b) return; const v = Number(e.target.value) / 100; blurs[selectedBlur] = { ...b, opacity: v >= 1 ? undefined : v }; $('#blurOpacityValue').textContent = `${e.target.value}%`; renderView(); });
+$('#blurOpacity').addEventListener('change', () => renderBlurs());
+video.addEventListener('timeupdate', () => { if (selectedBlur >= 0) showBlurTools(); });
+// With a blur picked, drag a corner to resize it, drag inside to move it, or drag anywhere else to draw it afresh
+// (as shares of the video, through any zoom). A blur with keyframes gets a keyframe at the playhead instead.
 $('#clip').addEventListener('pointerdown', (down) => {
   if (selectedBlur < 0 || down.button !== 0) return;
   down.preventDefault(); down.stopPropagation();
   const r = $('#clip').getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
   const src = StillZoom.source(vw, vh, StillZoom.at(zooms, video.currentTime));
   const share = (e) => ({ x: (src.x + (e.clientX - r.left) / r.width * src.w) / vw, y: (src.y + (e.clientY - r.top) / r.height * src.h) / vh });
-  const from = share(down), clip = $('#clip'); clip.setPointerCapture(down.pointerId);
-  const move = (e) => { blurs[selectedBlur] = { ...blurs[selectedBlur], ...StillBlurs.fromDrag(from, share(e)) }; renderView(); };
+  const from = share(down), clip = $('#clip'), time = video.currentTime; clip.setPointerCapture(down.pointerId);
+  const original = blurs[selectedBlur], start = StillBlurs.boxAt(original, time);
+  const handle = StillBlurs.handleAt(start, from, 12 / r.width * src.w / vw);
+  const move = (e) => {
+    const p = share(e), box = handle ? StillBlurs.dragBox(start, handle, p.x - from.x, p.y - from.y) : StillBlurs.fromDrag(from, p);
+    blurs[selectedBlur] = StillBlurs.placeAt(original, time, box); renderView();
+  };
   const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderBlurs(); };
   clip.addEventListener('pointermove', move); clip.addEventListener('pointerup', up);
 }, true);
@@ -1223,7 +1307,11 @@ async function open() {
   renderCallouts(false);
   chapters = (Array.isArray(project.chapters) ? project.chapters : []).filter((c) => c && Number.isFinite(c.time)).map((c) => ({ time: c.time, title: String(c.title || 'Chapter') })).sort((a, b) => a.time - b.time);
   renderChapters(false);
-  blurs = (Array.isArray(project.blurs) ? project.blurs : []).filter((b) => b && b.end > b.start).map((b) => ({ start: b.start, end: b.end, ...StillBlurs.fit(b) }));
+  blurs = (Array.isArray(project.blurs) ? project.blurs : []).filter((b) => b && b.end > b.start).map((b) => ({
+    start: b.start, end: b.end, ...StillBlurs.fit(b),
+    ...(Array.isArray(b.keys) && b.keys.length ? { keys: b.keys.filter((k) => Number.isFinite(k.t)).map((k) => ({ t: k.t, ...StillBlurs.fit(k) })).sort((p, q) => p.t - q.t) } : {}),
+    ...(b.fade > 0 ? { fade: b.fade } : {}), ...(b.opacity >= 0 && b.opacity < 1 ? { opacity: b.opacity } : {}),
+  }));
   renderBlurs();
   opening = StillTransitions.STYLES.includes(project.opening) ? project.opening : 'none'; closing = StillTransitions.STYLES.includes(project.closing) ? project.closing : 'none';
   $('#opening').value = opening; $('#closing').value = closing;

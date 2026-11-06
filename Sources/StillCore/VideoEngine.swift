@@ -13,6 +13,8 @@ public struct PreparedVideo {
     public let quality: VideoQuality
     /// A custom preset's bitrate; when set it replaces the size-based bitrate of `quality`.
     public let bitrate: Int?
+    /// The recording's own picture size (upright), inside the frame; the editor places drag handles from it.
+    public var sourceSize: CGSize = .zero
 }
 public enum VideoError: LocalizedError {
     case noVideo, export, invalidRange, cancelled
@@ -128,7 +130,7 @@ public enum VideoEngine {
         composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(max(1, min(60, settings.fps))))
         let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: cm(total/speed)), kept: kept, speed: speed, screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
         composition.instructions = [instruction]
-        return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: total/speed, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality))
+        return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: total/speed, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality), sourceSize: oriented)
     }
     public static func export(_ prepared: PreparedVideo, to url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
         if prepared.quality != .original || prepared.bitrate != nil { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, progress: progress); return }
@@ -258,11 +260,15 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
         var screen = CIImage(cvPixelBuffer: source).transformed(by: i.transform)
         screen = screen.transformed(by: CGAffineTransform(translationX: -screen.extent.minX, y: -screen.extent.minY))
         // Blur boxes, on the recording's own picture so they follow it through zooms. Core Image counts from the bottom.
-        for blur in s.blurs ?? [] where time >= blur.start && time <= blur.end {
-            let w = screen.extent.width, h = screen.extent.height
-            let rect = CGRect(x: blur.x*w, y: (1-blur.y-blur.h)*h, width: blur.w*w, height: blur.h*h).integral
+        // A blur can move (keyframes), fade in and out, and let the picture show through (its strength).
+        for blur in s.blurs ?? [] {
+            let alpha = blur.alpha(at: time)
+            guard alpha > 0 else { continue }
+            let box = blur.box(at: time), w = screen.extent.width, h = screen.extent.height
+            let rect = CGRect(x: box.minX*w, y: (1-box.minY-box.height)*h, width: box.width*w, height: box.height*h).integral
             let radius = max(6, min(rect.width, rect.height)/5)
-            let soft = screen.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius]).cropped(to: rect)
+            var soft = screen.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius]).cropped(to: rect)
+            if alpha < 1 { soft = soft.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)]) }
             screen = soft.composited(over: screen)
         }
         let padding = style == .none ? 0 : s.padding

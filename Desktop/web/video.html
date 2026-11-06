@@ -78,6 +78,12 @@
   .lane button { position: absolute; top: 2px; height: 12px; min-width: 6px; padding: 0; border: 0; border-radius: 4px; background: var(--accent); opacity: .55; cursor: pointer; }
   .lane.captions button { background: var(--text); opacity: .4; }
   .lane.blurs button { background: var(--red); opacity: .45; }
+  /* A blur's bar: grab either end to retime it; diamonds are its keyframes. */
+  .lane.blurs button .grip { position: absolute; top: -2px; bottom: -2px; width: 8px; cursor: ew-resize; }
+  .lane.blurs button .grip.from { left: -4px; }
+  .lane.blurs button .grip.to { right: -4px; }
+  .lane.blurs button.selected .grip::after { content: ""; position: absolute; left: 3px; top: 1px; bottom: 1px; width: 2px; border-radius: 1px; background: var(--text); }
+  .lane.blurs button .key { position: absolute; top: 2px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); background: var(--text); border-radius: 1px; pointer-events: none; }
   /* Fast-forwards: dashes, like motion lines. */
   .lane.skims button { background: repeating-linear-gradient(90deg, var(--text) 0 5px, transparent 5px 9px); opacity: .45; }
   .lane.skims button.selected { opacity: .95; }
@@ -213,7 +219,10 @@
     <button class="btn" id="findPrivate" title="Read the frame on screen and blur emails, card numbers, keys, IP addresses and phone numbers for 3 seconds" disabled><i data-lucide="shield-check"></i>Find Private Info</button>
     <span class="grow"></span>
     <span class="zoom-tools" id="blurTools" hidden>
-      <span class="dim">Drag on the video to place it.</span>
+      <span class="dim">Drag on the video to place it, or its corners to resize.</span>
+      <button class="btn" id="blurKey" title="Make the blur follow something moving"><i data-lucide="diamond-plus"></i>Add Keyframe</button>
+      <label class="dim" title="How long it takes to appear and to go">Fade <select class="field" id="blurFade" aria-label="Fade"><option value="0">None</option><option value="0.25">0.25 s</option><option value="0.5">0.5 s</option><option value="1">1 s</option></select></label>
+      <label class="dim" title="How much of the picture shows through">Strength <input type="range" id="blurOpacity" min="10" max="100" step="5" value="100" aria-label="Blur strength"><span id="blurOpacityValue">100%</span></label>
       <button class="btn" id="blurIn" title="Start this blur at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
       <button class="btn" id="blurOut" title="End this blur at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
       <button class="btn plain" id="blurRemove" title="Remove this blur (Delete)"><i data-lucide="trash-2"></i>Remove</button>

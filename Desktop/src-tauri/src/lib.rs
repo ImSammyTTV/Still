@@ -336,27 +336,34 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         if floating || !from_shortcut || _icons.is_some() { std::thread::sleep(Duration::from_millis(80)); }
         let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
-        let windows = if purpose == "screenshot" || purpose == "record" { capture::list_windows(factor) } else { vec![] };
         let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
         let temp = private_temp();
-        // All at once, so a second display doesn't add to the wait.
-        let pictures: Vec<Vec<u8>> = std::thread::scope(|scope| {
-            let jobs: Vec<_> = grabs.iter().map(|g| scope.spawn(|| capture::jpeg(&g.image, 90))).collect();
-            jobs.into_iter().map(|job| job.join().unwrap_or_default()).collect()
+        // Every display at once, each split across the processor's cores, with the window list read alongside, so
+        // the overlay waits as little as possible. Each display's picture arrives as strips the page joins again.
+        let cores = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(4);
+        let strips = (cores / grabs.len().max(1) as u32).clamp(1, 8);
+        let (pictures, windows) = std::thread::scope(|scope| {
+            let listing = scope.spawn(|| if purpose == "screenshot" || purpose == "record" { capture::list_windows(factor) } else { vec![] });
+            let jobs: Vec<_> = grabs.iter().map(|g| scope.spawn(move || capture::jpeg_strips(&g.image, 90, strips))).collect();
+            let pictures: Vec<Vec<(u32, u32, Vec<u8>)>> = jobs.into_iter().map(|job| job.join().unwrap_or_default()).collect();
+            (pictures, listing.join().unwrap_or_default())
         });
         let mut labels = Vec::new();
         for (i, g) in grabs.iter().enumerate() {
-            let file = temp.join(format!("still-overlay-{}-{}.jpg", std::process::id(), i));
-            let _ = std::fs::write(&file, &pictures[i]);
+            let parts: Vec<Value> = pictures[i].iter().enumerate().map(|(k, (y, rows, bytes))| {
+                let file = temp.join(format!("still-overlay-{}-{}-{}.jpg", std::process::id(), i, k));
+                let _ = std::fs::write(&file, bytes);
+                json!({ "path": file, "y": y, "h": rows })
+            }).collect();
             let (w, h) = g.image.dimensions();
             let mine: Vec<Value> = windows.iter().filter(|r| r.x < (g.x + w as i32) as f64 && r.y < (g.y + h as i32) as f64 && r.x + r.w > g.x as f64 && r.y + r.h > g.y as f64)
                 .map(|r| json!({ "id": r.id, "x": r.x - g.x as f64, "y": r.y - g.y as f64, "w": r.w, "h": r.h })).collect();
             let under_cursor = cursor.x >= g.x as f64 && cursor.x < (g.x + w as i32) as f64 && cursor.y >= g.y as f64 && cursor.y < (g.y + h as i32) as f64;
             let init = json!({
                 "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(), "canScroll": scroll::supported(),
-                "imagePath": file, "imageWidth": w, "imageHeight": h, "windows": mine,
+                "imageParts": parts, "imageWidth": w, "imageHeight": h, "windows": mine,
                 "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"),
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
                 "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
@@ -449,7 +456,7 @@ fn end_selection(app: &AppHandle) {
     let _ = app.global_shortcut().unregister("Escape");
     let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
-    for i in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}.jpg", std::process::id(), i))); }
+    for i in 0..16 { for k in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}-{}.jpg", std::process::id(), i, k))); } }
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
     hide_floating(app, false);
     warm_overlays(app);

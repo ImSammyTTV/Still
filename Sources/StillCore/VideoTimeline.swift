@@ -250,11 +250,93 @@ public enum AudioPauses {
 /// A part of a video's picture blurred for a stretch of the recording (in its own time). The box is kept as shares of
 /// the video (0 to 1, from the top left) so it fits any export size and follows the picture through zooms. Windows
 /// and Linux follow the same rules (shared/blurs.js) and share the test cases.
+/// Where a moving blur is at a moment of the recording (shares of the picture, from the top left).
+public struct VideoBlurKey: Codable, Equatable, Hashable {
+    public var t: Double, x: Double, y: Double, w: Double, h: Double
+    public init(t: Double, x: Double, y: Double, w: Double, h: Double) { self.t = t; self.x = x; self.y = y; self.w = w; self.h = h }
+    var box: CGRect { CGRect(x: x, y: y, width: w, height: h) }
+}
+
+/// A blur can follow something across the screen: `keys` are its box at moments of the recording, and between two
+/// keys it glides (easing in and out); before the first key and after the last it stays put. `fade` is how many
+/// seconds it takes to appear and to go, and `opacity` how much it hides (1 fully). Follows Desktop/web/shared/blurs.js
+/// and shares its test cases.
 public struct VideoBlur: Codable, Equatable, Hashable, Identifiable {
     public var id = UUID()
     public var start: Double
     public var end: Double
     public var x: Double, y: Double, w: Double, h: Double
+    public var keys: [VideoBlurKey]?
+    public var fade: Double?
+    public var opacity: Double?
+    public var box: CGRect { CGRect(x: x, y: y, width: w, height: h) }
+    static let keyGap = 0.05
+    private static func ease(_ u: Double) -> Double { u*u*(3-2*u) }
+    /// The box at `time`.
+    public func box(at time: Double) -> CGRect {
+        guard let keys, let first = keys.first, let last = keys.last else { return box }
+        if time <= first.t { return first.box }
+        if time >= last.t { return last.box }
+        guard let i = keys.firstIndex(where: { $0.t > time }), i > 0 else { return last.box }
+        let a = keys[i-1], c = keys[i], u = Self.ease((time-a.t)/(c.t-a.t))
+        let mix = { (p: Double, q: Double) in p+(q-p)*u }
+        return CGRect(x: mix(a.x, c.x), y: mix(a.y, c.y), width: mix(a.w, c.w), height: mix(a.h, c.h))
+    }
+    /// How strongly it shows at `time`: 0 outside its time, rising and falling over the fade, never above `opacity`.
+    public func alpha(at time: Double) -> Double {
+        guard time >= start, time <= end else { return 0 }
+        let strength = min(1, max(0, opacity ?? 1)), fade = min(self.fade ?? 0, (end-start)/2)
+        let edge = fade > 0 ? min(1, (time-start)/fade, (end-time)/fade) : 1
+        return strength*Self.ease(min(1, max(0, edge)))
+    }
+    /// The blur with its box set at `time`: a keyed blur gets (or updates) a key there, an unkeyed one just moves.
+    public func placing(at time: Double, _ rect: CGRect) -> VideoBlur {
+        let f = Self.fit(x: rect.minX, y: rect.minY, w: rect.width, h: rect.height)
+        var copy = self
+        guard let keys, !keys.isEmpty else { copy.x = f.x; copy.y = f.y; copy.w = f.w; copy.h = f.h; return copy }
+        copy.keys = (keys.filter { abs($0.t-time) >= Self.keyGap } + [VideoBlurKey(t: time, x: f.x, y: f.y, w: f.w, h: f.h)]).sorted { $0.t < $1.t }
+        return copy
+    }
+    /// Start following movement: a key at the start with its box, and one at `time` with where it is then.
+    public func addingKey(at time: Double) -> VideoBlur {
+        let here = box(at: time)
+        var copy = self
+        if copy.keys?.isEmpty ?? true { copy.keys = [VideoBlurKey(t: start, x: x, y: y, w: w, h: h)] }
+        return copy.placing(at: time, here)
+    }
+    /// Takes away the key nearest `time` (within a quarter second); the last one going makes it still again, there.
+    public func removingKey(near time: Double) -> VideoBlur {
+        guard let keys, let best = keys.indices.filter({ abs(keys[$0].t-time) <= 0.25 }).min(by: { abs(keys[$0].t-time) < abs(keys[$1].t-time) }) else { return self }
+        var copy = self, rest = keys
+        let gone = rest.remove(at: best)
+        if rest.isEmpty { copy.keys = nil; copy.x = gone.x; copy.y = gone.y; copy.w = gone.w; copy.h = gone.h } else { copy.keys = rest }
+        return copy
+    }
+    public func hasKey(near time: Double) -> Bool { keys?.contains { abs($0.t-time) <= 0.25 } ?? false }
+    /// Which part of a box is under `p` (shares): "nw", "ne", "sw", "se" for a corner, "move" inside, nil elsewhere.
+    public static func handle(in box: CGRect, at p: CGPoint, tolerance: Double = 0.02) -> String? {
+        for (name, corner) in [("nw", CGPoint(x: box.minX, y: box.minY)), ("ne", CGPoint(x: box.maxX, y: box.minY)), ("sw", CGPoint(x: box.minX, y: box.maxY)), ("se", CGPoint(x: box.maxX, y: box.maxY))]
+            where abs(p.x-corner.x) <= tolerance && abs(p.y-corner.y) <= tolerance { return name }
+        return box.contains(p) ? "move" : nil
+    }
+    /// The box after dragging `handle` by (dx, dy): a corner moves while the opposite one stays; "move" moves it all.
+    public static func dragged(_ box: CGRect, handle: String, dx: Double, dy: Double) -> CGRect {
+        if handle == "move" {
+            let f = fit(x: min(1-box.width, max(0, box.minX+dx)), y: min(1-box.height, max(0, box.minY+dy)), w: box.width, h: box.height)
+            return CGRect(x: f.x, y: f.y, width: f.w, height: f.h)
+        }
+        let clamp = { (v: Double) in min(1, max(0, v)) }
+        let x1 = clamp(handle.contains("w") ? box.minX+dx : box.minX), x2 = clamp(handle.contains("e") ? box.maxX+dx : box.maxX)
+        let y1 = clamp(handle.contains("n") ? box.minY+dy : box.minY), y2 = clamp(handle.contains("s") ? box.maxY+dy : box.maxY)
+        let f = fit(x: min(x1, x2), y: min(y1, y2), w: abs(x2-x1), h: abs(y2-y1))
+        return CGRect(x: f.x, y: f.y, width: f.w, height: f.h)
+    }
+    /// Its timing after dragging one end of its bar: at least 0.2 s long and inside the clip.
+    public func retimed(start moved: Bool, to time: Double, clipStart: Double, clipEnd: Double) -> VideoBlur {
+        var copy = self
+        if moved { copy.start = min(end-0.2, max(clipStart, time)) } else { copy.end = min(clipEnd, max(start+0.2, time)) }
+        return copy
+    }
     public init(start: Double, end: Double, x: Double = 0.35, y: Double = 0.42, w: Double = 0.3, h: Double = 0.16) {
         self.start = start; self.end = end
         let fitted = Self.fit(x: x, y: y, w: w, h: h); self.x = fitted.x; self.y = fitted.y; self.w = fitted.w; self.h = fitted.h
@@ -443,5 +525,39 @@ public enum VideoStoryboard {
         let cols = max(1, min(columns, n)), rows = Int((Double(n) / Double(cols)).rounded(.up))
         let th = (tile * height / max(1, width)).rounded()
         return Layout(cols: cols, rows: rows, tileWidth: tile, tileHeight: th, strip: strip, gap: gap, width: Double(cols) * tile + Double(cols + 1) * gap, height: Double(rows) * (th + strip) + Double(rows + 1) * gap)
+    }
+}
+
+
+/// Where the recording's own picture lands in the exported frame at a moment: through the frame padding and any zoom,
+/// with the same sums the exporter uses, top-left origin, in the frame's pixels. The editor uses it to put drag
+/// handles for blurs and callouts over the preview.
+public enum VideoGeometry {
+    /// The zoom at `time`: its scale (1 when none) and the point it centres on (shares).
+    public static func zoom(_ zooms: [ZoomSegment], at time: Double) -> (scale: Double, x: Double, y: Double) {
+        for segment in zooms where time >= segment.start && time <= segment.end {
+            let ramp = min(0.4, (segment.end-segment.start)/3)
+            let raw = min(1, max(0, min((time-segment.start)/ramp, (segment.end-time)/ramp)))
+            return (1+(segment.scale-1)*raw*raw*(3-2*raw), segment.x, segment.y)
+        }
+        return (1, 0.5, 0.5)
+    }
+    public static func pictureRect(output: CGSize, source: CGSize, padding: Double, zooms: [ZoomSegment], time: Double) -> CGRect {
+        guard source.width > 0, source.height > 0 else { return .zero }
+        let scale = min((output.width-padding*2)/source.width, (output.height-padding*2)/source.height)
+        let content = CGSize(width: source.width*scale, height: source.height*scale)
+        let origin = CGPoint(x: (output.width-content.width)/2, y: (output.height-content.height)/2)
+        let z = zoom(zooms, at: time)
+        var tx = content.width/2-z.x*content.width*z.scale, ty = content.height/2-(1-z.y)*content.height*z.scale
+        tx = min(0, max(content.width*(1-z.scale), tx)); ty = min(0, max(content.height*(1-z.scale), ty))
+        let height = content.height*z.scale
+        // The exporter counts from the bottom; flip to count from the top.
+        return CGRect(x: origin.x+tx, y: output.height-(origin.y+ty+height), width: content.width*z.scale, height: height)
+    }
+    /// The frame's place in a view that shows it whole, centred (as the preview player does).
+    public static func fitted(_ output: CGSize, in view: CGSize) -> CGRect {
+        guard output.width > 0, output.height > 0 else { return .zero }
+        let k = min(view.width/output.width, view.height/output.height)
+        return CGRect(x: (view.width-output.width*k)/2, y: (view.height-output.height*k)/2, width: output.width*k, height: output.height*k)
     }
 }

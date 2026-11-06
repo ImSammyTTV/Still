@@ -3,8 +3,20 @@ const G = StillGeometry;
 const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('--selection').trim() || '#0a84ff';
 const selectionAlpha = (alpha) => { const hex = SELECTION.replace('#', ''); const n = parseInt(hex.length === 3 ? hex.replace(/./g, '$&$&') : hex, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`; };
 const canvas = $('#canvas'), ctx = canvas.getContext('2d');
-const image = new Image();
-image.crossOrigin = 'anonymous'; // So the colour under the crosshair can be read from it.
+// The frozen screen, joined from the strips Still sends (they encode side by side, so the overlay opens sooner).
+const image = document.createElement('canvas');
+function loadPicture(data) {
+  const parts = data.imageParts || [{ path: data.imagePath, y: 0 }];
+  image.width = data.imageWidth; image.height = data.imageHeight;
+  const paint = image.getContext('2d');
+  return Promise.all(parts.map(async (part) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // So the colour under the crosshair can be read from it.
+    img.src = still.fileUrl(part.path);
+    await img.decode(); // Decoded off the page's main thread, all strips at once.
+    paint.drawImage(img, 0, part.y);
+  }));
+}
 // One pixel at a time, for the colour under the crosshair.
 const sampler = document.createElement('canvas'); sampler.width = sampler.height = 1;
 const sample = sampler.getContext('2d', { willReadFrequently: true });
@@ -41,9 +53,7 @@ function init(data) {
   $('.mode[data-mode="scroll"]').hidden = !data.canScroll;
   // The window stays hidden until the frozen screen is on it, so it never flashes black or shows a half-drawn page.
   const shown = () => requestAnimationFrame(() => requestAnimationFrame(() => still.send('overlay:drawn')));
-  image.onload = () => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); shown(); };
-  image.onerror = shown;
-  image.src = still.fileUrl(data.imagePath);
+  loadPicture(data).then(() => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); shown(); }, shown);
   refreshIcons();
   window.focus();
 }
