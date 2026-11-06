@@ -3,7 +3,7 @@
 const opts = window.__STILL_PARAMS__ || {};
 let recorder, streams = [], cropTimer, audioContext, ext = 'webm';
 let start = 0, pausedAt = 0, pausedTotal = 0, paused = false, cancelled = false, finishing = false, finishedAt = 0, trayTime = '';
-let media = null, triedWebm = false, failure = '';
+let media = null, triedWebm = false, failure = '', got = 0, watchdog = 0;
 // Each second of video goes to Still as soon as the recorder hands it over, in order, and Still appends it to a
 // file. Nothing waits in memory for the end, so stopping is quick however long the recording ran, and a
 // recording that is interrupted still exists on disk up to its last second.
@@ -22,20 +22,33 @@ function startRecorder(type) {
   const settings = media.getVideoTracks()[0].getSettings(), o = opts.options || {};
   const bits = StillGeometry.videoBitrate(settings.width || 1920, settings.height || 1080, o.fps || 30, o.quality);
   recorder = new MediaRecorder(media, { mimeType: type || undefined, videoBitsPerSecond: bits });
-  recorder.ondataavailable = (e) => { if (e.data.size) queueChunk(e.data); };
+  recorder.ondataavailable = (e) => { if (e.data.size) { got += e.data.size; queueChunk(e.data); } };
   recorder.onstop = finish;
   recorder.onerror = (e) => {
     const reason = (e.error && (e.error.message || e.error.name)) || 'The video encoder stopped unexpectedly.';
-    if (!written && ext === 'mp4' && !triedWebm) {
-      // Nothing recorded yet, so start over in WebM, which every engine can encode. The failed recorder's own
-      // stop event follows this error; ignoring it keeps the two recorders from both finishing.
-      triedWebm = true; recorder.onstop = null; recorder.ondataavailable = null; discardWritten();
-      setTimeout(() => { startRecorder(pickType('webm')); recorder.start(1000); start = performance.now(); pausedTotal = 0; toast('MP4 isn’t available here, so this is recording as WebM'); }, 0);
-      return;
-    }
+    if (!written && ext === 'mp4' && !triedWebm) return switchToWebm();
     failure = reason;
     stop();
   };
+}
+// Nothing recorded yet, so start over in WebM, which every engine can encode. The old recorder's own stop event
+// is ignored so the two recorders don't both finish.
+function switchToWebm() {
+  triedWebm = true; recorder.onstop = null; recorder.ondataavailable = null;
+  try { if (recorder.state !== 'inactive') recorder.stop(); } catch { /* already stopped */ }
+  discardWritten(); got = 0;
+  setTimeout(() => { startRecorder(pickType('webm')); recorder.start(1000); start = performance.now(); pausedTotal = 0; watch(); toast('MP4 isn’t available here, so this is recording as WebM'); }, 0);
+}
+// Some engines' encoders neither record nor report an error: the recording just stays empty. A few seconds in, an
+// MP4 recording with nothing in it starts over as WebM, and a WebM one says straight away that nothing is coming
+// through, rather than only when it is stopped.
+function watch() {
+  clearTimeout(watchdog);
+  watchdog = setTimeout(() => {
+    if (got || finishing || paused) return;
+    if (ext === 'mp4' && !triedWebm) return switchToWebm();
+    toast((opts.options || {}).engine === 'webview' ? 'Nothing is being recorded. Stop, then set Record with to Still in Settings → Screen Recording.' : 'Nothing is being recorded yet. Try the WebM format in Settings → Screen Recording.');
+  }, 3500);
 }
 refreshIcons();
 
@@ -95,9 +108,12 @@ async function begin() {
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(2, Math.round(src.w / 2) * 2); canvas.height = Math.max(2, Math.round(src.h / 2) * 2);
     const ctx = canvas.getContext('2d', { alpha: false });
-    const draw = () => ctx.drawImage(video, src.x, src.y, src.w, src.h, 0, 0, canvas.width, canvas.height);
+    // Each new screen frame is drawn as it arrives and handed to the recorder explicitly, so frames keep coming
+    // even when Windows slows the page's timers down (the timer stays as a backstop).
+    videoTrack = canvas.captureStream(0).getVideoTracks()[0];
+    const draw = () => { ctx.drawImage(video, src.x, src.y, src.w, src.h, 0, 0, canvas.width, canvas.height); if (videoTrack.requestFrame) videoTrack.requestFrame(); };
     draw(); cropTimer = setInterval(draw, 1000 / (o.fps || 30));
-    videoTrack = canvas.captureStream(o.fps || 30).getVideoTracks()[0];
+    if (video.requestVideoFrameCallback) { const onFrame = () => { if (finishing) return; draw(); video.requestVideoFrameCallback(onFrame); }; video.requestVideoFrameCallback(onFrame); }
   }
   const sources = [...display.getAudioTracks()];
   if (o.microphone) {
@@ -116,7 +132,7 @@ async function begin() {
   await still.invoke('recording:prepared').catch(() => {}); // The camera and overlays are extras: never a reason not to record.
   for (let n = o.countdown || 0; n > 0; n--) { $('#time').textContent = `Starts in ${n}`; await new Promise((res) => setTimeout(res, 1000)); if (cancelled || finishing) break; }
   if (cancelled || finishing) return finish();
-  recorder.start(1000); start = performance.now(); $('#time').textContent = '0:00';
+  recorder.start(1000); start = performance.now(); $('#time').textContent = '0:00'; watch();
   still.invoke('recording:started');
 }
 
@@ -139,14 +155,16 @@ async function finish() {
   if (finishing) return; // Stop can arrive twice now that the tray offers it too.
   finishing = true; finishedAt = performance.now();
   still.send('recording:finished'); // After the recorder, so the bubble doesn't vanish in the last frames.
-  clearInterval(cropTimer);
+  clearInterval(cropTimer); clearTimeout(watchdog);
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); audioContext?.close();
   if (cancelled) { await writes; return still.invoke('recording:cancel'); }
   $('#time').textContent = 'Saving…';
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
   await writes; // The last second is usually still on its way.
   // No data is a failure to report, never something to drop quietly.
-  if (!written) return still.invoke('recording:error', withWhy(failure || 'No video was captured. Try the WebM format in Settings → Screen Recording.'), 'save');
+  if (!written) return still.invoke('recording:error', failure ? withWhy(failure) : (opts.options || {}).engine === 'webview'
+    ? 'No video was captured by the system web engine. In Settings → Screen Recording, set Record with to Still (recommended).'
+    : 'No video was captured. Try the WebM format in Settings → Screen Recording.', 'save');
   try {
     await still.invoke('recording:save', ext, duration);
   } catch (error) {
