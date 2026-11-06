@@ -11,7 +11,16 @@ import StillCore
     let transcription = Transcription()
     @Published var transcribing = false
     private var transcriptionTask: Task<Void, Never>?
-    @Published var settings = VideoSettings() { didSet { if !restoring { redoStack.removeAll(); undoStack.append(oldValue); if undoStack.count > 60 { undoStack.removeFirst() }; dirty = true } } }
+    @Published var settings = VideoSettings() { didSet { if !restoring {
+        redoStack.removeAll()
+        // A drag on the preview saves as it goes; all of one drag is a single undo step.
+        let live = Date() < liveEditUntil
+        if !(live && liveEditRecorded) { undoStack.append(oldValue); if undoStack.count > 60 { undoStack.removeFirst() } }
+        liveEditRecorded = live; dirty = true
+    } } }
+    private var liveEditUntil = Date.distantPast, liveEditRecorded = false
+    /// Called before each change made by dragging on the preview: changes within a moment of each other are one undo step.
+    func liveEdit() { if Date() >= liveEditUntil { liveEditRecorded = false }; liveEditUntil = Date().addingTimeInterval(0.6) }
     @Published var metadata = RecordingMetadata()
     @Published var duration: Double = 0
     @Published var playhead: Double = 0
