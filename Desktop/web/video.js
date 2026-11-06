@@ -777,23 +777,54 @@ function renderCaptions() {
   captions.forEach((c, i) => {
     const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
     lane.append(el('button', { class: i === selectedCaption ? 'selected' : '', style: `left:${left}%;width:${width}%`, title: `“${c.text}” ${StillTrim.clock(c.start)} to ${StillTrim.clock(c.end)}`, 'aria-pressed': String(i === selectedCaption),
-      onclick: () => { selectedCaption = i === selectedCaption ? -1 : i; if (selectedCaption >= 0) jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); renderCaptions(); } }));
+      onclick: () => { selectedCaption = i === selectedCaption ? -1 : i; if (selectedCaption >= 0) { clearOthersForCaption(); jump(c.start + Math.min(0.5, (c.end - c.start) / 2)); } renderCaptions(); } }));
   });
   const c = captions[selectedCaption];
   $('#captionTools').hidden = !c;
-  if (c) { if (document.activeElement !== $('#captionText')) $('#captionText').value = c.text; $('#captionPlace').value = c.position; $('#captionSize').value = c.size; }
+  if (c) { if (document.activeElement !== $('#captionText')) $('#captionText').value = c.text; $('#captionPlace').value = StillCaptions.placed(c) ? 'custom' : c.position; $('#captionSize').value = c.size; }
+  $('#clip').classList.toggle('placing-text', !!c);
   renderView(); saveProject();
+}
+// Picking a text sets the others aside, so a press on the video moves the text, not a blur, callout or zoom point.
+function clearOthersForCaption() {
+  if (selectedBlur >= 0) { selectedBlur = -1; renderBlurs(); }
+  if (selectedCallout >= 0) { selectedCallout = -1; renderCallouts(false); }
+  if (selectedZoom >= 0) { pickZoom(-1, false); renderZooms(); }
 }
 const changeCaption = (patch) => { let changed = null; captions = captions.map((c, i) => (i === selectedCaption ? (changed = { ...c, ...patch }) : c)).sort((a, b) => a.start - b.start); if (changed) selectedCaption = captions.indexOf(changed); renderCaptions(); };
 $('#addCaption').onclick = () => {
   captions = StillCaptions.add(captions, video.currentTime, trim);
   selectedCaption = captions.findIndex((c) => c.start <= video.currentTime + 0.01 && c.end >= video.currentTime && c.text === 'Your text');
+  clearOthersForCaption();
   renderCaptions(); $('#captionText').focus(); $('#captionText').select();
 };
 $('#opening').onchange = (e) => { opening = e.target.value; renderView(); saveProject(); };
 $('#closing').onchange = (e) => { closing = e.target.value; renderView(); saveProject(); };
 $('#captionText').addEventListener('input', (e) => changeCaption({ text: e.target.value }));
-$('#captionPlace').onchange = (e) => changeCaption({ position: e.target.value });
+$('#captionPlace').onchange = (e) => {
+  if (e.target.value === 'custom') return;
+  captions = captions.map((c, i) => (i === selectedCaption ? StillCaptions.toPlace(c, e.target.value) : c)); renderCaptions();
+};
+// With a text picked, drag it on the video to put it anywhere; a press elsewhere on the video moves it there.
+$('#clip').addEventListener('pointerdown', (down) => {
+  const c = captions[selectedCaption];
+  if (!c || selectedBlur >= 0 || selectedCallout >= 0 || selectedZoom >= 0 || down.button !== 0) return;
+  down.preventDefault(); down.stopPropagation();
+  const clip = $('#clip'), r = clip.getBoundingClientRect(); clip.setPointerCapture(down.pointerId);
+  const font = getComputedStyle(document.body).fontFamily, ctx = document.createElement('canvas').getContext('2d');
+  const measure = (text, size) => { ctx.font = `600 ${size}px ${font}`; return ctx.measureText(text).width; };
+  const b = StillCaptions.box(c, r.width, r.height, measure), px = down.clientX - r.left, py = down.clientY - r.top;
+  const grabbed = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+  // Grabbed: keep the pointer on the same spot of the pill. Elsewhere: the pill's centre jumps to the pointer.
+  const start = grabbed ? StillCaptions.moved(c, 0, 0, r.width, r.height) : { ...c, x: px / r.width, y: py / r.height };
+  const move = (e) => {
+    captions[selectedCaption] = StillCaptions.moved(start, (e.clientX - down.clientX) / r.width, (e.clientY - down.clientY) / r.height);
+    $('#captionPlace').value = 'custom'; renderView();
+  };
+  const up = (e) => { move(e); clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up); renderCaptions(); };
+  clip.addEventListener('pointermove', move); clip.addEventListener('pointerup', up);
+  move(down);
+}, true);
 $('#captionSize').onchange = (e) => changeCaption({ size: e.target.value });
 $('#captionIn').onclick = () => { const c = captions[selectedCaption]; if (c && video.currentTime < c.end - 0.2) changeCaption({ start: video.currentTime }); };
 $('#captionOut').onclick = () => { const c = captions[selectedCaption]; if (c && video.currentTime > c.start + 0.2) changeCaption({ end: video.currentTime }); };

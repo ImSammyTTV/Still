@@ -47,7 +47,7 @@ function watch() {
   watchdog = setTimeout(() => {
     if (got || finishing || paused) return;
     if (ext === 'mp4' && !triedWebm) return switchToWebm();
-    toast((opts.options || {}).engine === 'webview' ? 'Nothing is being recorded. Stop, then set Record with to Still in Settings → Screen Recording.' : 'Nothing is being recorded yet. Try the WebM format in Settings → Screen Recording.');
+    toast(still.platform === 'win32' ? 'Nothing is being recorded. Stop, and see why Still’s own recorder couldn’t run in the message that follows.' : 'Nothing is being recorded yet. Try the WebM format in Settings → Screen Recording.');
   }, 3500);
 }
 refreshIcons();
@@ -162,8 +162,8 @@ async function finish() {
   const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
   await writes; // The last second is usually still on its way.
   // No data is a failure to report, never something to drop quietly.
-  if (!written) return still.invoke('recording:error', failure ? withWhy(failure) : (opts.options || {}).engine === 'webview'
-    ? 'No video was captured by the system web engine. In Settings → Screen Recording, set Record with to Still (recommended).'
+  if (!written) return still.invoke('recording:error', failure ? withWhy(failure) : still.platform === 'win32'
+    ? withWhy('No video was captured by Windows’ own recorder.')
     : 'No video was captured. Try the WebM format in Settings → Screen Recording.', 'save');
   try {
     await still.invoke('recording:save', ext, duration);

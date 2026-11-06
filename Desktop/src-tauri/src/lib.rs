@@ -599,6 +599,8 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let (iw, ih) = grab.image.dimensions();
     let rec = setting(app, "recording");
     let native = native_engine(&rec);
+    let mut rec = rec;
+    if cfg!(windows) { rec["engine"] = json!(if native.is_ok() { "auto" } else { "webview" }); }
     let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
         "stopShortcut": setting(app, "shortcuts")["record"], "native": native.is_ok(), "nativeWhy": native.err() });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
@@ -651,7 +653,9 @@ fn window_gone(app: &AppHandle, label: &str) {
 /// engine reports, so a failed recording says which recorder failed.
 fn native_engine(rec: &Value) -> Result<(), String> {
     if !cfg!(windows) { return Err("Still’s own recorder is Windows-only.".into()) }
-    if rec["engine"].as_str() == Some("webview") { return Err("Settings → Screen Recording → Record with is set to the system recorder.".into()) }
+    // An old "Record with: System web engine" setting is ignored: that route shows Windows' own "Choose what to share"
+    // picker and on many computers records nothing at all. It is only the fallback when Still's recorder can't run.
+    let _ = rec;
     record::available()
 }
 

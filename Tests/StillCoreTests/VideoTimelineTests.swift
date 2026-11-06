@@ -99,6 +99,22 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertNil(VideoCaption(start: 2, end: 3, text: "").alpha(at: 2.5))
     }
 
+    // The same cases are in Desktop/test/captions.test.js.
+    func testADraggedCaptionSitsWhereItWasPutAndAPlacePutsItBack() {
+        let c = VideoCaption(start: 0, end: 3, text: "Hi")
+        let m = c.moved(dx: 0.1, dy: -0.5, width: 1000, height: 500)
+        XCTAssertEqual(m.x!, 0.6, accuracy: 1e-9); XCTAssertEqual(m.y!, 0.38, accuracy: 1e-9)
+        let at = m.layout(width: 1000, height: 500)
+        XCTAssertEqual(at.fontSize, 30); XCTAssertEqual(at.x, 600, accuracy: 1e-9); XCTAssertEqual(at.y, 190, accuracy: 1e-9)
+        let edge = m.moved(dx: 5, dy: 5)
+        XCTAssertEqual(edge.x, 0.98); XCTAssertEqual(edge.y, 0.98)
+        let back = edge.at(place: "top")
+        XCTAssertNil(back.x); XCTAssertNil(back.y); XCTAssertEqual(back.position, "top")
+        XCTAssertFalse(c.placed); XCTAssertTrue(m.placed)
+        let centre = VideoCaption.centre(x: 990, y: 5, boxWidth: 100, boxHeight: 40, width: 1000, height: 500)
+        XCTAssertEqual(centre.x, 946); XCTAssertEqual(centre.y, 24)
+    }
+
     func testCaptionSizeAndPlaceFollowTheVideoArea() {
         let a = VideoCaption(start: 0, end: 1).layout(width: 1920, height: 1080)
         XCTAssertEqual(a.fontSize, 65); XCTAssertEqual(a.x, 960); XCTAssertEqual(a.y, 950.4, accuracy: 0.001)

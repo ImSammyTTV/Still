@@ -48,6 +48,8 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 16. **Export with everything.** Add a zoom, text, a blur, an arrow, music and a Fade opening, then export at 1080p.
     Play the file: everything is where it was in the preview, and the music dips when you speak.
 17. **Export GIF** of a 10-second stretch. Its size and frame count match what the GIF sheet said.
+18. **Drag text anywhere.** Add text, drag its pill to a corner of the video, then export. The text is in the same
+    place in the file. Choosing Top, Middle or Bottom again puts it back.
 
 ## History and sharing
 

@@ -91,6 +91,7 @@
   .lane.callouts button.selected { opacity: .95; }
   .lane.blurs button.selected { opacity: .95; }
   .clip.placing { cursor: crosshair; }
+  .clip.placing-text { cursor: move; }
   .lane.captions button.selected { opacity: .9; }
   .lane button.selected { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
   .zoom-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
@@ -193,7 +194,8 @@
     <span class="grow"></span>
     <span class="zoom-tools" id="captionTools" hidden>
       <input class="field" id="captionText" aria-label="Caption text" maxlength="160" style="width:220px">
-      <select class="field" id="captionPlace" aria-label="Where it shows"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
+      <select class="field" id="captionPlace" aria-label="Where it shows"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option><option value="custom" hidden>Where you put it</option></select>
+      <span class="dim">Drag it on the video to move it.</span>
       <select class="field" id="captionSize" aria-label="Text size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
       <button class="btn" id="captionIn" title="Start this text at the playhead"><i data-lucide="arrow-right-to-line"></i>Start</button>
       <button class="btn" id="captionOut" title="End this text at the playhead"><i data-lucide="arrow-left-to-line"></i>End</button>
