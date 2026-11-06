@@ -100,5 +100,13 @@ public struct VideoSettings: Codable, Equatable {
     public var closing: String?
     /// The stretches of the recording that make the finished video.
     public var kept: [VideoCut] { VideoTimeline.kept(start: start, end: end, cuts: cuts ?? [], skims: skims ?? []) }
+    /// Whether two settings make the same video apart from how its picture looks: the same stretches, speed, sound,
+    /// frame size and tracks. When they do, the preview redraws with the new look instead of being built again.
+    public func sameShape(as other: VideoSettings) -> Bool {
+        start == other.start && end == other.end && cuts == other.cuts && skims == other.skims && speed == other.speed
+            && frame == other.frame && padding == other.padding && aspect == other.aspect && exportHeight == other.exportHeight
+            && muted == other.muted && music == other.music && cameraEnabled == other.cameraEnabled && fps == other.fps
+            && opening == other.opening && closing == other.closing
+    }
     public init() {}
 }

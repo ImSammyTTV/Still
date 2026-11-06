@@ -2,8 +2,8 @@ import SwiftUI
 import StillCore
 
 /// Drag handles over the video preview, so blurs and callouts are placed on the picture itself rather than with
-/// sliders (the sliders stay in the inspector for fine adjustment). A drag shows its outline live and is saved once,
-/// when it ends, so it is one undo step and the preview is rebuilt once. Boxes are shares of the recording's own
+/// sliders (the sliders stay in the inspector for fine adjustment). A drag saves as it goes, like a slider, so the
+/// blur follows even if the system never reports the end of the drag; the whole drag is still one undo step. Boxes are shares of the recording's own
 /// picture, which `VideoGeometry` finds inside the frame through padding and zoom.
 struct PreviewHandles: View {
     @ObservedObject var model: VideoEditorModel
@@ -20,7 +20,7 @@ struct PreviewHandles: View {
                     ForEach(model.settings.blurs ?? []) { blur in
                         if model.playhead >= blur.start && model.playhead <= blur.end {
                             BoxHandles(box: blur.box(at: model.playhead), screen: screen, tint: .white, label: blur.keys == nil ? nil : "keyframed") { box in
-                                model.updateBlur(blur.id) { $0.placing(at: model.playhead, box) }
+                                model.liveEdit(); model.updateBlur(blur.id) { $0 = $0.placing(at: model.playhead, box) }
                             }
                         }
                     }
@@ -30,11 +30,11 @@ struct PreviewHandles: View {
                         if model.playhead >= callout.start && model.playhead <= callout.end {
                             if callout.kind == "arrow" {
                                 ArrowHandles(tip: CGPoint(x: callout.x, y: callout.y), tail: CGPoint(x: callout.x2 ?? 0.38, y: callout.y2 ?? 0.36), screen: screen) { tip, tail in
-                                    model.updateCallout(callout.id) { $0.x = tip.x; $0.y = tip.y; $0.x2 = tail.x; $0.y2 = tail.y }
+                                    model.liveEdit(); model.updateCallout(callout.id) { $0.x = tip.x; $0.y = tip.y; $0.x2 = tail.x; $0.y2 = tail.y }
                                 }
                             } else {
                                 BoxHandles(box: CGRect(x: callout.x, y: callout.y, width: callout.w ?? 0.3, height: callout.h ?? 0.3), screen: screen, tint: Color(nsColor: NSColor(hex: callout.color)), label: nil) { box in
-                                    model.updateCallout(callout.id) { $0.x = box.minX; $0.y = box.minY; $0.w = box.width; $0.h = box.height }
+                                    model.liveEdit(); model.updateCallout(callout.id) { $0.x = box.minX; $0.y = box.minY; $0.w = box.width; $0.h = box.height }
                                 }
                             }
                         }
@@ -49,10 +49,11 @@ struct PreviewHandles: View {
 struct BoxHandles: View {
     let box: CGRect, screen: CGRect, tint: Color, label: String?
     let commit: (CGRect) -> Void
-    @State private var live: CGRect?
+    /// The box when this drag began; the gesture resets it by itself when the drag ends or is cancelled.
+    @GestureState private var origin: CGRect?
 
     var body: some View {
-        let b = live ?? box
+        let b = box
         let r = CGRect(x: screen.minX+b.minX*screen.width, y: screen.minY+b.minY*screen.height, width: b.width*screen.width, height: b.height*screen.height)
         ZStack(alignment: .topLeading) {
             Rectangle().fill(Color.white.opacity(0.001))
@@ -70,8 +71,11 @@ struct BoxHandles: View {
     }
     private func drag(_ handle: String) -> some Gesture {
         DragGesture(minimumDistance: 1)
-            .onChanged { v in live = VideoBlur.dragged(box, handle: handle, dx: Double(v.translation.width/max(1, screen.width)), dy: Double(v.translation.height/max(1, screen.height))) }
-            .onEnded { _ in if let live { commit(live) }; live = nil }
+            .updating($origin) { v, start, _ in
+                if start == nil { start = box }
+                let moved = VideoBlur.dragged(start ?? box, handle: handle, dx: Double(v.translation.width/max(1, screen.width)), dy: Double(v.translation.height/max(1, screen.height)))
+                DispatchQueue.main.async { commit(moved) }
+            }
     }
 }
 
@@ -79,18 +83,18 @@ struct BoxHandles: View {
 struct ArrowHandles: View {
     let tip: CGPoint, tail: CGPoint, screen: CGRect
     let commit: (CGPoint, CGPoint) -> Void
-    @State private var live: (CGPoint, CGPoint)?
+    @GestureState private var origin: [CGPoint]?
 
     var body: some View {
-        let (t, s) = live ?? (tip, tail)
+        let (t, s) = (tip, tail)
         let view = { (p: CGPoint) in CGPoint(x: screen.minX+p.x*screen.width, y: screen.minY+p.y*screen.height) }
         let a = view(t), b = view(s)
         ZStack(alignment: .topLeading) {
             Path { $0.move(to: a); $0.addLine(to: b) }.stroke(Color.white.opacity(0.001), lineWidth: 16).contentShape(Path { $0.move(to: a); $0.addLine(to: b) }.strokedPath(StrokeStyle(lineWidth: 16)))
-                .gesture(drag { d in (moved(t, d), moved(s, d)) })
+                .gesture(drag { o, d in (moved(o[0], d), moved(o[1], d)) })
             Path { $0.move(to: a); $0.addLine(to: b) }.stroke(.white, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])).allowsHitTesting(false)
-            dot(at: a).gesture(drag { d in (moved(t, d), s) }).accessibilityLabel("Arrow tip")
-            dot(at: b).gesture(drag { d in (t, moved(s, d)) }).accessibilityLabel("Arrow tail")
+            dot(at: a).gesture(drag { o, d in (moved(o[0], d), o[1]) }).accessibilityLabel("Arrow tip")
+            dot(at: b).gesture(drag { o, d in (o[0], moved(o[1], d)) }).accessibilityLabel("Arrow tail")
         }
     }
     private func dot(at p: CGPoint) -> some View {
@@ -99,8 +103,12 @@ struct ArrowHandles: View {
     private func moved(_ p: CGPoint, _ d: CGSize) -> CGPoint {
         CGPoint(x: min(1, max(0, p.x+d.width/max(1, screen.width))), y: min(1, max(0, p.y+d.height/max(1, screen.height))))
     }
-    private func drag(_ update: @escaping (CGSize) -> (CGPoint, CGPoint)) -> some Gesture {
-        DragGesture(minimumDistance: 1).onChanged { v in live = update(v.translation) }.onEnded { _ in if let live { commit(live.0, live.1) }; live = nil }
+    private func drag(_ update: @escaping ([CGPoint], CGSize) -> (CGPoint, CGPoint)) -> some Gesture {
+        DragGesture(minimumDistance: 1).updating($origin) { v, start, _ in
+            if start == nil { start = [tip, tail] }
+            let (a, b) = update(start ?? [tip, tail], v.translation)
+            DispatchQueue.main.async { commit(a, b) }
+        }
     }
 }
 
@@ -109,13 +117,14 @@ struct ArrowHandles: View {
 struct BlurLane: View {
     @ObservedObject var model: VideoEditorModel
     let width: CGFloat, total: Double
-    @State private var live: VideoBlur?
+    /// The blur as it was when this drag began; reset by the gesture itself.
+    @GestureState private var origin: VideoBlur?
 
     var body: some View {
         let x = { (t: Double) in CGFloat(t/total)*width }
         ZStack(alignment: .topLeading) {
             ForEach(model.settings.blurs ?? []) { stored in
-                let blur = live?.id == stored.id ? live! : stored
+                let blur = stored
                 let left = x(blur.start), w = max(8, x(blur.end)-x(blur.start))
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.red.opacity(model.panel == "Blur" ? 0.75 : 0.45)).frame(width: w, height: 10)
@@ -133,12 +142,12 @@ struct BlurLane: View {
         Rectangle().fill(Color.white.opacity(0.001)).frame(width: 10, height: 16)
             .overlay(Capsule().fill(.white.opacity(0.9)).frame(width: 2, height: 10))
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-            .gesture(DragGesture(minimumDistance: 0).onChanged { v in
-                let base = model.settings.blurs?.first { $0.id == blur.id } ?? blur
-                let edge = start ? base.start : base.end
+            .gesture(DragGesture(minimumDistance: 0).updating($origin) { v, first, _ in
+                if first == nil { first = blur }
+                let base = first ?? blur, edge = start ? base.start : base.end
                 let moved = base.retimed(start: start, to: edge+Double(v.translation.width/max(1, width))*total, clipStart: model.settings.start, clipEnd: model.settings.end)
-                live = moved; model.seek(start ? moved.start : moved.end)
-            }.onEnded { _ in if let live { model.updateBlur(live.id) { $0 = live } }; live = nil })
+                DispatchQueue.main.async { model.liveEdit(); model.updateBlur(moved.id) { $0.start = moved.start; $0.end = moved.end }; model.seek(start ? moved.start : moved.end) }
+            })
             .accessibilityLabel(start ? "Blur start" : "Blur end")
     }
 }

@@ -11,7 +11,16 @@ import StillCore
     let transcription = Transcription()
     @Published var transcribing = false
     private var transcriptionTask: Task<Void, Never>?
-    @Published var settings = VideoSettings() { didSet { if !restoring { redoStack.removeAll(); undoStack.append(oldValue); if undoStack.count > 60 { undoStack.removeFirst() }; dirty = true } } }
+    @Published var settings = VideoSettings() { didSet { if !restoring {
+        redoStack.removeAll()
+        // A drag on the preview saves as it goes; all of one drag is a single undo step.
+        let live = Date() < liveEditUntil
+        if !(live && liveEditRecorded) { undoStack.append(oldValue); if undoStack.count > 60 { undoStack.removeFirst() } }
+        liveEditRecorded = live; dirty = true
+    } } }
+    private var liveEditUntil = Date.distantPast, liveEditRecorded = false
+    /// Called before each change made by dragging on the preview: changes within a moment of each other are one undo step.
+    func liveEdit() { if Date() >= liveEditUntil { liveEditRecorded = false }; liveEditUntil = Date().addingTimeInterval(0.6) }
     @Published var metadata = RecordingMetadata()
     @Published var duration: Double = 0
     @Published var playhead: Double = 0
@@ -63,7 +72,13 @@ import StillCore
             for index in 0..<9 { guard !Task.isCancelled else { return }; if let result = try? await generator.image(at: CMTime(seconds: max(0, min(duration-0.01, duration*Double(index)/9)), preferredTimescale: 600)) { thumbnails.append(NSImage(cgImage: result.image, size: .zero)) } }
         } catch { self.error = error.localizedDescription; loading = false }
     }
+    /// What the preview's compositor draws from, so a change of look shows straight away.
+    private let live = LiveVideoSettings()
+    private var shownShape: VideoSettings?
     func schedulePreview() {
+        live.set(settings)
+        // Only the look changed (cursor, clicks, blurs, callouts, text, zooms, corners…): redraw the frame now.
+        if let shown = shownShape, shown.sameShape(as: settings) { previewTask?.cancel(); refreshFrame(); return }
         previewTask?.cancel()
         previewTask = Task { try? await Task.sleep(nanoseconds: 180_000_000); guard !Task.isCancelled else { return }; await rebuild() }
     }
@@ -71,8 +86,11 @@ import StillCore
         do {
             let wasPlaying = player.rate > 0, position = playhead
             let camera = metadata.cameraFilename.map { library.root.appendingPathComponent($0) }
-            let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: settings, metadata: metadata, cameraURL: camera, musicURL: musicURL)
+            let building = settings
+            live.set(building)
+            let result = try await VideoEngine.prepare(url: library.videoSource(item), settings: building, metadata: metadata, cameraURL: camera, musicURL: musicURL, live: live)
             guard !Task.isCancelled else { return }
+            shownShape = building; live.set(settings)
             prepared = result; outputSize = result.size; sourceSize = result.sourceSize
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
             player.replaceCurrentItem(with: playerItem)
@@ -80,6 +98,11 @@ import StillCore
             if wasPlaying { player.play() }
             loading = false
         } catch { self.error = error.localizedDescription; loading = false }
+    }
+    /// Draws the paused frame again with the current settings (a playing video picks them up on its next frame).
+    private func refreshFrame() {
+        guard player.rate == 0, let item = player.currentItem, let composition = item.videoComposition?.mutableCopy() as? AVVideoComposition else { return }
+        item.videoComposition = composition
     }
     func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; player.play(); playing = true } }
     func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, VideoTimeline.outputTime(at: value, kept: settings.kept)), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
@@ -442,7 +465,8 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Callouts", "arrow.up.right.circle"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            // Ten panels: two rows of five, so none spill out of the sidebar over the preview.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 5), spacing: 4) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Callouts", "arrow.up.right.circle"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }

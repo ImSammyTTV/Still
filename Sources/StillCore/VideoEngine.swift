@@ -21,7 +21,7 @@ public enum VideoError: LocalizedError {
     public var errorDescription: String? { switch self { case .noVideo: return "This file has no readable video track."; case .export: return "Video export failed. Try a smaller output size."; case .invalidRange: return "Choose a trim range with at least one frame."; case .cancelled: return "Export cancelled." } }
 }
 public enum VideoEngine {
-    public static func prepare(url: URL, settings: VideoSettings, metadata: RecordingMetadata = .init(), cameraURL: URL? = nil, musicURL: URL? = nil) async throws -> PreparedVideo {
+    public static func prepare(url: URL, settings: VideoSettings, metadata: RecordingMetadata = .init(), cameraURL: URL? = nil, musicURL: URL? = nil, live: LiveVideoSettings? = nil) async throws -> PreparedVideo {
         let source = AVURLAsset(url: url)
         guard let original = try await source.loadTracks(withMediaType: .video).first else { throw VideoError.noVideo }
         let duration = try await source.load(.duration).seconds
@@ -129,6 +129,7 @@ public enum VideoEngine {
         composition.customVideoCompositorClass = CaptureVideoCompositor.self
         composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(max(1, min(60, settings.fps))))
         let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: cm(total/speed)), kept: kept, speed: speed, screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
+        instruction.live = live
         composition.instructions = [instruction]
         return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: total/speed, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality), sourceSize: oriented)
     }
@@ -202,6 +203,16 @@ public enum VideoEngine {
     }
 }
 
+/// Settings the preview's compositor reads at every frame, so a change to how the picture looks (cursor, blurs,
+/// callouts, zooms…) shows at once without building the video again. Exports leave it out and use their own copy.
+public final class LiveVideoSettings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: VideoSettings?
+    public init() {}
+    public var settings: VideoSettings? { lock.lock(); defer { lock.unlock() }; return value }
+    public func set(_ settings: VideoSettings) { lock.lock(); value = settings; lock.unlock() }
+}
+
 final class CaptureVideoInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     /// The stretches of the recording laid end to end, to find the recording's time at each frame.
@@ -220,6 +231,7 @@ final class CaptureVideoInstruction: NSObject, AVVideoCompositionInstructionProt
     let transform: CGAffineTransform
     let sourceSize: CGSize
     let cameraTransform: CGAffineTransform
+    var live: LiveVideoSettings?
     init(timeRange: CMTimeRange, kept: [VideoCut], speed: Double, screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, settings: VideoSettings, metadata: RecordingMetadata, size: CGSize, transform: CGAffineTransform, cameraTransform: CGAffineTransform, sourceSize: CGSize) {
         self.timeRange = timeRange; self.kept = kept; self.speed = speed; self.screenID = screenID; self.cameraID = cameraID; self.settings = settings; self.metadata = metadata; self.size = size; self.transform = transform; self.sourceSize = sourceSize; self.cameraTransform = cameraTransform
         requiredSourceTrackIDs = ([screenID]+(cameraID.map { [$0] } ?? [])).map { NSNumber(value: $0) }
@@ -253,7 +265,7 @@ public final class CaptureVideoCompositor: NSObject, AVVideoCompositing, @unchec
         }
     }
     private func frame(source: CVPixelBuffer, camera: CVPixelBuffer?, time: Double, instruction i: CaptureVideoInstruction) -> CIImage {
-        let s = i.settings, bounds = CGRect(origin: .zero, size: i.size)
+        let s = i.live?.settings ?? i.settings, bounds = CGRect(origin: .zero, size: i.size)
         let style = FrameStyle(rawValue: s.frame) ?? .none
         let colors = style == .none ? [NSColor.black, NSColor.black] : style.colors
         var background = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: 0, y: i.size.height), "inputPoint1": CIVector(x: i.size.width, y: 0), "inputColor0": CIColor(cgColor: colors[0].cgColor), "inputColor1": CIColor(cgColor: colors[1].cgColor)])!.outputImage!.cropped(to: bounds)
