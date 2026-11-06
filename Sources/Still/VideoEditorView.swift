@@ -442,7 +442,8 @@ struct VideoEditorView: View {
     }
     private var inspector: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Callouts", "arrow.up.right.circle"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
+            // Ten panels: two rows of five, so none spill out of the sidebar over the preview.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 5), spacing: 4) { ForEach([("Background", "photo"), ("Zoom", "plus.magnifyingglass"), ("Text", "captions.bubble"), ("Blur", "eye.slash"), ("Chapters", "bookmark"), ("Music", "music.note"), ("Callouts", "arrow.up.right.circle"), ("Cursor", "cursorarrow"), ("Camera", "video"), ("Audio", "speaker.wave.2")], id: \.0) { name, symbol in Button { model.panel = name } label: { Image(systemName: symbol).frame(width: 39, height: 33).background(model.panel == name ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).help(name).accessibilityLabel(name) } }.padding(10)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 17) { Text(model.panel).font(Studio.heading); controls }.padding(18) }
         }
