@@ -13,6 +13,7 @@ mod settings;
 mod similar;
 mod describe;
 mod trash;
+mod mcp;
 mod video;
 
 use capture::Grab;
@@ -1089,6 +1090,7 @@ fn after_settings(app: &AppHandle, patch: &Value) {
     if patch.get("shortcuts").is_some() { register_shortcuts(app); }
     if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
     if patch.get("quickAccess").is_some() { layout_previews(app); }
+    if patch.get("claude").is_some() { apply_connector(app); }
     build_tray_menu(app);
     let values = st(app).settings.lock().unwrap().values.clone();
     broadcast(app, "settings:changed", values);
@@ -1364,6 +1366,111 @@ async fn library_send_to_claude(app: AppHandle, id: String) -> Result<bool, Stri
     }
     open_url("https://claude.ai/new");
     Ok(false)
+}
+// ---- Still for Claude (MCP) ------------------------------------------------------------------------
+
+/// `Still --mcp`, started by Claude: speaks MCP on stdin/stdout and passes tool calls to the running app.
+pub fn mcp_bridge() { mcp::run_bridge() }
+
+/// The running app's end: listening while Settings → Claude → "Let Claude use Still" is on.
+static CONNECTOR: Mutex<Option<(u16, Arc<std::sync::atomic::AtomicBool>)>> = Mutex::new(None);
+fn connector_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join(mcp::FILE)) }
+fn apply_connector(app: &AppHandle) {
+    let wanted = setting(app, "claude.connector").as_bool().unwrap_or(false);
+    let mut running = CONNECTOR.lock().unwrap();
+    if !wanted {
+        if let Some((port, stop)) = running.take() { stop.store(true, std::sync::atomic::Ordering::SeqCst); let _ = std::net::TcpStream::connect(("127.0.0.1", port)); }
+        if let Some(f) = connector_file(app) { let _ = std::fs::remove_file(f); }
+        return;
+    }
+    if running.is_some() { return; }
+    let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) else { return };
+    let Ok(port) = listener.local_addr().map(|a| a.port()) else { return };
+    let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    if let Some(f) = connector_file(app) { let _ = write_private(&f, &json!({ "port": port, "token": token, "pid": std::process::id() }).to_string()); }
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *running = Some((port, stop.clone()));
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if stop.load(std::sync::atomic::Ordering::SeqCst) { break; }
+            let Ok(mut stream) = stream else { continue };
+            let (app, token) = (app.clone(), token.clone());
+            std::thread::spawn(move || {
+                let Some(request) = mcp::read_request(&mut stream) else { return };
+                let reply = if !mcp::same_secret(request["token"].as_str().unwrap_or(""), &token) { mcp::text_result("Still refused this connection.", true) }
+                    else { tauri::async_runtime::block_on(connector_call(&app, request["name"].as_str().unwrap_or(""), &request["arguments"])) };
+                use std::io::Write;
+                let _ = writeln!(stream, "{reply}");
+            });
+        }
+    });
+}
+/// A picture for Claude: at most 1568 pixels on its longest side, as JPEG.
+fn image_for_claude(image: &image::RgbaImage) -> Value {
+    let (w, h) = image.dimensions(); let k = 1568.0 / w.max(h) as f64;
+    let small = if k < 1.0 { image::imageops::resize(image, ((w as f64 * k) as u32).max(1), ((h as f64 * k) as u32).max(1), image::imageops::FilterType::Triangle) } else { image.clone() };
+    let rgb = image::DynamicImage::ImageRgba8(small).to_rgb8();
+    let mut out = Vec::new();
+    let _ = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&rgb);
+    use base64::Engine;
+    json!({ "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(out), "mimeType": "image/jpeg" })
+}
+fn capture_summary(lib: &Library, i: &Item, full: bool) -> Value {
+    let cut = |t: &str, n: usize| if t.chars().count() > n { format!("{}…", t.chars().take(n).collect::<String>()) } else { t.to_string() };
+    json!({ "id": i.id, "title": i.title, "kind": i.kind, "created": chrono::DateTime::from_timestamp_millis(i.created).map(|d| d.with_timezone(&chrono::Local).to_rfc3339()),
+        "width": i.width, "height": i.height, "seconds": if i.kind == "recording" { json!(i.duration) } else { Value::Null }, "starred": i.starred,
+        "description": if i.description.is_empty() { Value::Null } else { json!(i.description) },
+        "text": if i.text.is_empty() { Value::Null } else { json!(cut(&i.text, if full { 6000 } else { 200 })) },
+        "file": if full { json!(lib.file(i)) } else { Value::Null } })
+}
+async fn connector_call(app: &AppHandle, name: &str, args: &Value) -> Value {
+    let arg_id = args["id"].as_str().unwrap_or("").to_string();
+    let found = || { let lib = st(app).library.lock().unwrap(); lib.get(&arg_id) };
+    match name {
+        "still_capture_screen" => {
+            let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => return mcp::text_result(&e, true) };
+            let n = args["display"].as_u64().unwrap_or(1).max(1) as usize;
+            let Some(grab) = grabs.get(n - 1).or(grabs.first()) else { return mcp::text_result("No display to capture.", true) };
+            let (w, h) = grab.image.dimensions();
+            let item = match st(app).library.lock().unwrap().add(&capture::png(&grab.image), "screenshot", "png", None, w, h) { Ok(i) => i, Err(e) => return mcp::text_result(&e, true) };
+            make_thumb(app, &item); broadcast(app, "library:changed", Value::Null);
+            json!({ "content": [{ "type": "text", "text": format!("Screenshot saved in Still as “{}” (id {}), {w} × {h}, display {} of {}.", item.title, item.id, n.min(grabs.len()), grabs.len()) }, image_for_claude(&grab.image)], "isError": false })
+        }
+        "still_list_captures" => {
+            let lib = st(app).library.lock().unwrap();
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+            let items: Vec<Value> = lib.search(args["query"].as_str().unwrap_or(""), args["kind"].as_str().unwrap_or("all")).iter().take(limit).map(|i| capture_summary(&lib, i, false)).collect();
+            mcp::text_result(&serde_json::to_string_pretty(&items).unwrap_or_default(), false)
+        }
+        "still_get_capture" => {
+            let Some(item) = found() else { return mcp::text_result("No capture with that id. Use still_list_captures to find one.", true) };
+            let (summary, file) = { let lib = st(app).library.lock().unwrap(); (capture_summary(&lib, &item, true), lib.file(&item)) };
+            let mut content = vec![json!({ "type": "text", "text": serde_json::to_string_pretty(&summary).unwrap_or_default() })];
+            if item.kind != "recording" { if let Some(image) = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)) { content.push(image_for_claude(&image)); } }
+            json!({ "content": content, "isError": false })
+        }
+        "still_describe_capture" => match library_describe(app.clone(), arg_id).await { Ok(t) => mcp::text_result(&t, false), Err(e) => mcp::text_result(&e, true) },
+        "still_share_capture" => {
+            if found().is_none() { return mcp::text_result("No capture with that id.", true); }
+            match upload_item(app, &arg_id).await { Ok(link) => mcp::text_result(&link, false), Err(e) => mcp::text_result(&e, true) }
+        }
+        "still_open_capture" => {
+            let Some(item) = found() else { return mcp::text_result("No capture with that id.", true) };
+            let a = app.clone(); let id = item.id.clone(); let video = item.kind == "recording";
+            let _ = app.run_on_main_thread(move || if video { open_video(&a, &id) } else { open_editor(&a, Some(&id), false) });
+            mcp::text_result(&format!("Opened “{}” in Still.", item.title), false)
+        }
+        _ => mcp::text_result(&format!("Still has no tool called {name}."), true),
+    }
+}
+/// For Settings: the line to paste into Claude's settings, with this computer's path to Still.
+#[tauri::command]
+async fn connector_info() -> Value {
+    let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    json!({ "command": exe, "args": ["--mcp"],
+        "desktop": serde_json::to_string_pretty(&json!({ "mcpServers": { "still": { "command": exe, "args": ["--mcp"] } } })).unwrap_or_default(),
+        "code": format!("claude mcp add --scope user still -- \"{exe}\" --mcp") })
 }
 #[tauri::command]
 async fn library_search_web(app: AppHandle, id: String) -> Result<(), String> {
@@ -2134,6 +2241,7 @@ pub fn run() {
             let saved = saved_link(&handle); st(&handle).session.lock().unwrap().last_link = saved;
             apply_name_pattern(&handle);
             apply_history_days(&handle);
+            apply_connector(&handle);
             let menu = tray_menu(&handle)?;
             TrayIconBuilder::with_id("still").icon(tray_icon()).tooltip("Still").menu(&menu)
                 .show_menu_on_left_click(!cfg!(windows))
@@ -2170,7 +2278,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, library_search_web, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

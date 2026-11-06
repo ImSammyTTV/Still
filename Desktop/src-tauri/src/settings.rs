@@ -25,6 +25,7 @@ pub fn defaults() -> Value {
             "clicks": false, "keys": false, "keysShortcutsOnly": true },
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
         "ai": { "provider": "gemini" },
+        "claude": { "connector": false },
         "cloud": { "provider": "still", "endpoint": "", "expiryDays": 7, "visibility": "link", "autoUpload": false, "driveAccess": "link", "driveEmail": "", "driveFolder": "", "linkFormat": "url" },
         "shortcuts": {
             "area": "CommandOrControl+Shift+4",

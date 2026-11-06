@@ -23,6 +23,7 @@
     "allow-drive-connect",
     "allow-drive-disconnect",
     "allow-ai-get",
-    "allow-ai-set-key"
+    "allow-ai-set-key",
+    "allow-connector-info"
   ]
 }

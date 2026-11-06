@@ -1,14 +1,14 @@
 const PAGES = [
   ['Setup', 'sparkles', '#8e8e93'],
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
-  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['About', 'info', '#0a84ff']
+  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['Claude', 'sparkles', '#d97757'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
   ['allInOne', 'Capture Bar'], ['area', 'Capture Area'], ['window', 'Capture Window'], ['fullscreen', 'Capture Full Screen'],
   ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
-let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' }, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' };
+let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' }, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' }, connector = null;
 let searchBox = null;
 
 // Setup is a one-time guide: once finished it leaves the sidebar, and General offers to bring it back.
@@ -256,6 +256,23 @@ const pages = {
       ], 'After an upload, the share link is copied to your clipboard. Markdown and HTML show pictures inline in docs, issues and chats.')
     ];
   },
+  // Still for Claude: lets Claude (the desktop app or Claude Code) take screenshots and look through History.
+  Claude: () => {
+    const on = !!(prefs.claude && prefs.claude.connector);
+    const copy = (text, what) => navigator.clipboard.writeText(text).then(() => toast(`${what} copied`)).catch(() => toast('Couldn’t copy'));
+    const code = (text) => el('pre', { style: 'margin:0;padding:10px 12px;border-radius:var(--radius-md);background:var(--bg);font:12px ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;user-select:text' }, text);
+    return [
+      group('Still for Claude', [
+        row('Let Claude use Still', el('input', { type: 'checkbox', class: 'switch', 'aria-label': 'Let Claude use Still', checked: on, onchange: async (e) => { await set({ claude: { connector: e.target.checked } }); render(); } }))
+      ], 'With this on, Claude can take a screenshot of your screen, look through and search Capture History, read a capture’s text and picture, describe it, open it, and share it when you ask. Claude only reaches Still from this computer, and only while Still is running. Turn it off to stop it at once.'),
+      on && connector ? group('Claude Desktop', [
+        row('Add to Claude’s settings', el('button', { class: 'btn', onclick: () => copy(connector.desktop, 'Settings') }, 'Copy')), code(connector.desktop)
+      ], 'In Claude Desktop, open Settings → Developer → Edit Config, paste this into claude_desktop_config.json (merge it with any “mcpServers” already there), save, and restart Claude. Then ask Claude to “take a screenshot with Still”.') : null,
+      on && connector ? group('Claude Code', [
+        row('Add with one command', el('button', { class: 'btn', onclick: () => copy(connector.code, 'Command') }, 'Copy')), code(connector.code)
+      ], 'Run this in a terminal once. Claude Code can then use Still in any project.') : null,
+    ];
+  },
   About: () => [el('div', { class: 'about' }, [
     el('img', { src: 'icon.png', alt: '' }), el('b', { style: 'font-size:18px' }, 'Still'),
     el('span', { style: 'color:var(--text-2)' }, `Version ${prefs.version} for ${prefs.platform === 'win32' ? 'Windows' : 'Linux'}`),
@@ -327,6 +344,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   updateStatus = await still.invoke('update:status');
   driveState = await still.invoke('drive:get');
   aiState = await still.invoke('ai:get').catch(() => ({ hasKey: false }));
+  connector = await still.invoke('connector:info').catch(() => null);
   const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings', 'aria-label': 'Search settings categories', autocomplete: 'off' });
   const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');
