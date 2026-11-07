@@ -31,7 +31,7 @@ function colourAt(p) {
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
 let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
 // The magnifier's zoom steps; the scroll wheel moves between them and the choice is remembered.
-const ZOOMS = [2, 3, 4, 6, 8, 12, 16];
+const ZOOMS = G.MAGNIFIER_ZOOMS;
 let magnifierZoom = (() => { try { const z = Number(localStorage.getItem('stillMagnifierZoom')); return ZOOMS.includes(z) ? z : 8; } catch { return 8; } })();
 function stepMagnifier(direction) {
   const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(magnifierZoom) + direction))];
@@ -112,10 +112,15 @@ function updateBar() {
 
 // Read once: looking up a style on every frame makes the browser work out the page's styles again.
 const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono');
-function label(text, x, y) {
+function label(text, x, y, avoid) {
   ctx.font = `500 12px ${MONO}`;
   const w = ctx.measureText(text).width;
-  const px = Math.min(innerWidth - w - 16, Math.max(10, x + 18)), py = Math.min(innerHeight - 30, Math.max(10, y + 18));
+  let px = Math.min(innerWidth - w - 16, Math.max(10, x + 18)), py = Math.min(innerHeight - 30, Math.max(10, y + 18));
+  // Kept clear of the magnifier (and the colour chip under it): next to the pointer on the other side, if it would cover it.
+  if (avoid && px - 7 < avoid.x + avoid.w && px + w + 7 > avoid.x && py - 5 < avoid.y + avoid.h && py + 19 > avoid.y) {
+    py = avoid.y > y ? Math.max(10, y - 42) : Math.min(innerHeight - 30, y + 30);
+    px = Math.min(innerWidth - w - 16, Math.max(10, x - w / 2));
+  }
   ctx.fillStyle = 'rgba(0,0,0,.72)'; roundRect(px - 7, py - 5, w + 14, 24, 6); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.textBaseline = 'top'; ctx.fillText(text, px, py + 1);
 }
@@ -141,14 +146,16 @@ function draw() {
   }
   if (pointer.x < 0) return;
   const hint = purpose === 'record' ? 'Drag to record · hold Space for a window' : purpose === 'scroll' ? 'Drag over the area you will scroll' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
-  label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : hint, pointer.x, pointer.y);
-  if (config.magnifier && !anchor) drawMagnifier();
+  const lens = config.magnifier && !anchor ? drawMagnifier() : null;
+  label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : hint, pointer.x, pointer.y, lens);
 }
 
+// Draws the magnifier and returns the area it covers, colour chip included.
 function drawMagnifier() {
-  const scale = pixelScale, size = 96, zoom = magnifierZoom;
+  // The box grows as the wheel zooms in, and moves to whichever side of the pointer has room.
+  const scale = pixelScale, zoom = magnifierZoom, size = G.magnifierSize(zoom);
   const sx = pointer.x * scale - size / zoom / 2, sy = pointer.y * scale - size / zoom / 2;
-  const x = Math.min(innerWidth - size - 10, pointer.x + 24), y = Math.max(10, pointer.y - size - 24);
+  const { x, y } = G.magnifierPlace(pointer, size, { w: innerWidth, h: innerHeight });
   ctx.save(); roundRect(x, y, size, size, 10); ctx.clip(); ctx.imageSmoothingEnabled = false;
   ctx.drawImage(image, sx, sy, size / zoom, size / zoom, x, y, size, size);
   ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
@@ -162,12 +169,13 @@ function drawMagnifier() {
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; roundRect(x, y, size, size, 10); ctx.stroke();
   // The colour under the crosshair, ready to copy with C.
   const hex = colourAt(pointer);
-  if (!hex) return;
+  if (!hex) return { x, y, w: size, h: size };
   ctx.font = `500 10px ${MONO}`; ctx.textBaseline = 'middle';
   const text = `${hex}  C`, width = ctx.measureText(text).width + 26, top = y + size + 6;
   ctx.fillStyle = 'rgba(0,0,0,.72)'; roundRect(x, top, width, 18, 5); ctx.fill();
   ctx.fillStyle = hex; ctx.fillRect(x + 5, top + 4, 10, 10); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(x + 5.5, top + 4.5, 9, 9);
   ctx.fillStyle = '#fff'; ctx.fillText(text, x + 20, top + 9.5);
+  return { x, y, w: Math.max(size, width), h: size + 24 };
 }
 
 function drawWindowMode() {
@@ -219,8 +227,14 @@ function paint() {
   if (anchor) updateBar();
   draw();
 }
+// Over the Capture Bar (or one of its menus) the crosshair and magnifier step aside, as on the Mac where the bar is
+// its own window, instead of staying frozen where the pointer left the screen.
+function leave() {
+  if (anchor || pointer.x < 0) return;
+  pointer = { x: -100, y: -100 }; hovered = null; draw();
+}
 addEventListener('mousemove', (e) => {
-  if (onBar(e)) return;
+  if (onBar(e)) return leave();
   pointer = point(e); square = e.shiftKey;
   if (!here) { here = true; still.send('overlay:pointer'); }
   follow();
@@ -246,6 +260,8 @@ addEventListener('mouseup', (e) => {
   if (region && region.w > 2 && region.h > 2) finish(region);
   else draw();
 });
+
+document.documentElement.addEventListener('mouseleave', leave);
 
 addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
 

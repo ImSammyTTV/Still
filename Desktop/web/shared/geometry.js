@@ -120,5 +120,20 @@
     return name.replace(/^[-. ]+|[-. ]+$/g, '') ? name : clean(fill(DEFAULT_NAME));
   };
 
-  return { DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
+  // The capture magnifier. Its zoom steps (screen pixels shown per screen pixel); the box grows with the zoom, so
+  // zooming in shows more detail without the picture getting cramped. The same numbers are in SelectionGeometry.swift.
+  const MAGNIFIER_ZOOMS = [2, 3, 4, 6, 8, 12, 16];
+  const magnifierSize = (zoom) => 80 + 16 * Math.max(0, MAGNIFIER_ZOOMS.indexOf(zoom));
+  // Up and to the right of the pointer, moving to the left or below wherever that side would run off the screen,
+  // so the box never comes to rest under the pointer. `below` is room kept under the box for the colour chip.
+  const magnifierPlace = (pointer, size, view, { gap = 24, margin = 10, below = 26 } = {}) => {
+    let x = pointer.x + gap, y = pointer.y - gap - size;
+    if (x + size > view.w - margin) x = pointer.x - gap - size;
+    if (y < margin) y = pointer.y + gap;
+    x = Math.max(margin, Math.min(view.w - size - margin, x));
+    y = Math.max(margin, Math.min(view.h - size - below - margin, y));
+    return { x, y };
+  };
+
+  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
 });
