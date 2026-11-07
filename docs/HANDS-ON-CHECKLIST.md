@@ -10,6 +10,12 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 1. **Area capture, twice in a row.** Take an area screenshot, then another straight away. The overlay should appear
    at once both times, with no flash of black or of the old picture. Move the mouse quickly in circles with the
    magnifier on: the pointer keeps up.
+   - Scroll the wheel: the magnifier grows as it zooms in and shrinks as it zooms out, with the zoom (2× to 16×) in
+     its corner.
+   - Move into each corner of the screen: the magnifier moves to whichever side has room and never sits under the
+     pointer.
+   - Move over the Capture Bar: the crosshair and magnifier step aside, then come back when you leave it.
+   - The bar's icons and order match the Mac's (Windows/Linux): Area, Window, Screen, Scroll | Text, Record, Timer.
 2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the
    screenshot taken at zero has no countdown in it.
 3. **Move the Capture Bar.** Drag it by the Still icon, take a capture, then start a new one. It should be back in

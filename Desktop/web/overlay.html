@@ -37,14 +37,16 @@
 <div class="camera" id="camera"><i data-lucide="camera" style="width:24px;height:24px"></i></div>
 <div class="bar" id="bar">
   <span class="brand" id="barHandle" title="Drag to move the Capture Bar" aria-label="Move the Capture Bar" role="button"><span class="mark"></span></span>
-  <button class="mode active" data-mode="area" title="Area (A)"><i data-lucide="square-dashed"></i>Area</button>
-  <button class="mode" data-mode="window" title="Window (hold Space)"><i data-lucide="app-window"></i>Window</button>
-  <button class="mode" data-mode="fullscreen" title="Screen (F)"><i data-lucide="monitor"></i>Screen</button>
+  <!-- The same order and glyphs as the Mac bar (rectangle.dashed, macwindow, display, arrow.down.to.line | text.viewfinder,
+       record.circle, timer), drawn here so both bars look alike. -->
+  <button class="mode active" data-mode="area" title="Area (A)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5" stroke-dasharray="3.2 2.4"/></svg>Area</button>
+  <button class="mode" data-mode="window" title="Window (hold Space)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M2.5 8.5h19"/><circle cx="5.4" cy="6.25" r=".9" fill="currentColor" stroke="none"/><circle cx="7.9" cy="6.25" r=".9" fill="currentColor" stroke="none"/><circle cx="10.4" cy="6.25" r=".9" fill="currentColor" stroke="none"/></svg>Window</button>
+  <button class="mode" data-mode="fullscreen" title="Screen (F)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M12 16.5v3.5M8 20.5h8"/></svg>Screen</button>
+  <button class="mode" data-mode="scroll" title="Scrolling capture (S)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v12.5M7 11l5 5 5-5M4.5 20.5h15"/></svg>Scroll</button>
   <div class="divider"></div>
-  <button class="mode" data-mode="text" title="Copy text (O)"><i data-lucide="scan-text"></i>Text</button>
-  <button class="mode" data-mode="scroll" title="Scrolling capture (S)"><i data-lucide="arrow-down-to-line"></i>Scroll</button>
-  <button class="mode" data-mode="record" title="Record (V)"><i data-lucide="circle-dot"></i>Record</button>
-  <button class="mode" data-mode="timer" title="Timer (T)"><i data-lucide="timer"></i>Timer</button>
+  <button class="mode" data-mode="text" title="Copy text (O)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16M7.5 9h9M7.5 12h9M7.5 15h5.5"/></svg>Text</button>
+  <button class="mode" data-mode="record" title="Record (V)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.3" fill="currentColor" stroke="none"/></svg>Record</button>
+  <button class="mode" data-mode="timer" title="Timer (T)"><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-6.4 2.65"/><path d="M12 12 7.6 7.6"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>Timer</button>
   <div class="divider"></div>
   <span class="dims"><input class="dim" id="width" placeholder="W" aria-label="Capture width"><span class="times">×</span><input class="dim" id="height" placeholder="H" aria-label="Capture height"></span>
   <button class="mode" id="aspect" title="Lock aspect ratio"><!-- Nested frames, the same glyph as the Mac bar's "aspectratio" symbol. --><svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2.5"/><rect x="5.5" y="7.5" width="10" height="7" rx="1.5"/></svg></button>

@@ -10,6 +10,19 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertEqual(resized.width/resized.height,16.0/9,accuracy: 0.001)
         XCTAssertTrue(bounds.contains(resized))
     }
+    func testMagnifierGrowsWithZoomAndNeverRestsUnderThePointer() {
+        XCTAssertEqual(SelectionGeometry.magnifierZooms.map { SelectionGeometry.magnifierSize(zoom: $0) }, [80, 96, 112, 128, 144, 160, 176])
+        let bounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        for zoom in SelectionGeometry.magnifierZooms {
+            let size = SelectionGeometry.magnifierSize(zoom: zoom)
+            for p in [CGPoint(x: 500, y: 500), CGPoint(x: 1915, y: 500), CGPoint(x: 500, y: 3), CGPoint(x: 1915, y: 3), CGPoint(x: 3, y: 1075), CGPoint(x: 1915, y: 1075)] {
+                let frame = SelectionGeometry.magnifierFrame(pointer: p, size: size, within: bounds)
+                XCTAssertFalse(frame.contains(p), "size \(size) at \(p)")
+                XCTAssertTrue(bounds.insetBy(dx: 9, dy: 9).contains(frame))
+            }
+        }
+        XCTAssertEqual(SelectionGeometry.magnifierFrame(pointer: CGPoint(x: 500, y: 500), size: 144, within: bounds).origin, CGPoint(x: 524, y: 332))
+    }
     func testCropSnapOnlyChangesPointsCloseToEdges() {
         let bounds = CGRect(x: 0,y: 0,width: 100,height: 80)
         XCTAssertEqual(SelectionGeometry.snap(CGPoint(x: 3,y: 77),within: bounds,tolerance: 5),CGPoint(x: 0,y: 80))

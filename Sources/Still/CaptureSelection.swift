@@ -253,9 +253,12 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     private var anchor: CGPoint?
     var isSelecting: Bool { anchor != nil }
     private var pointer = CGPoint(x: -100, y: -100)
-    /// Source pixels shown across the magnifier; fewer means more zoom. The scroll wheel steps through these.
-    private static let magnifierPatches: [CGFloat] = [39, 27, 19, 13, 9, 7, 5]
-    private var magnifierPatch: CGFloat = 13
+    /// The magnifier's zoom (points per screen pixel). The scroll wheel steps through SelectionGeometry's steps, the box
+    /// grows with it, and the choice is remembered for the next capture.
+    private var magnifierZoom: Double = {
+        let saved = UserDefaults.standard.double(forKey: "magnifierZoom")
+        return SelectionGeometry.magnifierZooms.contains(saved) ? saved : 8
+    }()
     private var region = CGRect.zero
     private var hovered: OverlayWindow?
     private var spaceHeld = false
@@ -271,6 +274,8 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     // The colour under the crosshair, under the magnifier; C copies it.
     private let colourBack = CALayer(), colourSwatch = CALayer()
     private let colourLabel = CATextLayer()
+    // The zoom, in the magnifier's corner, so a turn of the wheel has visible feedback.
+    private let zoomBack = CALayer(), zoomLabel = CATextLayer()
     private var copiedColour: String?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -298,7 +303,10 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         colourSwatch.borderColor = NSColor.white.withAlphaComponent(0.7).cgColor; colourSwatch.borderWidth = 1
         colourLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium); colourLabel.fontSize = 10
         colourLabel.foregroundColor = NSColor.white.cgColor; colourLabel.contentsScale = scale
-        for layer in [frozen, shade, highlight, border, crossH, crossV, magnifier, colourBack, colourSwatch, colourLabel, labelBack, label] as [CALayer] { layer.actions = Self.noAnimations; root.addSublayer(layer) }
+        zoomBack.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor; zoomBack.cornerRadius = 4
+        zoomLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium); zoomLabel.fontSize = 10
+        zoomLabel.foregroundColor = NSColor.white.cgColor; zoomLabel.contentsScale = scale; zoomLabel.alignmentMode = .center
+        for layer in [frozen, shade, highlight, border, crossH, crossV, magnifier, zoomBack, zoomLabel, colourBack, colourSwatch, colourLabel, labelBack, label] as [CALayer] { layer.actions = Self.noAnimations; root.addSublayer(layer) }
         if Preferences.shared.rememberSelection, let saved = UserDefaults.standard.dictionary(forKey: "lastSelection"), let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue, (saved["screen"] as? Double) == id, let x = saved["x"] as? Double, let y = saved["y"] as? Double, let w = saved["w"] as? Double, let h = saved["h"] as? Double {
             region = CGRect(x: x, y: y, width: w, height: h).intersection(CGRect(origin: .zero, size: screen.frame.size))
             coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height))
@@ -360,6 +368,18 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             if crosshair == "full" { crossH.frame = CGRect(x: 0, y: pointer.y, width: bounds.width, height: px); crossV.frame = CGRect(x: pointer.x, y: 0, width: px, height: bounds.height) }
             else { crossH.frame = CGRect(x: pointer.x-20, y: pointer.y, width: 40, height: px); crossV.frame = CGRect(x: pointer.x, y: pointer.y-20, width: px, height: 40) }
         }
+        // The magnifier grows with its zoom and sits on whichever side of the pointer has room, never under it.
+        let showMagnifier = Preferences.shared.magnifier && !windowMode && anchor == nil && onScreen && snapshot != nil
+        magnifier.isHidden = !showMagnifier; zoomBack.isHidden = !showMagnifier; zoomLabel.isHidden = !showMagnifier
+        if showMagnifier, let snapshot {
+            let w = CGFloat(snapshot.width), h = CGFloat(snapshot.height), sx = w/bounds.width, sy = h/bounds.height
+            let size = SelectionGeometry.magnifierSize(zoom: magnifierZoom), patch = size/magnifierZoom
+            magnifier.contentsRect = CGRect(x: (pointer.x*sx-patch/2)/w, y: (pointer.y*sy-patch/2)/h, width: patch/w, height: patch/h)
+            magnifier.frame = SelectionGeometry.magnifierFrame(pointer: pointer, size: size, within: bounds)
+            let tag = "\(Int(magnifierZoom))×", tagWidth = (tag as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)]).width
+            zoomBack.frame = CGRect(x: magnifier.frame.maxX-tagWidth-12, y: magnifier.frame.maxY-18, width: tagWidth+8, height: 14)
+            zoomLabel.string = tag; zoomLabel.frame = CGRect(x: zoomBack.frame.minX, y: zoomBack.frame.minY+1, width: zoomBack.frame.width, height: 13)
+        }
         let text: String
         if windowMode { text = hovered == nil ? "Hold Space and move over a window" : (coordinator.purpose == .recording ? "Click to record window" : "Click to capture window") }
         else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" }
@@ -368,17 +388,12 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         if !label.isHidden {
             label.string = text
             let size = (text as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)])
-            let origin = CGPoint(x: min(bounds.width-size.width-18, max(10, pointer.x+16)), y: min(bounds.height-30, max(10, pointer.y+16)))
+            var origin = CGPoint(x: min(bounds.width-size.width-18, max(10, pointer.x+16)), y: min(bounds.height-30, max(10, pointer.y+16)))
+            // Kept clear of the magnifier and its colour chip: above the pointer instead, if it would cover them.
+            let lens = magnifier.frame.insetBy(dx: 0, dy: -2).union(magnifier.frame.offsetBy(dx: 0, dy: 26))
+            if showMagnifier, lens.intersects(CGRect(x: origin.x-6, y: origin.y-3, width: size.width+12, height: size.height+6)) { origin.y = max(10, pointer.y-size.height-24) }
             labelBack.frame = CGRect(x: origin.x-6, y: origin.y-3, width: size.width+12, height: size.height+6)
             label.frame = CGRect(x: origin.x, y: origin.y, width: size.width, height: size.height)
-        }
-        let showMagnifier = Preferences.shared.magnifier && !windowMode && anchor == nil && onScreen && snapshot != nil
-        magnifier.isHidden = !showMagnifier
-        if showMagnifier, let snapshot {
-            let w = CGFloat(snapshot.width), h = CGFloat(snapshot.height), sx = w/bounds.width, sy = h/bounds.height
-            let patch = magnifierPatch
-            magnifier.contentsRect = CGRect(x: (pointer.x*sx-patch/2)/w, y: (pointer.y*sy-patch/2)/h, width: patch/w, height: patch/h)
-            magnifier.frame = CGRect(x: min(bounds.width-100, pointer.x+22), y: max(10, pointer.y-110), width: 88, height: 88)
         }
         let hex = showMagnifier ? colourUnderPointer() : nil
         for layer in [colourBack, colourSwatch, colourLabel] { layer.isHidden = hex == nil }
@@ -411,8 +426,9 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     /// Scrolling up zooms the magnifier in, scrolling down zooms it out.
     override func scrollWheel(with event: NSEvent) {
         guard Preferences.shared.magnifier, anchor == nil, !coordinator.windowMode, event.scrollingDeltaY != 0 else { return }
-        let steps = Self.magnifierPatches, index = steps.firstIndex(of: magnifierPatch) ?? 3
-        magnifierPatch = steps[max(0, min(steps.count-1, index + (event.scrollingDeltaY > 0 ? 1 : -1)))]
+        let steps = SelectionGeometry.magnifierZooms, index = steps.firstIndex(of: magnifierZoom) ?? 4
+        magnifierZoom = steps[max(0, min(steps.count-1, index + (event.scrollingDeltaY > 0 ? 1 : -1)))]
+        UserDefaults.standard.set(magnifierZoom, forKey: "magnifierZoom")
         refresh()
     }
     override func mouseExited(with event: NSEvent) { pointer = CGPoint(x: -100, y: -100); refresh() }

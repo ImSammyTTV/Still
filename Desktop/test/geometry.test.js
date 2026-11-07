@@ -81,3 +81,17 @@ test('export sizes bring the shorter side down, never up, and stay even', () => 
   assert.deepEqual(G.exportSize(1001, 563, 0), { width: 1000, height: 562 }, 'original, made even');
   assert.equal(G.sizeLabel(G.estimateBytes(8_000_000, 60)), '61 MB');
 });
+
+test('the capture magnifier grows with its zoom and never comes to rest under the pointer', () => {
+  const sizes = G.MAGNIFIER_ZOOMS.map(G.magnifierSize);
+  assert.deepEqual(sizes, [80, 96, 112, 128, 144, 160, 176]);
+  const view = { w: 1920, h: 1080 }, under = (p, s, at) => p.x >= at.x && p.x <= at.x + s && p.y >= at.y && p.y <= at.y + s;
+  for (const size of sizes) {
+    for (const p of [{ x: 500, y: 500 }, { x: 1915, y: 500 }, { x: 500, y: 3 }, { x: 1915, y: 3 }, { x: 3, y: 1075 }, { x: 1915, y: 1075 }]) {
+      const at = G.magnifierPlace(p, size, view);
+      assert.ok(!under(p, size, at), `size ${size} at ${p.x},${p.y}`);
+      assert.ok(at.x >= 10 && at.x + size <= view.w - 10 && at.y >= 10 && at.y + size <= view.h - 10, 'stays on screen');
+    }
+  }
+  assert.deepEqual(G.magnifierPlace({ x: 500, y: 500 }, 144, view), { x: 524, y: 332 }, 'up and to the right by default');
+});
