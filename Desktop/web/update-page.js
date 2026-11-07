@@ -7,7 +7,7 @@ $('#later').onclick = () => still.send('window:close');
 $('#install').onclick = () => {
   $('#install').disabled = true; $('#later').hidden = true;
   $('#install').textContent = 'Downloading…'; $('.card').classList.add('busy');
-  $('#sub').classList.remove('error'); $('#sub').textContent = 'Still closes for a few seconds and reopens by itself.';
+  $('#sub').classList.remove('error'); $('#sub').textContent = 'Still reopens by itself when it’s done.';
   still.send('update:install');
 };
 still.on('update:status', (status) => {
