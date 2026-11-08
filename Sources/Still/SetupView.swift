@@ -7,8 +7,15 @@ struct SetupRootView: View {
     @ObservedObject var recorder: Recorder
     @AppStorage("studioSetupComplete") private var complete = false
     var body: some View {
-        if complete { MainView(library: library, recorder: recorder) }
-        else { SetupView(library: library) { complete = true } }
+        Group {
+            if complete { MainView(library: library, recorder: recorder) }
+            else { SetupView(library: library) { complete = true } }
+        }
+        // The welcome window has done its job once the first capture is in: setup is marked done and the window closes.
+        .onChange(of: library.items.count) { old, new in
+            guard !complete, new > old else { return }
+            complete = true; AppController.shared.closeMain()
+        }
     }
 }
 
@@ -56,7 +63,7 @@ struct SetupView: View {
                 Button("Set Up Later") { finish() }.buttonStyle(.plain).foregroundStyle(.secondary)
                 Spacer()
                 Button("Explore the Editor") { finish(); AppController.shared.demo() }
-                Button("Capture Area") { finish(); AppController.shared.captureArea() }.buttonStyle(.borderedProminent).disabled(!checked || failed)
+                Button("Capture Area") { AppController.shared.captureArea() }.buttonStyle(.borderedProminent).disabled(!checked || failed)
             }
         }.padding(.horizontal, 28).padding(.top, 42).padding(.bottom, 24)
             .font(.system(size: 12)).background(Studio.paper).tint(Studio.accent)

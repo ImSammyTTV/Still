@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connector-add-to-claude"
+description = "Enables the connector_add_to_claude command without any pre-configured scope."
+commands.allow = ["connector_add_to_claude"]
+
+[[permission]]
+identifier = "deny-connector-add-to-claude"
+description = "Denies the connector_add_to_claude command without any pre-configured scope."
+commands.deny = ["connector_add_to_claude"]

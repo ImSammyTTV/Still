@@ -362,6 +362,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         if CGPreflightScreenCaptureAccess() { library.permissionGranted = true }
     }
+    /// Closes the main window (the welcome window, after the first capture).
+    func closeMain() { mainWindow?.close() }
     func requestPermission() {
         Task {
             do {

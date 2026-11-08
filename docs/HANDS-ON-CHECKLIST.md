@@ -86,6 +86,9 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
   the Claude Code command). Restart Claude, then ask it to “take a screenshot with Still”, “find my screenshot
   with the error message” and “describe it”. Each works, the screenshot appears in History, and turning the switch
   off makes Claude say Still isn’t letting it in.
+- **Add to Claude (Mac, Windows).** With Claude Desktop installed, Settings → Claude → Add to Claude. Claude
+  Desktop opens with Still ready to install; choose Install. Let Claude use Still is now on, and asking Claude to
+  “take a screenshot with Still” works without copying any settings. Without Claude Desktop, Still says to get it.
 - **Send to Claude.** Right-click a screenshot in History → Send to Claude. Claude opens; pasting adds the picture.
 - **Describe with Claude.** In Settings → Cloud → Describe Image, choose Claude and save an Anthropic API key, then
   Describe Image on a screenshot.
