@@ -5,6 +5,7 @@ mod desktop;
 mod drive;
 mod library;
 mod marks;
+mod mcpb;
 mod previous;
 mod qr;
 mod record;
@@ -1476,6 +1477,25 @@ async fn connector_info() -> Value {
         "desktop": serde_json::to_string_pretty(&json!({ "mcpServers": { "still": { "command": exe, "args": ["--mcp"] } } })).unwrap_or_default(),
         "code": format!("claude mcp add --scope user still -- \"{exe}\" --mcp") })
 }
+/// "Add to Claude": turns the connector on, writes Still as a Claude Desktop extension and opens it, so Claude Desktop
+/// shows its install prompt. Ok(false) when Claude Desktop isn't installed (nothing to open the file with).
+#[tauri::command]
+async fn connector_add_to_claude(app: AppHandle) -> Result<bool, String> {
+    let patch = json!({ "claude": { "connector": true } });
+    st(&app).settings.lock().unwrap().update(&patch);
+    after_settings(&app, &patch);
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().to_string();
+    let bytes = mcpb::bundle(&app.package_info().version.to_string(), &exe, platform(), include_bytes!("../../web/icon.png"))?;
+    let file = app.path().app_data_dir().map_err(|e| e.to_string())?.join("Still.mcpb");
+    if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
+    std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
+    #[cfg(windows)] {
+        let installed = std::env::var_os("LOCALAPPDATA").map(|l| std::path::Path::new(&l).join("AnthropicClaude").join("claude.exe").exists()).unwrap_or(false);
+        if !installed { return Ok(false); }
+    }
+    open_path(&file);
+    Ok(true)
+}
 #[tauri::command]
 async fn library_search_web(app: AppHandle, id: String) -> Result<(), String> {
     library_copy(app, id).await?;
@@ -2282,7 +2302,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, library_search_web, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, connector_add_to_claude, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,

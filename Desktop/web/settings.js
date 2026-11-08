@@ -261,11 +261,24 @@ const pages = {
     const on = !!(prefs.claude && prefs.claude.connector);
     const copy = (text, what) => navigator.clipboard.writeText(text).then(() => toast(`${what} copied`)).catch(() => toast('Couldn’t copy'));
     const code = (text) => el('pre', { style: 'margin:0;padding:10px 12px;border-radius:var(--radius-md);background:var(--bg);font:12px ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;user-select:text' }, text);
+    // One click: Still turns the connector on and hands Claude Desktop an extension to install (Windows; Claude Desktop
+    // isn't made for Linux). The settings below stay for doing it by hand, and for Claude Code.
+    const addToClaude = async (button) => {
+      button.disabled = true;
+      try {
+        const opened = await still.invoke('connector:addToClaude');
+        prefs = await still.invoke('settings:get'); render();
+        toast(opened ? 'Claude Desktop is opening. Choose Install to add Still.' : 'Claude Desktop isn’t installed. Get it from claude.ai/download, then try again.');
+      } catch (e) { button.disabled = false; toast(`Couldn’t add Still to Claude: ${e}`); }
+    };
     return [
+      prefs.platform === 'win32' ? group('Add to Claude', [
+        row('Add Still to Claude Desktop in one step', el('button', { class: 'btn primary', onclick: (e) => addToClaude(e.currentTarget) }, 'Add to Claude'))
+      ], 'Opens Claude Desktop with Still ready to install: choose Install, and Claude can use Still. This also turns on “Let Claude use Still” below.') : null,
       group('Still for Claude', [
         row('Let Claude use Still', el('input', { type: 'checkbox', class: 'switch', 'aria-label': 'Let Claude use Still', checked: on, onchange: async (e) => { await set({ claude: { connector: e.target.checked } }); render(); } }))
       ], 'With this on, Claude can take a screenshot of your screen, look through and search Capture History, read a capture’s text and picture, describe it, open it, and share it when you ask. Claude only reaches Still from this computer, and only while Still is running. Turn it off to stop it at once.'),
-      on && connector ? group('Claude Desktop', [
+      on && connector ? group('Claude Desktop, by hand', [
         row('Add to Claude’s settings', el('button', { class: 'btn', onclick: () => copy(connector.desktop, 'Settings') }, 'Copy')), code(connector.desktop)
       ], 'In Claude Desktop, open Settings → Developer → Edit Config, paste this into claude_desktop_config.json (merge it with any “mcpServers” already there), save, and restart Claude. Then ask Claude to “take a screenshot with Still”.') : null,
       on && connector ? group('Claude Code', [

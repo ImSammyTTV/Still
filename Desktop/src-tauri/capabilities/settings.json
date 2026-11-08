@@ -25,6 +25,7 @@
     "allow-ai-get",
     "allow-ai-set-key",
     "allow-connector-info",
+    "allow-connector-add-to-claude",
     "allow-library-list"
   ]
 }
