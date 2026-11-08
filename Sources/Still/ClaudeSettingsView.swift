@@ -71,7 +71,7 @@ struct ClaudeSettingsView: View {
             adding = false
             switch result {
             case .success(let bundle):
-                NSWorkspace.shared.open([bundle], withApplicationAt: claude, configuration: NSWorkspace.OpenConfiguration())
+                NSWorkspace.shared.open([bundle], withApplicationAt: claude, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
                 addStatus = "Claude Desktop is opening. Choose Install to add Still."
             case .failure(let error):
                 addStatus = "Couldn’t add Still to Claude: \(error.localizedDescription)"
