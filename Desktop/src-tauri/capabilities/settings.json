@@ -24,6 +24,7 @@
     "allow-drive-disconnect",
     "allow-ai-get",
     "allow-ai-set-key",
-    "allow-connector-info"
+    "allow-connector-info",
+    "allow-library-list"
   ]
 }

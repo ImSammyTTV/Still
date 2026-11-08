@@ -130,7 +130,7 @@ const pages = {
       select('Appearance', 'theme', [['system', 'System Default'], ['dark', 'Dark'], ['light', 'Light']])
     ]),
     group('Sounds', [toggle('Play sounds', 'playSounds')]),
-    group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: () => { setSetupDone(false); current = 'Setup'; render(); } }, 'Open Setup Assistant…'))]),
+    group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: async () => { setSetupDone(false); current = 'Setup'; capturesAtStart = await captureCount(); render(); } }, 'Open Setup Assistant…'))]),
     group('Export', [row('Export location', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
       el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Documents › Still'),
       el('button', { class: 'btn', onclick: async () => { if (await still.invoke('settings:chooseFolder')) { prefs = await still.invoke('settings:get'); render(); } } }, 'Choose…')
@@ -335,12 +335,23 @@ addEventListener('keydown', async (e) => {
   render();
 });
 
+// The welcome guide closes itself once the first capture is in: setup is marked done and the window closes, so the
+// capture (and its floating preview) is what's left on screen.
+let capturesAtStart = null;
+const captureCount = async () => (await still.invoke('library:list', { query: '', kind: 'all' }).catch(() => null))?.length ?? null;
+still.on('library:changed', async () => {
+  if (setupDone() || capturesAtStart === null) return;
+  const now = await captureCount();
+  if (now === null || now <= capturesAtStart) { if (now !== null) capturesAtStart = now; return; }
+  setSetupDone(true); still.send('window:close');
+});
+
 still.on('settings:page', (page) => { if (pages[page]) { current = page; render(); } });
 still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = failed; if (current === 'Shortcuts' && !recordingKey) render(); } });
 
 (async () => {
   prefs = await applyTheme();
-  if (!setupDone()) current = 'Setup';
+  if (!setupDone()) { current = 'Setup'; capturesAtStart = await captureCount(); }
   updateStatus = await still.invoke('update:status');
   driveState = await still.invoke('drive:get');
   aiState = await still.invoke('ai:get').catch(() => ({ hasKey: false }));
