@@ -107,3 +107,12 @@ test('window selection steps from the whole window into the part under the point
   assert.equal(G.windowPartAt({ id: 2, x: 0, y: 0, w: 10, h: 10 }, { x: 1, y: 1 }, 1).rect.id, 2, 'windows without parts still work');
   assert.equal(G.windowPartAt(null, { x: 1, y: 1 }, 0).rect, null);
 });
+
+test('a window\'s picture gives a part below each full-width line near its top', () => {
+  // A 600×400 "browser": title bar to y 30, toolbar to y 80, then the page; a page header with a partial edge at 120.
+  const lum = (x, y) => y < 30 ? 60 : y < 80 ? 90 : (y < 120 && x < 300) ? 200 : 20;
+  assert.deepEqual(G.bandParts(lum, 600, 400), [{ x: 0, y: 30, w: 600, h: 370 }, { x: 0, y: 80, w: 600, h: 320 }]);
+  assert.deepEqual(G.bandParts(() => 128, 600, 400), [], 'a flat window has no parts');
+  assert.deepEqual(G.bandParts((x, y) => (y > 300 ? 0 : 255), 600, 400), [], 'lines lower than the top band are ignored');
+  assert.deepEqual(G.bandParts(lum, 100, 100), [], 'tiny windows are skipped');
+});

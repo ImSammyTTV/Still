@@ -45,6 +45,24 @@
 
   // Windows are listed front to back; the first one under the pointer wins.
   const windowAt = (windows, point) => windows.find((w) => contains(w, point)) || null;
+  // Parts of a window found from its picture, for when the system can't say what's inside it: the long straight
+  // lines across the whole window near its top, where a title bar, tab strip or toolbar ends and the page begins.
+  // `lum(x, y)` gives the brightness (0–255) of the window's pixel; w and h are its size in those pixels. Returns
+  // one part per line found, each the window below that line, largest first (so the wheel steps down a band at a
+  // time). The same rule is in StillCore's WindowParts.swift.
+  const bandParts = (lum, w, h) => {
+    if (w < 120 || h < 120) return [];
+    const step = Math.max(1, Math.floor(w / 400)), cols = [];
+    for (let x = Math.floor(w * 0.02); x < w * 0.98; x += step) cols.push(x);
+    const lines = [];
+    for (let y = 4; y < h * 0.45; y++) {
+      let edges = 0;
+      for (const x of cols) if (Math.abs(lum(x, y) - lum(x, y - 1)) > 18) edges++;
+      if (edges >= cols.length * 0.9 && (!lines.length || y - lines[lines.length - 1] > 6)) lines.push(y);
+      if (lines.length === 4) break;
+    }
+    return lines.filter((y) => h - y >= h * 0.4).map((y) => ({ x: 0, y, w, h: h - y }));
+  };
   // In window selection the wheel steps from the whole window into the parts of it under the pointer (a browser's
   // page without its tabs and toolbar, a pane) and back out. Depth 0 is the whole window; each step goes one part
   // smaller. Returns what is selected at that depth and how deep it can go here.
@@ -144,5 +162,5 @@
     return { x, y };
   };
 
-  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, windowPartAt, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
+  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, windowPartAt, bandParts, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
 });

@@ -30,6 +30,21 @@ function colourAt(p) {
 }
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
 // partDepth: how far the wheel has gone into the hovered window's parts (0 = the whole window).
+// When the system lists no parts for a window (Linux, and Windows apps without child windows), they're found from
+// the frozen picture: the full-width lines below a title bar or toolbar. Worked out once per window, when first needed.
+function partsOf(win) {
+  if (!win || (win.parts && win.parts.length) || win.picturedParts) return win;
+  win.picturedParts = true;
+  try {
+    const r = G.intersect(win, bounds());
+    const px = { x: Math.round(r.x * pixelScale), y: Math.round(r.y * pixelScale), w: Math.round(r.w * pixelScale), h: Math.round(r.h * pixelScale) };
+    if (px.w < 120 || px.h < 120) return win;
+    const data = image.getContext('2d').getImageData(px.x, px.y, px.w, px.h).data;
+    const lum = (x, y) => { const i = (y * px.w + x) * 4; return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114; };
+    win.parts = G.bandParts(lum, px.w, px.h).map((p) => ({ x: r.x + p.x / pixelScale, y: r.y + p.y / pixelScale, w: p.w / pixelScale, h: p.h / pixelScale }));
+  } catch { win.parts = []; }
+  return win;
+}
 let partDepth = 0, lastPartStep = -1000;
 let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
 // The magnifier's zoom steps; the scroll wheel moves between them and the choice is remembered.
@@ -92,7 +107,7 @@ function setWindowMode(on, fromOthers = false) {
   }
   windowMode = on; anchor = null; partDepth = 0;
   document.body.classList.toggle('window-mode', on);
-  hovered = on ? G.windowAt(config.windows, pointer) : null;
+  hovered = on ? partsOf(G.windowAt(config.windows, pointer)) : null;
   if (!fromOthers) still.send('overlay:windowMode', on);
   updateBar(); draw();
 }
@@ -222,7 +237,7 @@ let here = false, frame = 0, backup = 0, square = false;
 // web view can hand a full-screen window few or no frames, so a timer draws if no frame comes within 50 ms.
 function follow() {
   if (!config) return;
-  if (windowMode) { const next = G.windowAt(config.windows, pointer); if (next !== hovered) partDepth = 0; hovered = next; }
+  if (windowMode) { const next = partsOf(G.windowAt(config.windows, pointer)); if (next !== hovered) partDepth = 0; hovered = next; }
   else if (anchor) {
     if (fixed) region = G.intersect({ x: pointer.x, y: pointer.y, w: fixed.w, h: fixed.h }, bounds());
     else region = G.dragRect(anchor, pointer, { aspect, square, bounds: bounds() });
@@ -252,7 +267,7 @@ addEventListener('mousedown', (e) => {
   if (e.button !== 0 || onBar(e) || !config) return;
   pointer = point(e);
   if (windowMode) {
-    const next = G.windowAt(config.windows, pointer);
+    const next = partsOf(G.windowAt(config.windows, pointer));
     if (next !== hovered) partDepth = 0;
     hovered = next;
     const part = G.windowPartAt(hovered, pointer, partDepth);
