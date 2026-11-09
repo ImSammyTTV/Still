@@ -95,3 +95,15 @@ test('the capture magnifier grows with its zoom and never comes to rest under th
   }
   assert.deepEqual(G.magnifierPlace({ x: 500, y: 500 }, 144, view), { x: 524, y: 332 }, 'up and to the right by default');
 });
+
+test('window selection steps from the whole window into the part under the pointer and back', () => {
+  const page = { x: 4, y: 55, w: 992, h: 541 }, pane = { x: 600, y: 300, w: 200, h: 150 };
+  const win = { id: 1, x: 0, y: 0, w: 1000, h: 600, parts: [pane, page] };
+  assert.deepEqual(G.windowPartAt(win, { x: 700, y: 350 }, 0), { rect: win, depth: 0, deepest: 2 });
+  assert.equal(G.windowPartAt(win, { x: 700, y: 350 }, 1).rect, page, 'the largest part first');
+  assert.equal(G.windowPartAt(win, { x: 700, y: 350 }, 2).rect, pane);
+  assert.equal(G.windowPartAt(win, { x: 700, y: 350 }, 9).depth, 2, 'clamped to the deepest part');
+  assert.deepEqual(G.windowPartAt(win, { x: 500, y: 20 }, 1), { rect: win, depth: 0, deepest: 0 }, 'over the tabs there is only the window');
+  assert.equal(G.windowPartAt({ id: 2, x: 0, y: 0, w: 10, h: 10 }, { x: 1, y: 1 }, 1).rect.id, 2, 'windows without parts still work');
+  assert.equal(G.windowPartAt(null, { x: 1, y: 1 }, 0).rect, null);
+});

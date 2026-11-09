@@ -46,9 +46,29 @@ pub fn grab_display(id: u32) -> Result<Grab, String> {
     grab_monitor(monitors.iter().find(|m| m.id().unwrap_or(0) == id).ok_or("That display is no longer connected.")?)
 }
 
-/// A window frame in physical pixels, front to back.
+/// A window frame in physical pixels, front to back. `parts` are areas inside it that can be captured on their own,
+/// such as a browser's page without its tabs and toolbar (Windows: the window's child windows).
 #[derive(Clone, Serialize)]
-pub struct WindowRect { pub id: u32, pub x: f64, pub y: f64, pub w: f64, pub h: f64 }
+pub struct WindowRect { pub id: u32, pub x: f64, pub y: f64, pub w: f64, pub h: f64, pub parts: Vec<PartRect> }
+#[derive(Clone, Copy, Serialize, PartialEq, Debug)]
+pub struct PartRect { pub x: f64, pub y: f64, pub w: f64, pub h: f64 }
+
+/// Which child rectangles are worth offering: big enough to be a part of the window someone would want on its own,
+/// inside the window, not (nearly) the whole window, and each only once, at most 40, largest first.
+pub fn useful_parts(window: PartRect, children: &[PartRect]) -> Vec<PartRect> {
+    let area = window.w * window.h;
+    let mut out: Vec<PartRect> = Vec::new();
+    for c in children {
+        let x = c.x.max(window.x); let y = c.y.max(window.y);
+        let w = (c.x + c.w).min(window.x + window.w) - x; let h = (c.y + c.h).min(window.y + window.h) - y;
+        if w < 80.0 || h < 60.0 || w * h > area * 0.95 { continue; }
+        let r = PartRect { x, y, w, h };
+        if !out.iter().any(|o| (o.x - r.x).abs() < 2.0 && (o.y - r.y).abs() < 2.0 && (o.w - r.w).abs() < 2.0 && (o.h - r.h).abs() < 2.0) { out.push(r); }
+    }
+    out.sort_by(|a, b| (b.w * b.h).partial_cmp(&(a.w * a.h)).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(40);
+    out
+}
 
 /// Windows: EnumWindows walks top-level windows front to back; DWM gives the visible frame
 /// (without the invisible resize border) and tells us which windows are cloaked on other desktops.
@@ -77,7 +97,18 @@ pub fn list_windows(_factor: f64) -> Vec<WindowRect> {
         if DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS as u32, &mut r as *mut _ as *mut _, std::mem::size_of::<RECT>() as u32) != 0 { return 1; }
         let (w, h) = ((r.right - r.left) as f64, (r.bottom - r.top) as f64);
         if w < 40.0 || h < 40.0 { return 1; }
-        list.push(WindowRect { id: hwnd as usize as u32, x: r.left as f64, y: r.top as f64, w, h });
+        let frame = PartRect { x: r.left as f64, y: r.top as f64, w, h };
+        let mut children: Vec<PartRect> = Vec::new();
+        EnumChildWindows(hwnd, Some(child), &mut children as *mut _ as LPARAM);
+        list.push(WindowRect { id: hwnd as usize as u32, x: frame.x, y: frame.y, w, h, parts: useful_parts(frame, &children) });
+        1
+    }
+    // Every visible child window's rectangle (a browser's page area is one), in the same physical pixels.
+    unsafe extern "system" fn child(hwnd: HWND, data: LPARAM) -> BOOL {
+        let list = &mut *(data as *mut Vec<PartRect>);
+        if IsWindowVisible(hwnd) == 0 || list.len() >= 400 { return 1; }
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetWindowRect(hwnd, &mut r) != 0 { list.push(PartRect { x: r.left as f64, y: r.top as f64, w: (r.right - r.left) as f64, h: (r.bottom - r.top) as f64 }); }
         1
     }
     let mut list: Vec<WindowRect> = Vec::new();
@@ -95,7 +126,7 @@ pub fn list_windows(factor: f64) -> Vec<WindowRect> {
         if title.is_empty() || title == "Capture Selection" { return None; }
         let (width, height) = (w.width().ok()? as f64 * factor, w.height().ok()? as f64 * factor);
         if width < 40.0 || height < 40.0 { return None; }
-        Some((w.z().unwrap_or(0), WindowRect { id: w.id().ok()?, x: w.x().ok()? as f64 * factor, y: w.y().ok()? as f64 * factor, w: width, h: height }))
+        Some((w.z().unwrap_or(0), WindowRect { id: w.id().ok()?, x: w.x().ok()? as f64 * factor, y: w.y().ok()? as f64 * factor, w: width, h: height, parts: vec![] }))
     }).collect();
     list.sort_by(|a, b| b.0.cmp(&a.0));
     list.into_iter().map(|(_, r)| r).collect()
@@ -268,5 +299,27 @@ mod tests {
     #[test]
     fn data_urls_decode() {
         assert_eq!(data_url_bytes("data:text/plain;base64,aGk=").unwrap(), b"hi");
+    }
+}
+
+#[cfg(test)]
+mod part_tests {
+    use super::*;
+    const WIN: PartRect = PartRect { x: 0.0, y: 0.0, w: 2000.0, h: 1200.0 };
+    #[test]
+    fn offers_the_page_area_but_not_the_whole_window_or_tiny_controls() {
+        let page = PartRect { x: 8.0, y: 110.0, w: 1984.0, h: 1082.0 };
+        let parts = useful_parts(WIN, &[
+            PartRect { x: 0.0, y: 0.0, w: 2000.0, h: 1200.0 },   // the whole client area
+            page, page,                                          // the same area twice
+            PartRect { x: 40.0, y: 40.0, w: 30.0, h: 20.0 },     // a button
+            PartRect { x: 100.0, y: 200.0, w: 400.0, h: 300.0 }, // a smaller pane
+        ]);
+        assert_eq!(parts, vec![page, PartRect { x: 100.0, y: 200.0, w: 400.0, h: 300.0 }]);
+    }
+    #[test]
+    fn clips_parts_to_the_window() {
+        let parts = useful_parts(WIN, &[PartRect { x: -50.0, y: 100.0, w: 600.0, h: 400.0 }]);
+        assert_eq!(parts, vec![PartRect { x: 0.0, y: 100.0, w: 550.0, h: 400.0 }]);
     }
 }

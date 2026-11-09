@@ -45,6 +45,15 @@
 
   // Windows are listed front to back; the first one under the pointer wins.
   const windowAt = (windows, point) => windows.find((w) => contains(w, point)) || null;
+  // In window selection the wheel steps from the whole window into the parts of it under the pointer (a browser's
+  // page without its tabs and toolbar, a pane) and back out. Depth 0 is the whole window; each step goes one part
+  // smaller. Returns what is selected at that depth and how deep it can go here.
+  const windowPartAt = (win, point, depth) => {
+    if (!win) return { rect: null, depth: 0, deepest: 0 };
+    const under = (win.parts || []).filter((p) => contains(p, point)).sort((a, b) => b.w * b.h - a.w * a.h);
+    const d = Math.max(0, Math.min(depth, under.length));
+    return { rect: d === 0 ? win : under[d - 1], depth: d, deepest: under.length };
+  };
 
   // Fits content of size into a box, never upscaling beyond 1.
   const fit = (size, box) => {
@@ -135,5 +144,5 @@
     return { x, y };
   };
 
-  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
+  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, windowPartAt, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
 });

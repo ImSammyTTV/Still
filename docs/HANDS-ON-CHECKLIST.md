@@ -15,6 +15,8 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
    - Move into each corner of the screen: the magnifier moves to whichever side has room and never sits under the
      pointer.
    - Move over the Capture Bar: the crosshair and magnifier step aside, then come back when you leave it.
+   - Window parts (Windows): hold Space over a browser and scroll down. The highlight moves from the whole window
+     to just the page, without the tabs and toolbar; click captures only that. Scroll up goes back to the whole window.
    - The bar's icons and order match the Mac's (Windows/Linux): Area, Window, Screen, Scroll | Text, Record, Timer.
 2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the
    screenshot taken at zero has no countdown in it.
