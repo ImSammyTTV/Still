@@ -19,6 +19,10 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
      whole window to just the page, without the tabs and toolbar; click captures only that. Scroll up goes back to
      the whole window. Try an app with panes too (a mail app, an editor): scrolling again steps into a pane.
    - The bar's icons and order match the Mac's (Windows/Linux): Area, Window, Screen, Scroll | Text, Record, Timer.
+   - Two displays (Mac): open the Capture Bar and move the pointer onto the other display; the bar follows. Click
+     Screen, then click the laptop's display: that one is captured. With Record chosen, it is recorded. In Record
+     Screen's panel, the full-screen button lists each display by name.
+   - Dock icon (Mac): clicking Still in the Dock opens the Capture Bar; right-click it for Settings.
 2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the
    screenshot taken at zero has no countdown in it.
 3. **Move the Capture Bar.** Drag it by the Still icon, take a capture, then start a new one. It should be back in

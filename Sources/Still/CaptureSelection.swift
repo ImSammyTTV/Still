@@ -51,9 +51,14 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     @Published var width = ""
     @Published var height = ""
     @Published var aspect = 0.0
-    @Published var purpose = SelectionPurpose.screenshot
+    @Published var purpose = SelectionPurpose.screenshot { didSet { if pickingScreen { pickingScreen = false; views.forEach { $0.windowModeChanged() } } } }
     /// Space toggles between dragging an area and clicking a window, like the system screenshot overlay.
     @Published var windowMode = false
+    /// With more than one display, the bar's Screen button asks which: each display lights up under the pointer and
+    /// a click takes it. (The bar is on one display, so "the display under the pointer" would always be that one.)
+    @Published private(set) var pickingScreen = false
+    /// The display the bar is on; it moves to whichever display the pointer goes to.
+    private var barScreen: NSScreen?
     private(set) var windows: [OverlayWindow] = []
     private var panels: [NSPanel] = []
     private var bar: NSPanel?
@@ -128,9 +133,19 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     private func showBar() {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
         let panel = barPanel()
-        let size = panel.contentView?.fittingSize ?? panel.frame.size
-        panel.setFrame(CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.minY+28, width: size.width, height: size.height), display: false)
+        place(panel, on: screen)
         panel.orderFrontRegardless(); bar = panel
+    }
+    private func place(_ panel: NSPanel, on screen: NSScreen) {
+        let size = panel.contentView?.fittingSize ?? panel.frame.size
+        panel.setFrame(CGRect(x: screen.frame.midX-size.width/2, y: screen.visibleFrame.minY+28, width: size.width, height: size.height), display: true)
+        barScreen = screen
+    }
+    /// The pointer went onto another display: the bar goes with it, so its buttons are always on the display you're
+    /// working on (a laptop's own screen included, when Still was opened from another display's menu bar).
+    func pointerEntered(_ screen: NSScreen) {
+        guard active, let bar, barScreen !== screen else { return }
+        place(bar, on: screen)
     }
     /// The bar is built once and kept, hidden, between captures: laying out its SwiftUI view is a noticeable part of
     /// the wait otherwise. It shows this coordinator's state, so nothing carries over from the last capture.
@@ -170,13 +185,23 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             } catch { onError?(error) }
         }
     }
+    /// F: the whole display under the pointer.
     func fullscreen() {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
         finish(on: screen, rect: CGRect(origin: .zero, size: screen.frame.size))
     }
+    /// The bar's Screen button: straight away with one display, otherwise click the display you want.
+    func chooseScreen() {
+        guard NSScreen.screens.count > 1 else { fullscreen(); return }
+        if windowMode { windowMode = false }
+        pickingScreen.toggle(); views.forEach { $0.windowModeChanged() }
+    }
     func window() { close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window) } }
     func toggleWindowMode() { setWindowMode(!windowMode) }
-    func setWindowMode(_ on: Bool) { guard allowsWindowSelection || !on, on != windowMode else { return }; windowMode = on; views.forEach { $0.windowModeChanged() } }
+    func setWindowMode(_ on: Bool) {
+        if pickingScreen { pickingScreen = false; if on == windowMode { views.forEach { $0.windowModeChanged() } } }
+        guard allowsWindowSelection || !on, on != windowMode else { return }; windowMode = on; views.forEach { $0.windowModeChanged() }
+    }
     func capture(window: OverlayWindow) {
         if purpose == .recording {
             guard let primary = NSScreen.screens.first,
@@ -213,7 +238,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     func close() {
         captureTask?.cancel(); captureTask = nil
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor); self.keyboardMonitor = nil }
-        holdingSpace = false
+        holdingSpace = false; pickingScreen = false; barScreen = nil
         active = false; for panel in panels { panel.close() }; panels = []; views = []; images = [:]; bar?.orderOut(nil); bar = nil }
 }
 /// A normal-layer window from the Window Server list, front to back, in global top-left coordinates.
@@ -326,7 +351,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     override func layout() { super.layout(); root.frame = bounds; frozen.frame = bounds; refresh() }
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); refresh() }
     override func updateTrackingAreas() { super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea); addTrackingArea(NSTrackingArea(rect: bounds, options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect], owner: self)) }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: coordinator.windowMode ? Self.cameraCursor : .crosshair) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: coordinator.pickingScreen ? .pointingHand : coordinator.windowMode ? Self.cameraCursor : .crosshair) }
     private static let cameraCursor: NSCursor = {
         let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .regular).applying(.init(paletteColors: [.white]))
         guard let symbol = NSImage(systemSymbolName: "camera.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return .pointingHand }
@@ -377,15 +402,18 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     func refresh() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        let windowMode = coordinator.windowMode
+        let picking = coordinator.pickingScreen
+        // Picking a display draws like window mode: no crosshair or magnifier, a highlight and a hint.
+        let windowMode = coordinator.windowMode || picking
         let onScreen = bounds.contains(pointer)
         // Area mode: dim only outside the selection, like the system tool; window mode: blue highlight.
         let hasRegion = !windowMode && region.width > 0
         shade.isHidden = !hasRegion
         if hasRegion { let path = CGMutablePath(); path.addRect(bounds); path.addRect(region); shade.path = path; border.path = CGPath(rect: region.insetBy(dx: 0.5, dy: 0.5), transform: nil) }
         border.isHidden = !hasRegion
-        let part = windowMode ? selectedPart() : nil
-        if let part { highlight.frame = part.rect.intersection(bounds); highlight.isHidden = false } else { highlight.isHidden = true }
+        let part = windowMode && !picking ? selectedPart() : nil
+        if picking { highlight.frame = bounds.insetBy(dx: 2, dy: 2); highlight.isHidden = !onScreen }
+        else if let part { highlight.frame = part.rect.intersection(bounds); highlight.isHidden = false } else { highlight.isHidden = true }
         let crosshair = Preferences.shared.crosshair
         let showCross = !windowMode && onScreen && crosshair != "disabled"
         crossH.isHidden = !showCross; crossV.isHidden = !showCross
@@ -407,7 +435,8 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             zoomLabel.string = tag; zoomLabel.frame = CGRect(x: zoomBack.frame.minX, y: zoomBack.frame.minY+1, width: zoomBack.frame.width, height: 13)
         }
         let text: String
-        if windowMode {
+        if picking { text = "Click to \(coordinator.purpose == .recording ? "record" : "capture") \(display.localizedName)" }
+        else if windowMode {
             let verb = coordinator.purpose == .recording ? "record" : "capture"
             if hovered == nil { text = "Hold Space and move over a window" }
             else if let part, part.depth > 0 { text = "Click to \(verb) this part · scroll \(part.depth < part.deepest ? "for a smaller part, or " : "")up for the whole window" }
@@ -472,8 +501,10 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         refresh()
     }
     override func mouseExited(with event: NSEvent) { pointer = CGPoint(x: -100, y: -100); refresh() }
+    override func mouseEntered(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); coordinator.pointerEntered(display); refresh() }
     override func mouseDown(with event: NSEvent) {
         pointer = convert(event.locationInWindow, from: nil)
+        if coordinator.pickingScreen { coordinator.finish(on: display, rect: CGRect(origin: .zero, size: bounds.size)); return }
         if coordinator.windowMode {
             updateHover()
             // A part of a window is taken like an area; the whole window as a window.
@@ -543,7 +574,7 @@ struct CaptureBar: View {
                 .overlay(BarHandle()).help("Drag to move the Capture Bar").accessibilityLabel("Move the Capture Bar")
             mode("Area", "rectangle.dashed", selected: selection.purpose == .screenshot && !selection.windowMode) { selection.setWindowMode(false); selection.purpose = .screenshot }
             mode("Window", "macwindow", selected: selection.windowMode) { selection.toggleWindowMode() }
-            mode("Screen", "display") { selection.fullscreen() }
+            mode("Screen", "display", selected: selection.pickingScreen) { selection.chooseScreen() }
             mode("Scroll", "arrow.down.to.line", selected: selection.purpose == .scroll) { selection.setWindowMode(false); selection.purpose = .scroll }
             divider
             mode("Text", "text.viewfinder", selected: selection.purpose == .text) { selection.setWindowMode(false); selection.purpose = .text }
