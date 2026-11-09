@@ -29,6 +29,23 @@ function colourAt(p) {
   } catch { return null; } // A picture the page may not read: no colour, nothing else lost.
 }
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
+// partDepth: how far the wheel has gone into the hovered window's parts (0 = the whole window).
+// When the system lists no parts for a window (Linux, and Windows apps without child windows), they're found from
+// the frozen picture: the full-width lines below a title bar or toolbar. Worked out once per window, when first needed.
+function partsOf(win) {
+  if (!win || (win.parts && win.parts.length) || win.picturedParts) return win;
+  win.picturedParts = true;
+  try {
+    const r = G.intersect(win, bounds());
+    const px = { x: Math.round(r.x * pixelScale), y: Math.round(r.y * pixelScale), w: Math.round(r.w * pixelScale), h: Math.round(r.h * pixelScale) };
+    if (px.w < 120 || px.h < 120) return win;
+    const data = image.getContext('2d').getImageData(px.x, px.y, px.w, px.h).data;
+    const lum = (x, y) => { const i = (y * px.w + x) * 4; return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114; };
+    win.parts = G.bandParts(lum, px.w, px.h).map((p) => ({ x: r.x + p.x / pixelScale, y: r.y + p.y / pixelScale, w: p.w / pixelScale, h: p.h / pixelScale }));
+  } catch { win.parts = []; }
+  return win;
+}
+let partDepth = 0, lastPartStep = -1000;
 let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
 // The magnifier's zoom steps; the scroll wheel moves between them and the choice is remembered.
 const ZOOMS = G.MAGNIFIER_ZOOMS;
@@ -64,7 +81,8 @@ function init(data) {
 // or the display scaling changes, so hover outlines keep lining up with the real windows.
 function scaleWindows() {
   pixelScale = config.imageWidth / innerWidth;
-  config.windows = (config.rawWindows || []).map((w) => ({ ...w, x: w.x / pixelScale, y: w.y / pixelScale, w: w.w / pixelScale, h: w.h / pixelScale }));
+  const css = (r) => ({ x: r.x / pixelScale, y: r.y / pixelScale, w: r.w / pixelScale, h: r.h / pixelScale });
+  config.windows = (config.rawWindows || []).map((w) => ({ ...w, ...css(w), parts: (w.parts || []).map(css) }));
 }
 addEventListener('resize', () => { if (config) { config.width = innerWidth; config.height = innerHeight; scaleWindows(); } });
 // A pre-warmed page waits hidden until a capture hands it its screen; the app falls back to a fresh page if it doesn't answer.
@@ -87,9 +105,9 @@ function setWindowMode(on, fromOthers = false) {
     if (on && !fromOthers) toastWindowUnavailable();
     on = false;
   }
-  windowMode = on; anchor = null;
+  windowMode = on; anchor = null; partDepth = 0;
   document.body.classList.toggle('window-mode', on);
-  hovered = on ? G.windowAt(config.windows, pointer) : null;
+  hovered = on ? partsOf(G.windowAt(config.windows, pointer)) : null;
   if (!fromOthers) still.send('overlay:windowMode', on);
   updateBar(); draw();
 }
@@ -180,13 +198,17 @@ function drawMagnifier() {
 
 function drawWindowMode() {
   ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(0, 0, innerWidth, innerHeight);
-  if (hovered) {
-    const r = G.intersect(hovered, bounds());
+  const part = G.windowPartAt(hovered, pointer, partDepth);
+  if (part.rect) {
+    const r = G.intersect(part.rect, bounds());
     ctx.fillStyle = selectionAlpha(0.32); ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.strokeStyle = selectionAlpha(0.85); ctx.lineWidth = 1; ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
   }
   const cam = $('#camera'); cam.style.left = `${pointer.x}px`; cam.style.top = `${pointer.y}px`;
-  if (pointer.x >= 0) label(hovered ? 'Click to capture window' : 'Hold Space and move over a window', pointer.x + 6, pointer.y + 6);
+  const text = !hovered ? 'Hold Space and move over a window'
+    : part.depth > 0 ? `Click to capture this part · scroll ${part.depth < part.deepest ? 'for a smaller part, or ' : ''}up for the whole window`
+    : part.deepest > 0 ? 'Click to capture window · scroll down for the page inside' : 'Click to capture window';
+  if (pointer.x >= 0) label(text, pointer.x + 6, pointer.y + 6);
 }
 
 // ---- Interaction ---------------------------------------------------------------------------
@@ -215,7 +237,7 @@ let here = false, frame = 0, backup = 0, square = false;
 // web view can hand a full-screen window few or no frames, so a timer draws if no frame comes within 50 ms.
 function follow() {
   if (!config) return;
-  if (windowMode) hovered = G.windowAt(config.windows, pointer);
+  if (windowMode) { const next = partsOf(G.windowAt(config.windows, pointer)); if (next !== hovered) partDepth = 0; hovered = next; }
   else if (anchor) {
     if (fixed) region = G.intersect({ x: pointer.x, y: pointer.y, w: fixed.w, h: fixed.h }, bounds());
     else region = G.dragRect(anchor, pointer, { aspect, square, bounds: bounds() });
@@ -245,8 +267,13 @@ addEventListener('mousedown', (e) => {
   if (e.button !== 0 || onBar(e) || !config) return;
   pointer = point(e);
   if (windowMode) {
-    hovered = G.windowAt(config.windows, pointer);
-    if (hovered) finish(G.intersect(hovered, bounds()), hovered.id);
+    const next = partsOf(G.windowAt(config.windows, pointer));
+    if (next !== hovered) partDepth = 0;
+    hovered = next;
+    const part = G.windowPartAt(hovered, pointer, partDepth);
+    // A part of a window is taken from the frozen screen like an area; the whole window as a window.
+    if (part.depth > 0) finish(G.intersect(part.rect, bounds()));
+    else if (hovered) finish(G.intersect(hovered, bounds()), hovered.id);
     return;
   }
   anchor = pointer; region = fixed ? G.intersect({ ...pointer, ...fixed }, bounds()) : null; draw();
@@ -269,6 +296,16 @@ addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
 
 // Scrolling up zooms the magnifier in, scrolling down zooms it out.
 addEventListener('wheel', (e) => {
+  // In window selection, scrolling down goes into the part of the window under the pointer, up back out.
+  if (config && windowMode && hovered && e.deltaY && !onBar(e)) {
+    e.preventDefault();
+    // One step per notch: a trackpad sends dozens of small scroll events, which would race straight to the end.
+    if (e.timeStamp - lastPartStep < 160) return;
+    lastPartStep = e.timeStamp;
+    const part = G.windowPartAt(hovered, pointer, partDepth);
+    partDepth = Math.max(0, Math.min(part.deepest, part.depth + (e.deltaY > 0 ? 1 : -1)));
+    draw(); return;
+  }
   if (!config || !config.magnifier || onBar(e) || anchor || windowMode || !e.deltaY) return;
   e.preventDefault();
   stepMagnifier(e.deltaY < 0 ? 1 : -1);

@@ -220,6 +220,8 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
 struct OverlayWindow {
     let id: CGWindowID
     let frame: CGRect
+    /// The app the window belongs to, for finding the parts inside it (see WindowPartsFinder).
+    var pid: pid_t = 0
     /// Menus, Spotlight and other pop-ups close once Still takes focus, so they're cut from the frozen image.
     var popup = false
     @MainActor static func onScreen() -> [OverlayWindow] {
@@ -236,7 +238,7 @@ struct OverlayWindow {
                   let id = info[kCGWindowNumber as String] as? CGWindowID, let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds), frame.width > 40, frame.height > 40,
                   ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0 else { return nil }
-            return OverlayWindow(id: id, frame: frame, popup: layer > 0)
+            return OverlayWindow(id: id, frame: frame, pid: owner ?? 0, popup: layer > 0)
         }
     }
 }
@@ -261,6 +263,10 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     }()
     private var region = CGRect.zero
     private var hovered: OverlayWindow?
+    /// How far the wheel has gone into the hovered window's parts (0 = the whole window), and the parts found per
+    /// window, in this view's coordinates.
+    private var partDepth = 0, lastPartStep: TimeInterval = 0
+    private var windowParts: [CGWindowID: [CGRect]] = [:]
     private var spaceHeld = false
     private let root = CALayer()
     private let frozen = CALayer()
@@ -346,8 +352,27 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         let primary = NSScreen.screens.first?.frame.height ?? display.frame.height
         return frame.offsetBy(dx: -display.frame.minX, dy: -(primary-display.frame.maxY))
     }
-    private func updateHover() { hovered = coordinator.windowMode ? coordinator.windows.first(where: { local($0.frame).contains(pointer) }) : nil }
-    func windowModeChanged() { anchor = nil; updateHover(); window?.invalidateCursorRects(for: self); refresh() }
+    private func updateHover() {
+        let next = coordinator.windowMode ? coordinator.windows.first(where: { local($0.frame).contains(pointer) }) : nil
+        if next?.id != hovered?.id { partDepth = 0 }
+        hovered = next
+    }
+    /// The hovered window's parts: from macOS's accessibility tree when Still may read it, otherwise from the frozen
+    /// picture. Found once per window, when first needed.
+    private func parts(of window: OverlayWindow) -> [CGRect] {
+        if let known = windowParts[window.id] { return known }
+        let frame = local(window.frame)
+        var found = WindowPartsFinder.accessibility(pid: window.pid, frame: window.frame).map { local($0) }
+        if found.isEmpty, let snapshot { found = WindowPartsFinder.picture(snapshot, region: frame.intersection(bounds), viewSize: bounds.size) }
+        let useful = WindowParts.useful(found, in: frame)
+        windowParts[window.id] = useful
+        return useful
+    }
+    private func selectedPart() -> (rect: CGRect, depth: Int, deepest: Int)? {
+        guard let hovered else { return nil }
+        return WindowParts.part(of: local(hovered.frame), parts: parts(of: hovered), at: pointer, depth: partDepth)
+    }
+    func windowModeChanged() { anchor = nil; partDepth = 0; updateHover(); window?.invalidateCursorRects(for: self); refresh() }
 
     func refresh() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -359,7 +384,8 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         shade.isHidden = !hasRegion
         if hasRegion { let path = CGMutablePath(); path.addRect(bounds); path.addRect(region); shade.path = path; border.path = CGPath(rect: region.insetBy(dx: 0.5, dy: 0.5), transform: nil) }
         border.isHidden = !hasRegion
-        if windowMode, let hovered { highlight.frame = local(hovered.frame).intersection(bounds); highlight.isHidden = false } else { highlight.isHidden = true }
+        let part = windowMode ? selectedPart() : nil
+        if let part { highlight.frame = part.rect.intersection(bounds); highlight.isHidden = false } else { highlight.isHidden = true }
         let crosshair = Preferences.shared.crosshair
         let showCross = !windowMode && onScreen && crosshair != "disabled"
         crossH.isHidden = !showCross; crossV.isHidden = !showCross
@@ -381,7 +407,13 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             zoomLabel.string = tag; zoomLabel.frame = CGRect(x: zoomBack.frame.minX, y: zoomBack.frame.minY+1, width: zoomBack.frame.width, height: 13)
         }
         let text: String
-        if windowMode { text = hovered == nil ? "Hold Space and move over a window" : (coordinator.purpose == .recording ? "Click to record window" : "Click to capture window") }
+        if windowMode {
+            let verb = coordinator.purpose == .recording ? "record" : "capture"
+            if hovered == nil { text = "Hold Space and move over a window" }
+            else if let part, part.depth > 0 { text = "Click to \(verb) this part · scroll \(part.depth < part.deepest ? "for a smaller part, or " : "")up for the whole window" }
+            else if let part, part.deepest > 0 { text = "Click to \(verb) window · scroll down for the page inside" }
+            else { text = "Click to \(verb) window" }
+        }
         else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" }
         else { text = "" }
         label.isHidden = text.isEmpty || !onScreen; labelBack.isHidden = label.isHidden
@@ -425,6 +457,14 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     override func mouseMoved(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); updateHover(); refresh() }
     /// Scrolling up zooms the magnifier in, scrolling down zooms it out.
     override func scrollWheel(with event: NSEvent) {
+        // In window selection, scrolling down goes into the part of the window under the pointer, up back out. One
+        // step per notch: a trackpad sends dozens of small scroll events.
+        if coordinator.windowMode, hovered != nil, event.scrollingDeltaY != 0 {
+            guard event.timestamp - lastPartStep > 0.16, let part = selectedPart() else { return }
+            lastPartStep = event.timestamp
+            partDepth = max(0, min(part.deepest, part.depth + (event.scrollingDeltaY < 0 ? 1 : -1)))
+            refresh(); return
+        }
         guard Preferences.shared.magnifier, anchor == nil, !coordinator.windowMode, event.scrollingDeltaY != 0 else { return }
         let steps = SelectionGeometry.magnifierZooms, index = steps.firstIndex(of: magnifierZoom) ?? 4
         magnifierZoom = steps[max(0, min(steps.count-1, index + (event.scrollingDeltaY > 0 ? 1 : -1)))]
@@ -434,7 +474,13 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     override func mouseExited(with event: NSEvent) { pointer = CGPoint(x: -100, y: -100); refresh() }
     override func mouseDown(with event: NSEvent) {
         pointer = convert(event.locationInWindow, from: nil)
-        if coordinator.windowMode { updateHover(); if let hovered { coordinator.capture(window: hovered) }; return }
+        if coordinator.windowMode {
+            updateHover()
+            // A part of a window is taken like an area; the whole window as a window.
+            if let part = selectedPart(), part.depth > 0 { coordinator.finish(on: display, rect: part.rect.intersection(bounds)) }
+            else if let hovered { coordinator.capture(window: hovered) }
+            return
+        }
         anchor = pointer; region = .zero; window?.makeFirstResponder(self); refresh()
     }
     override func mouseDragged(with event: NSEvent) {

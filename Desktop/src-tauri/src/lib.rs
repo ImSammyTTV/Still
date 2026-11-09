@@ -376,7 +376,8 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
             }).collect();
             let (w, h) = g.image.dimensions();
             let mine: Vec<Value> = windows.iter().filter(|r| r.x < (g.x + w as i32) as f64 && r.y < (g.y + h as i32) as f64 && r.x + r.w > g.x as f64 && r.y + r.h > g.y as f64)
-                .map(|r| json!({ "id": r.id, "x": r.x - g.x as f64, "y": r.y - g.y as f64, "w": r.w, "h": r.h })).collect();
+                .map(|r| json!({ "id": r.id, "x": r.x - g.x as f64, "y": r.y - g.y as f64, "w": r.w, "h": r.h,
+                    "parts": r.parts.iter().map(|p| json!({ "x": p.x - g.x as f64, "y": p.y - g.y as f64, "w": p.w, "h": p.h })).collect::<Vec<_>>() })).collect();
             let under_cursor = cursor.x >= g.x as f64 && cursor.x < (g.x + w as i32) as f64 && cursor.y >= g.y as f64 && cursor.y < (g.y + h as i32) as f64;
             let init = json!({
                 "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(), "canScroll": scroll::supported(),

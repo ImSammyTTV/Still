@@ -95,3 +95,24 @@ test('the capture magnifier grows with its zoom and never comes to rest under th
   }
   assert.deepEqual(G.magnifierPlace({ x: 500, y: 500 }, 144, view), { x: 524, y: 332 }, 'up and to the right by default');
 });
+
+test('window selection steps from the whole window into the part under the pointer and back', () => {
+  const page = { x: 4, y: 55, w: 992, h: 541 }, pane = { x: 600, y: 300, w: 200, h: 150 };
+  const win = { id: 1, x: 0, y: 0, w: 1000, h: 600, parts: [pane, page] };
+  assert.deepEqual(G.windowPartAt(win, { x: 700, y: 350 }, 0), { rect: win, depth: 0, deepest: 2 });
+  assert.equal(G.windowPartAt(win, { x: 700, y: 350 }, 1).rect, page, 'the largest part first');
+  assert.equal(G.windowPartAt(win, { x: 700, y: 350 }, 2).rect, pane);
+  assert.equal(G.windowPartAt(win, { x: 700, y: 350 }, 9).depth, 2, 'clamped to the deepest part');
+  assert.deepEqual(G.windowPartAt(win, { x: 500, y: 20 }, 1), { rect: win, depth: 0, deepest: 0 }, 'over the tabs there is only the window');
+  assert.equal(G.windowPartAt({ id: 2, x: 0, y: 0, w: 10, h: 10 }, { x: 1, y: 1 }, 1).rect.id, 2, 'windows without parts still work');
+  assert.equal(G.windowPartAt(null, { x: 1, y: 1 }, 0).rect, null);
+});
+
+test('a window\'s picture gives a part below each full-width line near its top', () => {
+  // A 600×400 "browser": title bar to y 30, toolbar to y 80, then the page; a page header with a partial edge at 120.
+  const lum = (x, y) => y < 30 ? 60 : y < 80 ? 90 : (y < 120 && x < 300) ? 200 : 20;
+  assert.deepEqual(G.bandParts(lum, 600, 400), [{ x: 0, y: 30, w: 600, h: 370 }, { x: 0, y: 80, w: 600, h: 320 }]);
+  assert.deepEqual(G.bandParts(() => 128, 600, 400), [], 'a flat window has no parts');
+  assert.deepEqual(G.bandParts((x, y) => (y > 300 ? 0 : 255), 600, 400), [], 'lines lower than the top band are ignored');
+  assert.deepEqual(G.bandParts(lum, 100, 100), [], 'tiny windows are skipped');
+});
