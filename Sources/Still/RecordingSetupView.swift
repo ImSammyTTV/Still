@@ -6,16 +6,21 @@ struct RecordingSetupView: View {
     @ObservedObject private var prefs = Preferences.shared
     let selectedSize: CGSize?
     var selectedWindow = false
+    /// The display the panel is on: what Full Screen records unless another display is chosen.
+    var screen: NSScreen? = nil
     let chooseArea: () -> Void
     let cancel: () -> Void
-    let record: (String, Bool, Bool, CGSize) -> Void
+    /// Format, Studio Mode, whole display, size, and the display chosen for a whole-display recording.
+    let record: (String, Bool, Bool, CGSize, NSScreen?) -> Void
     @State private var details = false
     @State private var width = ""
     @State private var height = ""
     @State private var fullscreen = false
+    @State private var display: NSScreen?
     var body: some View {
         VStack(spacing: 12) {
             if selectedWindow && !fullscreen { Label("Selected window only", systemImage: "macwindow").font(.system(size: 12, weight: .semibold)) }
+            if fullscreen && NSScreen.screens.count > 1 { Label("Whole display: \((display ?? screen)?.localizedName ?? "this display")", systemImage: "display").font(.system(size: 12, weight: .semibold)) }
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button { details.toggle() } label: { Image(systemName: "slider.vertical.3").frame(width: 31) }.buttonStyle(.plain).help("Recording settings").popover(isPresented: $details) { VStack(alignment: .leading, spacing: 16) { Text("Recording Settings").font(.headline); Picker("Quality", selection: $prefs.recordingQuality) { ForEach(prefs.qualityOptions(including: prefs.recordingQuality), id: \.tag) { Text($0.title).tag($0.tag) } }; Picker("Frame Rate", selection: $prefs.recordingFPS) { ForEach([15, 24, 30, 60], id: \.self) { Text("\($0) fps").tag($0) } }; Picker("Max Resolution", selection: $prefs.recordingResolution) { Text("Original").tag(0); Text("1080p").tag(1920); Text("4K").tag(3840) }; Toggle("Show Cursor", isOn: $prefs.recordingCursor); Toggle("Show Clicks", isOn: $prefs.recordingClicks); Toggle("Show Keystrokes", isOn: $prefs.recordingKeys); Toggle("Only Shortcuts", isOn: $prefs.recordingCommandKeysOnly) }.padding(20).frame(width: 280) }
@@ -23,7 +28,20 @@ struct RecordingSetupView: View {
                     TextField("Width", text: $width).disabled(selectedWindow && !fullscreen).textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 14, weight: .semibold)).frame(width: 56).padding(.vertical, 5).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
                     Text("×").foregroundStyle(.secondary)
                     TextField("Height", text: $height).disabled(selectedWindow && !fullscreen).textFieldStyle(.plain).multilineTextAlignment(.center).font(.system(size: 14, weight: .semibold)).frame(width: 56).padding(.vertical, 5).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
-                    Button { fullscreen.toggle(); let size = fullscreen ? NSScreen.main?.frame.size : selectedSize; if let size { width = String(Int(size.width)); height = String(Int(size.height)) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(fullscreen ? Color.white : Color.secondary) }.buttonStyle(.plain).help("Full screen")
+                    if NSScreen.screens.count > 1 {
+                        // With more than one display, Full Screen asks which one: the laptop's own screen is easy to
+                        // miss otherwise, as the panel opens where the pointer is.
+                        Menu {
+                            ForEach(NSScreen.screens.indices, id: \.self) { index in
+                                let each = NSScreen.screens[index]
+                                Button(each.localizedName) { display = each; setFullscreen(true) }
+                            }
+                            if fullscreen { Divider(); Button("Selected Area Only") { setFullscreen(false) } }
+                        } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(fullscreen ? Color.white : Color.secondary) }
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Record a whole display").accessibilityLabel("Record a whole display")
+                    } else {
+                        Button { setFullscreen(!fullscreen) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(fullscreen ? Color.white : Color.secondary) }.buttonStyle(.plain).help("Full screen")
+                    }
                     Button(action: chooseArea) { Image(systemName: "crop").frame(width: 25) }.buttonStyle(.plain).help("Select recording area").accessibilityLabel("Select recording area")
                 }.padding(12)
                 Divider()
@@ -43,9 +61,14 @@ struct RecordingSetupView: View {
             action("Record in Studio Mode", symbol: "film.stack", shortcut: "⇧↩") { start("mp4", true) }.keyboardShortcut(.return, modifiers: .shift).background(.ultraThickMaterial, in: Capsule())
             Button("Cancel", action: cancel).buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary).keyboardShortcut(.cancelAction)
         }.frame(width: 340).padding(10).environment(\.colorScheme, .dark)
-        .onAppear { let size = selectedSize ?? NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080); width = String(Int(size.width)); height = String(Int(size.height)) }
+        .onAppear { let size = selectedSize ?? (screen ?? NSScreen.main)?.frame.size ?? CGSize(width: 1920, height: 1080); width = String(Int(size.width)); height = String(Int(size.height)) }
     }
-    private func start(_ format: String, _ studio: Bool) { let w = max(2, Double(width) ?? 1920), h = max(2, Double(height) ?? 1080); record(format, studio, fullscreen, CGSize(width: w, height: h)) }
+    private func setFullscreen(_ on: Bool) {
+        fullscreen = on
+        if !on { display = nil }
+        if let size = on ? (display ?? screen ?? NSScreen.main)?.frame.size : selectedSize { width = String(Int(size.width)); height = String(Int(size.height)) }
+    }
+    private func start(_ format: String, _ studio: Bool) { let w = max(2, Double(width) ?? 1920), h = max(2, Double(height) ?? 1080); record(format, studio, fullscreen, CGSize(width: w, height: h), fullscreen ? display : nil) }
     private func toggle(_ symbol: String, _ title: String, binding: Binding<Bool>) -> some View { Button { binding.wrappedValue.toggle() } label: { Image(systemName: symbol).font(.system(size: 19)).foregroundStyle(binding.wrappedValue ? Color.white : Color.white.opacity(0.4)).frame(maxWidth: .infinity) }.buttonStyle(.plain).help("\(title): \(binding.wrappedValue ? "On" : "Off")").accessibilityLabel(title).accessibilityAddTraits(binding.wrappedValue ? .isSelected : []) }
     private func action(_ title: String, symbol: String, shortcut: String, perform: @escaping () -> Void) -> some View { Button(action: perform) { HStack(spacing: 14) { if symbol == "GIF" { Text("GIF").font(.system(size: 8, weight: .bold)).foregroundStyle(.black).padding(3).background(.white, in: RoundedRectangle(cornerRadius: 4)) } else { Image(systemName: symbol).frame(width: 24) }; Text(title).font(.system(size: 15, weight: .medium)); Spacer(); Text(shortcut).foregroundStyle(.secondary) }.padding(.horizontal, 17).frame(height: 47).contentShape(Rectangle()) }.buttonStyle(.plain) }
 }

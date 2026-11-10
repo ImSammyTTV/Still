@@ -181,7 +181,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             library.toast("\(rescued.count) recovered recording\(rescued.count == 1 ? " is" : "s are") waiting in \(recovery.path)")
         }
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
+    /// The Dock icon opens the Capture Bar, like the menu bar menu's first item, so Still can be used when its menu bar
+    /// icon is out of sight (behind a MacBook's camera housing, say). Before setup is done it opens the welcome
+    /// window; Settings is in the Dock icon's menu and under ⌘,.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if UserDefaults.standard.bool(forKey: "studioSetupComplete") { showAllInOne() } else { showMain() }
+        return false
+    }
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        for (title, action) in [("Capture Bar", #selector(allInOne)), ("Record Screen", #selector(record)), ("Capture History", #selector(showHistory)), ("Settings…", #selector(settings))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
+        }
+        return menu
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if preparingRecording {
@@ -825,17 +838,19 @@ extension AppController {
 extension AppController {
     private func showRecordingSetup(screen: NSScreen? = nil, rect: CGRect? = nil, windowID: CGWindowID? = nil) {
         recordingSetupPanel?.close(); recordingBorder?.close()
-        guard let target = screen ?? NSScreen.main else { return }
+        // Started from the menu bar or a shortcut: the display the pointer is on (NSScreen.main is the one with the menu
+        // bar Still was opened from, which may not be the one you want). The panel can switch to another display.
+        guard let target = screen ?? NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
         let panel = SelectionPanel(contentRect: CGRect(x: target.visibleFrame.midX-180, y: target.visibleFrame.midY-160, width: 360, height: 330), styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.level = .floating; panel.hasShadow = true
         // The bar is always dark, so its window is too: the Recording Settings popover then draws as dark glass with
         // light text, instead of light glass under the bar's light text.
         panel.appearance = NSAppearance(named: .darkAqua)
-        panel.contentView = NSHostingView(rootView: RecordingSetupView(library: library, selectedSize: rect?.size, selectedWindow: windowID != nil, chooseArea: { [weak self] in self?.closeRecordingSetup(); self?.showAllInOne(purpose: .recording) }, cancel: { [weak self] in self?.closeRecordingSetup(); self?.restoreOverlays() }, record: { [weak self] format, studio, full, size in
+        panel.contentView = NSHostingView(rootView: RecordingSetupView(library: library, selectedSize: rect?.size, selectedWindow: windowID != nil, screen: target, chooseArea: { [weak self] in self?.closeRecordingSetup(); self?.showAllInOne(purpose: .recording) }, cancel: { [weak self] in self?.closeRecordingSetup(); self?.restoreOverlays() }, record: { [weak self] format, studio, full, size, display in
             guard let self else { return }; self.closeRecordingSetup(); self.forceVideoEditor = studio
             Preferences.shared.recordingFormat = format; self.recorder.systemAudio = self.library.systemAudio; self.recorder.microphone = self.library.microphoneAudio
             DesktopCover.shared.beginCapture(); self.lastExternalApp?.activate()
-            if full { self.recorder.recordArea(screen: target, rect: CGRect(origin: .zero, size: target.frame.size)) }
+            if full { let whole = display ?? target; self.recorder.recordArea(screen: whole, rect: CGRect(origin: .zero, size: whole.frame.size)) }
             else if let windowID { self.recorder.recordWindow(id: windowID) }
             else if let screen, let rect { let updated = CGRect(origin: rect.origin, size: size).intersection(CGRect(origin: .zero, size: screen.frame.size)); self.startAreaRecording(screen: screen, rect: updated) }
             // No area chosen: record the whole display the setup panel is on. (The system picker
