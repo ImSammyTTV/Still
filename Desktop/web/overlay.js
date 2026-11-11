@@ -3,8 +3,20 @@ const G = StillGeometry;
 const SELECTION = getComputedStyle(document.documentElement).getPropertyValue('--selection').trim() || '#0a84ff';
 const selectionAlpha = (alpha) => { const hex = SELECTION.replace('#', ''); const n = parseInt(hex.length === 3 ? hex.replace(/./g, '$&$&') : hex, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`; };
 const canvas = $('#canvas'), ctx = canvas.getContext('2d');
-// The frozen screen, joined from the strips Still sends (they encode side by side, so the overlay opens sooner).
+// The frozen screen, joined from the strips Still sends (they encode side by side, so the overlay opens sooner). It is
+// on the page behind the drawing canvas and painted once; each frame only draws the shade, crosshair and magnifier
+// over it, instead of copying the whole screen again on every move of the pointer.
 const image = document.createElement('canvas');
+image.id = 'frozen'; image.setAttribute('aria-hidden', 'true');
+canvas.before(image);
+// Its pixels, read back once, for the colour under the crosshair and for finding a window's parts. Reading a pixel
+// from the picture itself on every move made the browser copy the whole screen back from the graphics card each
+// time, which on a large display could stall the graphics card, and with it the pointer and the whole screen.
+let pixels = null;
+function pixelData() {
+  if (!pixels && image.width > 0) { try { pixels = image.getContext('2d').getImageData(0, 0, image.width, image.height); } catch { pixels = null; } }
+  return pixels;
+}
 function loadPicture(data) {
   const parts = data.imageParts || [{ path: data.imagePath, y: 0 }];
   image.width = data.imageWidth; image.height = data.imageHeight;
@@ -17,16 +29,14 @@ function loadPicture(data) {
     paint.drawImage(img, 0, part.y);
   }));
 }
-// One pixel at a time, for the colour under the crosshair.
-const sampler = document.createElement('canvas'); sampler.width = sampler.height = 1;
-const sample = sampler.getContext('2d', { willReadFrequently: true });
+// The colour under the crosshair, from the pixels read once.
 function colourAt(p) {
-  try {
-    sample.clearRect(0, 0, 1, 1);
-    sample.drawImage(image, Math.floor(p.x * pixelScale), Math.floor(p.y * pixelScale), 1, 1, 0, 0, 1, 1);
-    const [r, g, b] = sample.getImageData(0, 0, 1, 1).data;
-    return G.hexColor(r, g, b);
-  } catch { return null; } // A picture the page may not read: no colour, nothing else lost.
+  const data = pixelData();
+  if (!data) return null; // A picture the page may not read: no colour, nothing else lost.
+  const x = Math.floor(p.x * pixelScale), y = Math.floor(p.y * pixelScale);
+  if (x < 0 || y < 0 || x >= data.width || y >= data.height) return null;
+  const i = (y * data.width + x) * 4;
+  return G.hexColor(data.data[i], data.data[i + 1], data.data[i + 2]);
 }
 let config = null, region = null, anchor = null, pointer = { x: -100, y: -100 }, hovered = null;
 // partDepth: how far the wheel has gone into the hovered window's parts (0 = the whole window).
@@ -39,8 +49,10 @@ function partsOf(win) {
     const r = G.intersect(win, bounds());
     const px = { x: Math.round(r.x * pixelScale), y: Math.round(r.y * pixelScale), w: Math.round(r.w * pixelScale), h: Math.round(r.h * pixelScale) };
     if (px.w < 120 || px.h < 120) return win;
-    const data = image.getContext('2d').getImageData(px.x, px.y, px.w, px.h).data;
-    const lum = (x, y) => { const i = (y * px.w + x) * 4; return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114; };
+    const all = pixelData();
+    if (!all) { win.parts = []; return win; }
+    const data = all.data, stride = all.width;
+    const lum = (x, y) => { const i = ((y + px.y) * stride + x + px.x) * 4; return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114; };
     win.parts = G.bandParts(lum, px.w, px.h).map((p) => ({ x: r.x + p.x / pixelScale, y: r.y + p.y / pixelScale, w: p.w / pixelScale, h: p.h / pixelScale }));
   } catch { win.parts = []; }
   return win;
@@ -72,7 +84,8 @@ function init(data) {
   // Two frames normally; a hidden window may get no frames at all, so a timer makes sure it is shown anyway.
   let told = false;
   const tell = () => { if (!told) { told = true; still.send('overlay:drawn'); } };
-  const shown = () => { requestAnimationFrame(() => requestAnimationFrame(tell)); setTimeout(tell, 120); };
+  // The pixels are read back once, just after the window is up, so the first move of the pointer doesn't wait for it.
+  const shown = () => { requestAnimationFrame(() => requestAnimationFrame(tell)); setTimeout(tell, 120); setTimeout(pixelData, 160); };
   loadPicture(data).then(() => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); shown(); }, shown);
   refreshIcons();
   window.focus();
@@ -147,7 +160,6 @@ function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r
 function draw() {
   if (!config) return;
   ctx.clearRect(0, 0, innerWidth, innerHeight);
-  ctx.drawImage(image, 0, 0, innerWidth, innerHeight);
   if (windowMode) return drawWindowMode();
   ctx.fillStyle = 'rgba(0,0,0,.28)';
   ctx.beginPath(); ctx.rect(0, 0, innerWidth, innerHeight);
