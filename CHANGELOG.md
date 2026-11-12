@@ -1,7 +1,8 @@
 # Changelog
 
 What changed in each version of Still. The newest is at the top. Each section becomes the notes of its release on
-GitHub, so write for people using Still: what they'll notice, in plain words.
+GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
+name or compare with other apps or services.
 
 ## v1.2.53 — 2026-11-12
 
@@ -9,9 +10,9 @@ GitHub, so write for people using Still: what they'll notice, in plain words.
   the pointer inside it and it becomes a hand: drag to move the box. Drag an edge or corner to resize it. Click
   **Capture** under the box, press Return, or double-click inside to take it; Esc cancels. Prefer capturing the moment
   you let go? Turn off Settings → Screenshots → **Adjust the area before capturing**.
-- **Cloud upload removed** (Mac, Windows, Linux). Upload and Copy Link, automatic upload, share-link QR codes, the
-  Still Cloud server, and Google Drive and iCloud Drive upload are gone. To keep captures in the cloud, set Still's save
-  folder to your own iCloud Drive or Google Drive folder. **Share…** still uses your computer's share menu.
+- **Cloud upload removed** (Mac, Windows, Linux). Upload and Copy Link, automatic upload, share-link QR codes and the
+  Still Cloud server are gone. To keep captures in the cloud, set Still's save folder to a folder your own cloud
+  storage syncs. **Share…** still uses your computer's share menu.
 - **Describe Image keys** now live in Settings → **AI**.
 - **Mac:** Remember last selection is now off by default, as on Windows and Linux.
 
