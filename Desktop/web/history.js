@@ -144,6 +144,7 @@ async function load() {
         { label: 'Copy', icon: 'copy', action: () => still.invoke('library:copy', item.id) },
         { label: 'Save', icon: 'download', action: () => still.invoke('library:save', item.id).then(() => toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
         { label: 'Save As…', icon: 'folder-down', action: () => still.invoke('library:saveAs', item.id).then((file) => file && toast('Saved'), (e) => toast(`Couldn’t save: ${explain(e)}`)) },
+        ...(item.kind === 'recording' ? [] : [{ label: 'Save for Size…', icon: 'scaling', action: () => still.send('library:saveForSize', item.id) }]),
         ...(item.kind === 'recording' ? [] : [
           { label: 'Find Similar', icon: 'images', action: () => findSimilar(item) },
           { label: 'Find Similar in a Folder…', icon: 'folder-open', action: () => findSimilarInFolder(item) },

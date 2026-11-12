@@ -472,6 +472,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if item.isVideo { openVideoEditor(item) }
         else if let image = ImageRenderer.load(library.url(item)) { openEditor(image: image, item: item) }
     }
+    /// Straight to Save for Size from the Floating Preview or History: the editor opens with the sheet up.
+    func saveForSize(_ item: CaptureItem) {
+        guard !item.isVideo else { return }
+        openItem(item)
+        editorModels[item.id]?.activeSheet = .saveForSize
+    }
     func openEditor(image: CGImage, item: CaptureItem? = nil, recognize: Bool = false, isSample: Bool = false) {
         if let item, let window = editors[item.id] { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let id = item?.id ?? UUID()

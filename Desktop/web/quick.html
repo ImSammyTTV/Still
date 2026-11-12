@@ -21,7 +21,7 @@
   .media { width: 100%; height: 100%; object-fit: contain; display: block; -webkit-user-drag: none; }
   .badge { position: absolute; right: 8px; bottom: 8px; padding: 2px 7px; border-radius: var(--radius-pill); font-size: var(--text-xs); background: var(--hud); color: var(--on-chrome); }
   .actions { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; cursor: default; }
-  .actions button { width: 30px; height: 26px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--on-chrome); display: grid; place-items: center; }
+  .actions button { width: 30px; min-width: 22px; flex: 0 1 30px; height: 26px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--on-chrome); display: grid; place-items: center; }
   .actions button:hover { background: var(--chrome-surface); }
   .actions button.primary { width: auto; padding: 0 10px; background: var(--accent); color: var(--accent-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); gap: 5px; display: inline-flex; align-items: center; }
   .actions svg { width: 15px; height: 15px; }
@@ -35,6 +35,7 @@
     <button class="primary" id="copy" title="Copy"><i data-lucide="copy"></i>Copy</button>
     <button id="save" title="Save"><i data-lucide="download"></i></button>
     <button id="edit" title="Annotate"><i data-lucide="pencil"></i></button>
+    <button id="size" title="Save for Size… (square, width, file size)"><i data-lucide="scaling"></i></button>
     <button id="pin" title="Pin to Screen"><i data-lucide="pin"></i></button>
     <button id="upload" title="Upload and Copy Link"><i data-lucide="cloud-upload"></i></button>
     <button id="trash" title="Delete"><i data-lucide="trash-2"></i></button>

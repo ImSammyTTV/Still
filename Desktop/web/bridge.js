@@ -18,7 +18,7 @@
     'editor:save': ['editor_save', 'id', 'dataUrl', 'project'], 'editor:copy': ['editor_copy', 'dataUrl'],
     'editor:export': ['editor_export', 'dataUrl', 'name', 'saveAs'], 'editor:drag': ['editor_drag', 'dataUrl'],
     'editor:pin': ['editor_pin', 'dataUrl'], 'editor:openImage': ['editor_open_image'],
-    'preview:edit': ['preview_edit', 'id'], 'open:settings': ['open_settings_cmd', 'page'], 'open:history': ['open_history_cmd'],
+    'preview:edit': ['preview_edit', 'id', 'sheet'], 'library:saveForSize': ['library_save_for_size', 'id'], 'editor:saveFile': ['editor_save_file', 'dataUrl', 'name', 'ext'], 'open:settings': ['open_settings_cmd', 'page'], 'open:history': ['open_history_cmd'],
     'open:demo': ['open_demo'], 'capture': ['capture_action', 'action'],
     'ocr:result': ['ocr_result', 'text', 'error'],
     'recording:prepared': ['recording_prepared'], 'recording:started': ['recording_started'], 'recording:listen': ['recording_listen', 'on'], 'recording:finished': ['recording_finished'],

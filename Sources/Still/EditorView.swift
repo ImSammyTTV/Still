@@ -45,6 +45,7 @@ struct EditorView: View {
             case .background: BackgroundEditor(model: model)
             case .resize: ResizeEditor(model: model)
             case .palette: PaletteEditor(model: model)
+            case .saveForSize: SaveForSizeSheet(model: model)
             }
         }
         .alert("Couldn’t complete that action", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
@@ -114,6 +115,7 @@ struct EditorView: View {
             Spacer(minLength: 0)
             Menu("Save As…") {
                 Button("Image…") { model.export() }.keyboardShortcut("e", modifiers: .command)
+                Button("Image for Size…") { model.activeSheet = .saveForSize }.keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Editable Project…") { model.saveProject() }
                 Button("Save to Capture History") { model.save() }.keyboardShortcut("s", modifiers: .command)
             }.menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 11).padding(.vertical, 6).background(Color.primary.opacity(0.07), in: Capsule())
@@ -214,6 +216,43 @@ struct ResizeEditor: View {
                 .onChange(of: width) { _, value in if locked, let w = Int(value) { height = String(Int(Double(w)*Double(model.source.height)/Double(model.source.width))) } }
             HStack { Spacer(); Button("Cancel") { model.activeSheet = nil }.keyboardShortcut(.cancelAction); Button("Resize") { if let w = Int(width), let h = Int(height) { model.resize(width: w, height: h); model.activeSheet = nil } }.keyboardShortcut(.defaultAction).disabled(Int(width) == nil || Int(height) == nil) }
         }.padding(25).onAppear { width = String(model.source.width); height = String(model.source.height) }
+    }
+}
+/// Save for Size: square or as it is, a width, and a file size to stay under, such as a profile picture under 500 KB.
+/// The choices are remembered for next time.
+struct SaveForSizeSheet: View {
+    @ObservedObject var model: EditorModel
+    @AppStorage("sizeSquare") private var square = false
+    @AppStorage("sizeWidth") private var width = ""
+    @AppStorage("sizeLimitOn") private var limitOn = true
+    @AppStorage("sizeLimitKB") private var limitKB = "500"
+    @AppStorage("sizeJPEG") private var jpeg = true
+    /// The finished picture's size (with any background and padding), worked out once when the sheet opens.
+    @State private var picture: (Int, Int)?
+    var body: some View {
+        let full = picture ?? (model.source.width, model.source.height)
+        let plan = ExportSize.plan(width: full.0, height: full.1, square: square, width: Int(width) ?? 0)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Save for Size").font(.headline)
+            Toggle("Square: keep the middle of the picture", isOn: $square)
+            HStack {
+                Text("Width"); TextField("\(Int(plan.crop.width))", text: $width).frame(width: 80); Text("pixels")
+                Text("→ \(plan.width) × \(plan.height)").foregroundStyle(.secondary)
+            }
+            HStack {
+                Toggle("Keep under", isOn: $limitOn); TextField("500", text: $limitKB).frame(width: 70).disabled(!limitOn); Text("KB")
+            }
+            Picker("Format", selection: $jpeg) { Text("JPEG (smaller)").tag(true); Text("PNG (exact)").tag(false) }.pickerStyle(.segmented).frame(width: 300)
+            Text(limitOn ? "Still lowers the quality first, then the size, until the file fits." : "Saved at the size above.").font(.system(size: 11)).foregroundStyle(.secondary)
+            HStack {
+                if model.makingSize { ProgressView().controlSize(.small); Text("Making it fit…").foregroundStyle(.secondary) }
+                Spacer()
+                Button("Cancel") { model.activeSheet = nil }.keyboardShortcut(.cancelAction)
+                Button("Save…") { model.saveForSize(square: square, width: Int(width) ?? 0, limitKB: limitOn ? max(1, Int(limitKB) ?? 0) : 0, jpeg: jpeg) }
+                    .keyboardShortcut(.defaultAction).disabled(model.makingSize || (limitOn && (Int(limitKB) ?? 0) < 1))
+            }
+        }.padding(25).frame(width: 440)
+        .onAppear { if let image = try? model.flattened(watermarked: false) { picture = (image.width, image.height) } }
     }
 }
 struct BackgroundEditor: View {

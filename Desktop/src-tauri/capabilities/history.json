@@ -6,6 +6,7 @@
     "history"
   ],
   "permissions": [
+    "allow-library-save-for-size",
     "allow-library-list",
     "allow-library-copy",
     "allow-library-delete",

@@ -116,3 +116,10 @@ test('a window\'s picture gives a part below each full-width line near its top',
   assert.deepEqual(G.bandParts((x, y) => (y > 300 ? 0 : 255), 600, 400), [], 'lines lower than the top band are ignored');
   assert.deepEqual(G.bandParts(lum, 100, 100), [], 'tiny windows are skipped');
 });
+
+test('Space mid-drag moves the selection, never off the screen', () => {
+  const G = require('../web/shared/geometry.js');
+  const view = { x: 0, y: 0, w: 1000, h: 800 };
+  assert.deepStrictEqual(G.moveWithin({ x: 100, y: 100, w: 200, h: 200 }, 50, -30, view), { dx: 50, dy: -30 });
+  assert.deepStrictEqual(G.moveWithin({ x: 100, y: 100, w: 200, h: 200 }, -500, 900, view), { dx: -100, dy: 500 });
+});
