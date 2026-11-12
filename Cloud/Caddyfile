@@ -1,3 +1,0 @@
-{$STILL_DOMAIN} {
-    reverse_proxy still:7843
-}

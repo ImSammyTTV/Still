@@ -12,7 +12,7 @@ final class StillConnectorTests: XCTestCase {
         XCTAssertNil(StillConnector.answer(["jsonrpc": "2.0", "method": "notifications/initialized"], version: "1", call: never))
         let list = StillConnector.answer(["jsonrpc": "2.0", "id": 3, "method": "tools/list"], version: "1", call: never)!
         let names = (((list["result"] as? [String: Any])?["tools"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
-        XCTAssertEqual(names, ["still_capture_screen", "still_list_captures", "still_get_capture", "still_describe_capture", "still_share_capture", "still_open_capture"])
+        XCTAssertEqual(names, ["still_capture_screen", "still_list_captures", "still_get_capture", "still_describe_capture", "still_open_capture"])
         let unknown = StillConnector.answer(["jsonrpc": "2.0", "id": 4, "method": "resources/list"], version: "1", call: never)!
         XCTAssertEqual((unknown["error"] as? [String: Any])?["code"] as? Int, -32601)
     }

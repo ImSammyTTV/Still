@@ -123,3 +123,27 @@ test('Space mid-drag moves the selection, never off the screen', () => {
   assert.deepStrictEqual(G.moveWithin({ x: 100, y: 100, w: 200, h: 200 }, 50, -30, view), { dx: 50, dy: -30 });
   assert.deepStrictEqual(G.moveWithin({ x: 100, y: 100, w: 200, h: 200 }, -500, 900, view), { dx: -100, dy: 500 });
 });
+
+test('a finished selection can be grabbed by its edges, corners or middle', () => {
+  const G = require('../web/shared/geometry.js');
+  const r = { x: 100, y: 100, w: 200, h: 100 };
+  assert.equal(G.handleAt(r, { x: 200, y: 150 }), 'inside');
+  assert.equal(G.handleAt(r, { x: 100, y: 150 }), 'w');
+  assert.equal(G.handleAt(r, { x: 304, y: 150 }), 'e');
+  assert.equal(G.handleAt(r, { x: 200, y: 97 }), 'n');
+  assert.equal(G.handleAt(r, { x: 299, y: 201 }), 'se');
+  assert.equal(G.handleAt(r, { x: 101, y: 99 }), 'nw');
+  assert.equal(G.handleAt(r, { x: 50, y: 50 }), null);
+  assert.equal(G.handleAt(null, { x: 0, y: 0 }), null);
+});
+
+test('resizing keeps the opposite side, the minimum size, the screen and the shape', () => {
+  const G = require('../web/shared/geometry.js');
+  const r = { x: 100, y: 100, w: 200, h: 100 }, bounds = { x: 0, y: 0, w: 1000, h: 800 };
+  assert.deepStrictEqual(G.resizeRect(r, 'e', 50, 0, { bounds }), { x: 100, y: 100, w: 250, h: 100 });
+  assert.deepStrictEqual(G.resizeRect(r, 'nw', -20, -30, { bounds }), { x: 80, y: 70, w: 220, h: 130 });
+  assert.deepStrictEqual(G.resizeRect(r, 'w', 500, 0, { bounds }), { x: 296, y: 100, w: 4, h: 100 });
+  assert.deepStrictEqual(G.resizeRect(r, 'n', 0, -500, { bounds }), { x: 100, y: 0, w: 200, h: 200 });
+  assert.deepStrictEqual(G.resizeRect({ x: 100, y: 100, w: 100, h: 100 }, 'se', 60, 10, { bounds, aspect: 1 }), { x: 100, y: 100, w: 160, h: 160 });
+  assert.deepStrictEqual(G.resizeRect({ x: 100, y: 100, w: 100, h: 100 }, 's', 0, 40, { bounds, aspect: 1 }), { x: 100, y: 100, w: 140, h: 140 });
+});

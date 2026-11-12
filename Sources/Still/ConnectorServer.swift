@@ -71,7 +71,7 @@ import StillCore
                                 "created": ISO8601DateFormatter().string(from: item.date), "width": item.width, "height": item.height, "starred": item.isStarred]
         if let d = item.imageDescription { v["description"] = d }
         if let t = item.recognizedText, !t.isEmpty { v["text"] = cut(t, full ? 6000 : 200) }
-        if full { v["file"] = library.url(item).path; if let link = item.cloudURL { v["link"] = link } }
+        if full { v["file"] = library.url(item).path }
         return v
     }
     private static func json(_ value: Any) -> String { (try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .withoutEscapingSlashes])).map { String(decoding: $0, as: UTF8.self) } ?? "" }
@@ -107,32 +107,11 @@ import StillCore
         case "still_describe_capture":
             guard let item else { return StillConnector.textResult("No capture with that id.", error: true) }
             do { return StillConnector.textResult(try await library.describedText(item)) } catch { return StillConnector.textResult(error.localizedDescription, error: true) }
-        case "still_share_capture":
-            guard let item else { return StillConnector.textResult("No capture with that id.", error: true) }
-            do { return StillConnector.textResult(try await share(item)) } catch { return StillConnector.textResult(error.localizedDescription, error: true) }
         case "still_open_capture":
             guard let item else { return StillConnector.textResult("No capture with that id.", error: true) }
             AppController.shared.openItem(item)
             return StillConnector.textResult("Opened “\(item.title)” in Still.")
         default: return StillConnector.textResult("Still has no tool called \(name).", error: true)
-        }
-    }
-    /// Uploads with Still's cloud settings, as the Upload button does without its options, and returns the link.
-    private static func share(_ item: CaptureItem) async throws -> String {
-        let prefs = Preferences.shared, file = library.url(item)
-        switch prefs.cloudProvider {
-        case "drive":
-            guard GoogleDrive.refreshToken != nil else { throw CloudError.response("Connect Google Drive in Still’s Settings → Cloud first.") }
-            let result = try await GoogleDrive.upload(file, title: item.title, public: prefs.driveAccess == "link", folder: prefs.driveFolder, progress: { _ in })
-            prefs.driveFolder = result.folder; library.setCloudURL(item, url: result.link); library.lastLink = result.link.absoluteString
-            return result.link.absoluteString
-        case "icloud": throw CloudError.response("Still is set to save to iCloud Drive, which makes no share link. Choose Still Cloud or Google Drive in Settings → Cloud.")
-        default:
-            guard !prefs.cloudEndpoint.isEmpty else { throw CloudError.response("Connect a Cloud server in Still’s Settings → Cloud first.") }
-            var options = CloudOptions(title: item.title); options.expiryDays = prefs.cloudExpiry
-            let link = try await CloudClient(endpoint: prefs.cloudEndpoint).upload(file, options: options, progress: { _ in })
-            library.setCloudURL(item, url: link); library.lastLink = link.absoluteString
-            return link.absoluteString
         }
     }
 }

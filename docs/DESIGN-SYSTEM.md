@@ -1,22 +1,21 @@
 # Still design system
 
-Still is one product on three surfaces: a native Mac app (Swift), a Tauri app for Windows and Linux (`Desktop/web`), and the Still Cloud sharing site (`Cloud/static`). They share one visual language: a neutral graphite palette, soft grouped surfaces, system type, line icons, and a white tile carrying the capture-frame mark with its folded corner (`assets/brand/mark.svg`). This document is the reference for that language. The brand itself (name, mark, voice) is in [BRAND.md](BRAND.md).
+Still is one product on two surfaces: a native Mac app (Swift) and a Tauri app for Windows and Linux (`Desktop/web`). They share one visual language: a neutral graphite palette, soft grouped surfaces, system type, line icons, and a white tile carrying the capture-frame mark with its folded corner (`assets/brand/mark.svg`). This document is the reference for that language. The brand itself (name, mark, voice) is in [BRAND.md](BRAND.md).
 
-Tokens live in three places and must stay in step:
+Tokens live in two places and must stay in step:
 
 | Surface | Where tokens live | How they are used |
 | :--- | :--- | :--- |
 | Mac | `Sources/Still/Design.swift` (`Studio`) | `Studio.accent`, `Studio.onAccent`, `Studio.paper`, `Studio.surface`, `Studio.Radius`, `Studio.glass` |
 | Windows and Linux | `Desktop/web/style.css` (`:root`) | CSS custom properties; every page style uses `var(--…)` |
-| Still Cloud | `Cloud/static/style.css` (`:root`) | Same names as the desktop app; the server fills `{{ACCENT}}` |
 
 `Desktop/test/design-tokens.test.js` fails the build when a page style uses a raw colour outside the token blocks, uses an inline style with a colour, or sets text below 10px.
 
 ## Principles
 
 1. **The capture is the hero.** Chrome is quiet and neutral so screenshots and recordings carry the colour. The accent is graphite, never a brand hue competing with the content.
-2. **One primary action per surface.** A single filled graphite control marks the main action (Copy, Save, Upload, Connect). Everything else is a soft surface button.
-3. **Same words everywhere.** Capture History, Floating Preview, Capture Bar, Annotate, Still Cloud. The Mac app, the Windows/Linux app and the website use the same names for the same things.
+2. **One primary action per surface.** A single filled graphite control marks the main action (Copy, Save, Record). Everything else is a soft surface button.
+3. **Same words everywhere.** Capture History, Floating Preview, Capture Bar, Annotate. The Mac app and the Windows/Linux app use the same names for the same things.
 4. **Both appearances, equally.** Light mode is cool white and grey; dark mode is space grey. Every colour is a token with a value in each appearance, and contrast is checked in both.
 5. **Respect the system.** System font, native materials (under-window material on Mac, Acrylic on Windows), reduced motion and reduced transparency, visible focus rings on every control.
 
@@ -28,7 +27,7 @@ Tokens live in three places and must stay in step:
 | :--- | :--- | :--- | :--- |
 | `--accent` / `Studio.accent` | `#707075` (Mac `#6E6E73`) | `#98989D` | The primary action, the selected segment, the active sidebar row, focus rings |
 | `--accent-text` / `Studio.onAccent` | `#FFFFFF` | `#171719` | Text and glyphs on the accent. Never write `#fff` on an accent background: the accent lightens in dark mode and its text must darken |
-| `--red` | `#FF453A` (Cloud `#D84550` / `#FF6B6B`) | same | Recording, destructive and error states |
+| `--red` | `#FF453A` | same | Recording, destructive and error states |
 | `--yellow` | `#FFD60A` | same | Paused recording |
 | `--selection` | `#0A84FF` | same | Functional only: selection handles, crop frames and window outlines drawn over a screenshot. Never used for chrome |
 
@@ -66,7 +65,7 @@ A selected segment on chrome still uses `--accent` with `--accent-text`: a dark 
 
 ### Category tiles
 
-Settings categories use the system's category colours behind a white glyph, the way System Settings does. They are data in `settings.js`, not theme tokens: Setup and General `#8E8E93`, Shortcuts `#5E5CE6`, Floating Preview `#30B0C7`, Screenshots `#34C759`, Recording `#FF3B30`, Annotate `#FF9F0A`, Cloud `#5AC8FA`, About `#0A84FF`.
+Settings categories use the system's category colours behind a white glyph, the way System Settings does. They are data in `settings.js`, not theme tokens: Setup and General `#8E8E93`, Shortcuts `#5E5CE6`, Floating Preview `#30B0C7`, Screenshots `#34C759`, Recording `#FF3B30`, Annotate `#FF9F0A`, AI `#5AC8FA`, About `#0A84FF`.
 
 ### Content palettes
 
@@ -76,15 +75,15 @@ The annotation colours (`ColorPalette.swift`, `editor.js` `COLORS`) and the back
 
 System UI font everywhere: SF Pro on Mac, Segoe UI Variable on Windows, the desktop font on Linux. Headings use weight 650 with `-0.01em` tracking. Digits that line up use `tabular-nums`.
 
-| Token | Desktop | Cloud | Use |
-| :--- | :--- | :--- | :--- |
-| `--text-xs` | 11px | 11px | Hints, group titles, tags, dates. The smallest readable size |
-| `--text-sm` | 12px | 12px | Buttons on chrome, secondary rows, labels |
-| `--text-md` | 13px | 14px | Body |
-| `--text-lg` | 15px | 16px | Wordmark |
-| `--text-xl` | 18px | 18px | About name, Cloud section headings |
-| `--text-2xl` | 22px | 22px | Window titles (Settings page title, Capture History, Sign in) |
-| `--text-3xl` | 30px | 26px | Setup headline, Cloud library title |
+| Token | Desktop | Use |
+| :--- | :--- | :--- |
+| `--text-xs` | 11px | Hints, group titles, tags, dates. The smallest readable size |
+| `--text-sm` | 12px | Buttons on chrome, secondary rows, labels |
+| `--text-md` | 13px | Body |
+| `--text-lg` | 15px | Wordmark |
+| `--text-xl` | 18px | About name |
+| `--text-2xl` | 22px | Window titles (Settings page title, Capture History, Sign in) |
+| `--text-3xl` | 30px | Setup headline |
 
 Mac: `Studio.heading` is 26pt semibold; panel labels are 10 to 12pt. The `.label` class (10px, 600, uppercase, `.08em`) is the one exception below 11px and is reserved for short stamps such as "Update available" and "Capture ready".
 
@@ -96,10 +95,10 @@ Mac: `Studio.heading` is 26pt semibold; panel labels are 10 to 12pt. The `.label
 | `--radius-sm` | 6px | Fields, segmented buttons, sidebar rows, menu rows |
 | `--radius-md` | 8px | Buttons, tool rail buttons, app icon in lists (`Studio.Radius.control`) |
 | `--radius-lg` / `--radius` | 12px | Cards, grouped lists, menus (`Studio.Radius.card`) |
-| `--radius-xl` | 16px | Floating cards: preview, update, dialogs, Cloud cards (`Studio.Radius.panel`) |
+| `--radius-xl` | 16px | Floating cards: preview, update, dialogs (`Studio.Radius.panel`) |
 | `--radius-pill` | 999px | Capture Bar, HUD, badges, drag handle |
 
-Spacing is on a 4px grid: `--space-1` 4px through `--space-7` 28px (Cloud adds `--space-8` 40px). Rows in grouped lists are 40px tall with 12px side padding; controls are 28px tall.
+Spacing is on a 4px grid: `--space-1` 4px through `--space-7` 28px. Rows in grouped lists are 40px tall with 12px side padding; controls are 28px tall.
 
 Shadows: `--shadow` for menus, `--shadow-float` for floating chrome. Cards on glass get a soft two-layer shadow (`0 1px 2px` and `0 6px 16px`, black at 12% and 8%).
 
@@ -109,22 +108,22 @@ Shadows: `--shadow` for menus, `--shadow-float` for floating chrome. Cards on gl
 | :--- | :--- | :--- | :--- |
 | Button `.btn` | default, `.primary`, `.icon`, `.plain` | hover (brightness), active, disabled (40%), focus ring | Everywhere |
 | Segmented `.segmented` | — | hover, `.active` (accent) | History filter, editor undo/redo, window controls |
-| Field `.field` | text, select | focus (accent border and 30% ring), placeholder (`--text-2`) | Settings, History search, Cloud forms |
+| Field `.field` | text, select | focus (accent border and 30% ring), placeholder (`--text-2`) | Settings, History search |
 | Switch `.switch` | — | on (accent), off | Settings rows |
 | Grouped list `.group` / `.row` | with `.group-title` and `.hint` | — | Settings |
-| Sidebar nav | icon tile and label | hover, `.active` (accent fill, `aria-current`) | Settings, Cloud |
-| Card / tile | History `.tile`, Cloud `.capture-card` | hover (accent border, shadow), focus-within shows actions | Libraries |
+| Sidebar nav | icon tile and label | hover, `.active` (accent fill, `aria-current`) | Settings |
+| Card / tile | History `.tile` | hover (accent border, shadow), focus-within shows actions | Libraries |
 | Capture Bar `.bar` | modes, dimensions, aspect lock | `.mode.active`, window mode | Overlay |
 | Recording HUD `.hud` | recording, `.paused` | pulse dot (static with reduced motion) | Recording |
 | Floating Preview `.card` | image, recording (badge) | leaving animation, hover pauses auto-close | After capture |
 | Menu `.menu` | items, separators | hover (accent) | Context menus |
-| Toast `.toast` / `#toast` | — | show for 1.8s (desktop) or 4.5s (Cloud) | Feedback |
+| Toast `.toast` / `#toast` | — | show for 1.8s (desktop) | Feedback |
 
-Icons are Lucide at 16px with a 1.8 stroke on the desktop app, and matching inline line icons on Still Cloud. Settings tiles use 13px glyphs.
+Icons are Lucide at 16px with a 1.8 stroke on the desktop app. Settings tiles use 13px glyphs.
 
 ## States and accessibility
 
-- Every control has a visible focus ring: 2px accent (desktop) or 3px accent at 60% (Cloud), offset 2 to 3px.
+- Every control has a visible focus ring: 2px accent (desktop), offset 2 to 3px.
 - Text contrast is at least 4.5:1 in both appearances; icons on the accent at least 3:1. The dark accent is paired with dark text for this reason.
 - Icon-only buttons carry a `title`, which `refreshIcons()` copies to `aria-label`. Active sidebar rows set `aria-current="page"`.
 - Hover-revealed actions (card tools) also show on `focus-within` and on touch screens (`hover: none`).
@@ -145,7 +144,7 @@ Icons are Lucide at 16px with a 1.8 stroke on the desktop app, and matching inli
 ## Checking a change
 
 1. Run `npm test` in `Desktop` for the token guard and the unit tests.
-2. Render the page in both appearances. The web pages run in any browser with a stubbed `window.__TAURI__`; Still Cloud runs with `python3 Cloud/server.py --data ./data`.
+2. Render the page in both appearances. The web pages run in any browser with a stubbed `window.__TAURI__`.
 3. Check contrast of any new colour pairing in both appearances before it lands.
 
 ## Installation note

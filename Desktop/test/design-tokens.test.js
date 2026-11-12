@@ -10,7 +10,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..', '..');
 const files = [
   ...fs.readdirSync(path.join(root, 'Desktop/web')).filter((f) => f.endsWith('.html')).map((f) => `Desktop/web/${f}`),
-  'Desktop/web/style.css', 'Cloud/static/style.css', 'Cloud/static/index.html'
+  'Desktop/web/style.css'
 ];
 
 function componentCSS(source, isCSS) {

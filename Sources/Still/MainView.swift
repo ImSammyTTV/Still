@@ -17,7 +17,7 @@ struct MainView: View {
     private let categories: [(String, String, Color)] = [
         ("General", "gearshape.fill", .gray), ("Shortcuts", "command", .gray), ("Floating Preview", "rectangle.bottomthird.inset.filled", .green),
         ("Wallpaper", "photo.fill", .cyan), ("Screenshots", "camera.fill", .blue), ("Screen Recording", "video.fill", .pink),
-        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("Cloud", "icloud.fill", .blue), ("Claude", "sparkles", .orange), ("Advanced", "wand.and.stars", .purple)
+        ("Annotate", "pencil.tip", .orange), ("Clipboard", "doc.on.clipboard.fill", .teal), ("AI", "text.viewfinder", .blue), ("Claude", "sparkles", .orange), ("Advanced", "wand.and.stars", .purple)
     ]
     private var selected: String { categories.map(\.0).contains(library.page) || library.page == "About" ? library.page : "General" }
     @State private var sidebarSearch = ""
@@ -92,7 +92,7 @@ struct MainView: View {
         case "Screen Recording": recording
         case "Annotate": annotate
         case "Clipboard": ClipboardSettings()
-        case "Cloud": CloudSettingsView(library: library)
+        case "AI": AISettingsView()
         case "Claude": ClaudeSettingsView()
         case "Advanced": advanced
         default: about
@@ -119,7 +119,6 @@ struct MainView: View {
                 afterRow("Show Floating Preview", image: $library.showPreview, video: $prefs.recordingPreview)
                 afterRow("Copy to clipboard", image: $library.autoCopy, video: $prefs.copyRecording)
                 afterRow("Save to export location", image: $prefs.saveAfterCapture)
-                afterRow("Upload to Cloud & copy link", image: $prefs.autoUploadImages, video: $prefs.autoUploadVideos)
                 afterRow("Open Annotate tool", image: $prefs.annotateAfterCapture)
                 afterRow("Pin to the screen", image: $prefs.pinAfterCapture)
                 HStack { Text("Open Video Editor"); Spacer(); Text("—").foregroundStyle(.secondary).frame(width: 85); Toggle("Open Video Editor", isOn: $prefs.openVideoEditor).labelsHidden().toggleStyle(.checkbox).frame(width: 75) }
@@ -148,8 +147,8 @@ struct MainView: View {
                 choice("Close automatically", selection: $prefs.previewTimeout) { Text("Never").tag(0.0); Text("5 seconds").tag(5.0); Text("10 seconds").tag(10.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0); Text("1 minute").tag(60.0) }
             }
             section("Swipe Gestures") {
-                choice("Swipe left", selection: $prefs.previewSwipeLeft) { ForEach(["dismiss", "copy", "save", "edit", "upload"], id: \.self) { Text($0.capitalized).tag($0) } }
-                choice("Swipe right", selection: $prefs.previewSwipeRight) { ForEach(["dismiss", "copy", "save", "edit", "upload"], id: \.self) { Text($0.capitalized).tag($0) } }
+                choice("Swipe left", selection: $prefs.previewSwipeLeft) { ForEach(["dismiss", "copy", "save", "edit"], id: \.self) { Text($0.capitalized).tag($0) } }
+                choice("Swipe right", selection: $prefs.previewSwipeRight) { ForEach(["dismiss", "copy", "save", "edit"], id: \.self) { Text($0.capitalized).tag($0) } }
                 Text("When an overlay has focus: Return opens it, ⌘C copies it, and Escape closes it.").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             section("Actions") { Button("Restore Last Capture") { AppController.shared.restoreLastCapture() }; Button("Hide / Show All Overlays") { AppController.shared.toggleOverlays() } }
@@ -190,6 +189,7 @@ struct MainView: View {
             section("Selection") {
                 choice("Crosshair", selection: $prefs.crosshair) { Text("Small").tag("cross"); Text("Full Screen").tag("full"); Text("Off").tag("disabled") }
                 Toggle("Show magnifier", isOn: $prefs.magnifier)
+                Toggle("Adjust the area before capturing", isOn: $prefs.adjustBeforeCapture)
                 Toggle("Remember last selection", isOn: $prefs.rememberSelection)
             }
         }
@@ -235,16 +235,6 @@ struct MainView: View {
         Group {
             section("Default Tool") { choice("Tool", selection: $prefs.annotateDefaultTool) { ForEach(MarkTool.allCases.filter { $0 != .image && $0 != .crop }, id: \.rawValue) { Text($0.title).tag($0.rawValue) } }; HStack { Text("Stroke width"); Slider(value: $prefs.annotateDefaultWidth, in: 2...24, step: 1); Text("\(Int(prefs.annotateDefaultWidth)) px").foregroundStyle(.secondary) } }
             section("Editor") { Text("Annotations stay editable in capture history. Export an editable .stillshot project to continue on another Mac. Image exports flatten and remove covered pixels.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true); Button("Open Sample Image") { AppController.shared.demo() }; Button("Open Image or Project…") { AppController.shared.importImage() } }
-        }
-    }
-    private var cloud: some View {
-        Group {
-            section("Hosting") {
-                Text("Connect your own Still Cloud server to upload captures and copy shareable links.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                TextField("Server URL", text: $prefs.cloudEndpoint).textFieldStyle(.roundedBorder)
-                choice("Links expire after", selection: $prefs.cloudExpiry) { Text("Never").tag(0); Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30) }
-                Text("No file is uploaded until you use an upload action. Connect your own Still server to share captures.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
     private var advanced: some View {

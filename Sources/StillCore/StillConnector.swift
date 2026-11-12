@@ -4,7 +4,7 @@ import Darwin
 #endif
 
 /// Still for Claude: an MCP server, so Claude (the desktop app, Claude Code and other MCP clients) can take a screenshot,
-/// look through Capture History, read a capture's text and picture, describe it and share it.
+/// look through Capture History, read a capture's text and picture and describe it.
 ///
 /// The running app listens on 127.0.0.1 (a random port) for one JSON line per request carrying a secret token; the port
 /// and token are in a private file, written only while Settings → Claude → "Let Claude use Still" is on.
@@ -27,7 +27,6 @@ public enum StillConnector {
                 "limit": ["type": "integer", "minimum": 1, "maximum": 50, "description": "How many, at most. Default 20."]]]],
             ["name": "still_get_capture", "description": "Get one capture from Still: its title, date, size, file path, any recognized text and description, and for a screenshot the picture itself.", "inputSchema": id],
             ["name": "still_describe_capture", "description": "Have Still describe a screenshot in words (with the service chosen in Still's settings) and keep the description with it for search.", "inputSchema": id],
-            ["name": "still_share_capture", "description": "Upload a capture with Still's cloud settings and return its share link. Ask the user before sharing anything.", "inputSchema": id],
             ["name": "still_open_capture", "description": "Open a capture in Still on the user's screen: a screenshot in the editor, a recording in the video editor.", "inputSchema": id],
         ]
     }

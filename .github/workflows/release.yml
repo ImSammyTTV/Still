@@ -50,8 +50,6 @@ jobs:
       - name: Build universal app
         env:
           STILL_REQUIRE_SIGNING: '1'
-          STILL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          STILL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: ./scripts/build.sh "$RUNNER_TEMP/Still.app"
       - name: Check the signature
         run: codesign -dvv "$RUNNER_TEMP/Still.app" 2>&1 | grep -q '^Authority=Still Self-Signed' || { echo "Still.app isn't signed with the release certificate"; exit 1; }
@@ -94,8 +92,6 @@ jobs:
       - run: npm test
       - name: Build
         env:
-          STILL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          STILL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }} ${{ runner.os == 'Windows' && '--bundles nsis' || '--bundles appimage,deb,rpm' }}
@@ -159,4 +155,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         # Tag the commit that was built, not whatever main points at by now.
-        run: gh release create "$VERSION" release/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Still $VERSION" --generate-notes
+        # The notes are this version's section of CHANGELOG.md; without one, GitHub lists the merged changes instead.
+        run: |
+          node Desktop/scripts/release-notes.mjs CHANGELOG.md "$VERSION" > "$RUNNER_TEMP/notes.md"
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); else notes=(--generate-notes); fi
+          gh release create "$VERSION" release/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Still $VERSION" "${notes[@]}"

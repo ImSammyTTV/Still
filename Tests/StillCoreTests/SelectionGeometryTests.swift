@@ -28,4 +28,25 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertEqual(SelectionGeometry.snap(CGPoint(x: 3,y: 77),within: bounds,tolerance: 5),CGPoint(x: 0,y: 80))
         XCTAssertEqual(SelectionGeometry.snap(CGPoint(x: 30,y: 40),within: bounds,tolerance: 5),CGPoint(x: 30,y: 40))
     }
+    /// The same cases as Desktop/test/geometry.test.js.
+    func testAFinishedSelectionCanBeGrabbedByItsEdgesCornersOrMiddle() {
+        let r = CGRect(x: 100, y: 100, width: 200, height: 100)
+        XCTAssertEqual(SelectionGeometry.handle(of: r, at: CGPoint(x: 200, y: 150)), "inside")
+        XCTAssertEqual(SelectionGeometry.handle(of: r, at: CGPoint(x: 100, y: 150)), "w")
+        XCTAssertEqual(SelectionGeometry.handle(of: r, at: CGPoint(x: 304, y: 150)), "e")
+        XCTAssertEqual(SelectionGeometry.handle(of: r, at: CGPoint(x: 200, y: 97)), "n")
+        XCTAssertEqual(SelectionGeometry.handle(of: r, at: CGPoint(x: 299, y: 201)), "se")
+        XCTAssertEqual(SelectionGeometry.handle(of: r, at: CGPoint(x: 101, y: 99)), "nw")
+        XCTAssertNil(SelectionGeometry.handle(of: r, at: CGPoint(x: 50, y: 50)))
+    }
+    func testResizingKeepsTheOppositeSideTheMinimumTheScreenAndTheShape() {
+        let r = CGRect(x: 100, y: 100, width: 200, height: 100), bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        XCTAssertEqual(SelectionGeometry.resize(r, handle: "e", dx: 50, dy: 0, within: bounds), CGRect(x: 100, y: 100, width: 250, height: 100))
+        XCTAssertEqual(SelectionGeometry.resize(r, handle: "nw", dx: -20, dy: -30, within: bounds), CGRect(x: 80, y: 70, width: 220, height: 130))
+        XCTAssertEqual(SelectionGeometry.resize(r, handle: "w", dx: 500, dy: 0, within: bounds), CGRect(x: 296, y: 100, width: 4, height: 100))
+        XCTAssertEqual(SelectionGeometry.resize(r, handle: "n", dx: 0, dy: -500, within: bounds), CGRect(x: 100, y: 0, width: 200, height: 200))
+        let sq = CGRect(x: 100, y: 100, width: 100, height: 100)
+        XCTAssertEqual(SelectionGeometry.resize(sq, handle: "se", dx: 60, dy: 10, within: bounds, aspect: 1), CGRect(x: 100, y: 100, width: 160, height: 160))
+        XCTAssertEqual(SelectionGeometry.resize(sq, handle: "s", dx: 0, dy: 40, within: bounds, aspect: 1), CGRect(x: 100, y: 100, width: 140, height: 140))
+    }
 }

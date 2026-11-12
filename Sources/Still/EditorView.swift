@@ -161,7 +161,6 @@ struct EditorView: View {
             roundButton("pin.fill", "Pin to Screen") { do { AppController.shared.pin(try model.flattened()) } catch { model.error = error.localizedDescription } }
             roundButton("doc.on.doc.fill", "Copy") { model.copy() }.keyboardShortcut("c", modifiers: [.command, .shift])
             roundButton("square.and.arrow.down", "Save Image") { model.export() }
-            roundButton("icloud.and.arrow.up", "Upload and Copy Link") { AppController.shared.uploadEditor(model) }
         }.padding(.horizontal, 13).frame(height: 45).background(Studio.surface).overlay(alignment: .top) { Divider() }
     }
     private func roundButton(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {

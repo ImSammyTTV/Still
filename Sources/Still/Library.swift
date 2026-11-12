@@ -250,7 +250,7 @@ final class Library: ObservableObject {
     /// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search
     /// and copied to the clipboard.
     @MainActor func describe(_ item: CaptureItem) {
-        guard GeminiKey.value != nil else { toast("Add a key in Settings → Cloud → Describe Image first"); AppController.shared.showMain(); page = "Cloud"; return }
+        guard GeminiKey.value != nil else { toast("Add a key in Settings → AI first"); AppController.shared.showMain(); page = "AI"; return }
         toast("Describing…")
         Task { @MainActor in
             do {
@@ -262,7 +262,7 @@ final class Library: ObservableObject {
     }
     /// Describes a screenshot with the service Settings picked and keeps the description with it.
     @MainActor func describedText(_ item: CaptureItem) async throws -> String {
-        guard let key = GeminiKey.value else { throw ImageDescriber.Failure(message: "Add a key in Still’s Settings → Cloud → Describe Image first.") }
+        guard let key = GeminiKey.value else { throw ImageDescriber.Failure(message: "Add a key in Still’s Settings → AI first.") }
         guard !item.isVideo, let image = ImageRenderer.load(url(item)) else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
         // A big screenshot is scaled down first: smaller to send, and plenty for a description.
         guard let data = try? ImageRenderer.data(Self.scaledDown(image, maxSide: 1600)) else { throw ImageDescriber.Failure(message: "Couldn’t read this screenshot.") }
@@ -377,16 +377,8 @@ final class Library: ObservableObject {
     func replaceVideo(_ item: CaptureItem, file: URL) throws {
         try Data(contentsOf: file).write(to: url(item), options: .atomic); forgetThumbnail(item.id); objectWillChange.send()
     }
-    /// The most recent link an upload produced, for showing it again as a QR code.
-    var lastLink: String? {
-        get { UserDefaults.standard.string(forKey: "lastShareLink") }
-        set { UserDefaults.standard.set(newValue, forKey: "lastShareLink") }
-    }
     func setStarred(_ item: CaptureItem, _ starred: Bool) {
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].starred = starred ? true : nil; do { try persist() } catch { toast(error.localizedDescription) } }
-    }
-    func setCloudURL(_ item: CaptureItem, url: URL) {
-        if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].cloudURL = url.absoluteString; do { try persist() } catch { toast(error.localizedDescription) } }
     }
     deinit { if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) } }
 }

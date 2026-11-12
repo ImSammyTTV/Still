@@ -1,0 +1,34 @@
+name: Release notes
+# Copies each version's section of CHANGELOG.md onto its GitHub release, for when the changelog is written or
+# corrected after a release went out. Releases without a section are left as they are.
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Versions to update, separated by spaces (empty: every version in CHANGELOG.md)'
+        required: false
+        default: ''
+permissions:
+  contents: write
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - name: Update release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSIONS: ${{ inputs.versions }}
+        run: |
+          list="$VERSIONS"
+          [ -n "$list" ] || list=$(node Desktop/scripts/release-notes.mjs CHANGELOG.md --versions)
+          for v in $list; do
+            v="v${v#v}"
+            node Desktop/scripts/release-notes.mjs CHANGELOG.md "$v" > "$RUNNER_TEMP/notes.md"
+            if [ ! -s "$RUNNER_TEMP/notes.md" ]; then echo "No changelog section for $v"; continue; fi
+            if gh release view "$v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              gh release edit "$v" --repo "${{ github.repository }}" --notes-file "$RUNNER_TEMP/notes.md" && echo "Updated $v"
+            else echo "No release $v yet"; fi
+          done

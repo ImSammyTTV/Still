@@ -26,7 +26,6 @@ struct PreviewView: View {
                 action("square.and.arrow.down", "Save") { if NSEvent.modifierFlags.contains(.option) { library.export(item) } else { library.quickSave(item) }; dismiss() }
                 action(item.isVideo ? "play.fill" : "pencil", item.isVideo ? "Edit Video" : "Annotate") { AppController.shared.openItem(item); dismiss() }
                 if !item.isVideo { action("pin", "Pin") { if let image = ImageRenderer.load(library.url(item)) { AppController.shared.pin(image) }; dismiss() } }
-                action("icloud.and.arrow.up", "Upload") { AppController.shared.upload(item) }
                 action("square.and.arrow.up", "Share") { AppController.shared.shareItem(item) }
                 action("xmark", "Close") { dismiss() }
             }.padding(.horizontal, 6).frame(height: 34).background(Studio.surface)

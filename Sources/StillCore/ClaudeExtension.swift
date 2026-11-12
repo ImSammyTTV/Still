@@ -14,7 +14,7 @@ public enum ClaudeExtension {
             "display_name": "Still",
             "version": version,
             "description": "Screenshots and Capture History from the Still app on this computer.",
-            "long_description": "Lets Claude take a screenshot of your screen with Still, search your Capture History by what was on screen, read a capture's text and picture, describe it, open it in Still, and share it when you ask. Still must be running, with Settings → Claude → Let Claude use Still turned on.",
+            "long_description": "Lets Claude take a screenshot of your screen with Still, search your Capture History by what was on screen, read a capture's text and picture, describe it and open it in Still. Still must be running, with Settings → Claude → Let Claude use Still turned on.",
             "author": ["name": "Still"],
             "icon": "icon.png",
             "server": ["type": "binary", "entry_point": launcherPath, "mcp_config": ["command": executable, "args": ["--mcp"]]],

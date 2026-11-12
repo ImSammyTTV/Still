@@ -8,6 +8,10 @@
   html, body { background: #000; cursor: crosshair; }
   body.window-mode { cursor: none; }
   body.moving-selection { cursor: grabbing; }
+  /* Under an area being adjusted: takes it, like Enter or a double-click inside. */
+  .sel-capture { position: fixed; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border: 1px solid var(--chrome-border);
+    border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); box-shadow: 0 8px 24px rgba(0,0,0,.4); cursor: default; }
+  .sel-capture[hidden] { display: none; }
   canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
   /* Still's capture bar: a slim pill along the top of the screen. */
   .bar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: none; align-items: center; gap: 4px; height: 44px; padding: 0 6px;
@@ -35,6 +39,7 @@
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<button class="sel-capture" id="selCapture" hidden><i data-lucide="camera" style="width:15px;height:15px"></i>Capture</button>
 <div class="camera" id="camera"><i data-lucide="camera" style="width:24px;height:24px"></i></div>
 <div class="bar" id="bar">
   <span class="brand" id="barHandle" title="Drag to move the Capture Bar" aria-label="Move the Capture Bar" role="button"><span class="mark"></span></span>

@@ -143,6 +143,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     }
     /// The pointer went onto another display: the bar goes with it, so its buttons are always on the display you're
     /// working on (a laptop's own screen included, when Still was opened from another display's menu bar).
+    func clearAdjusting(except view: SelectionSurface) { for other in views where other !== view { other.clearAdjusting() } }
     func pointerEntered(_ screen: NSScreen) {
         guard active, let bar, barScreen !== screen else { return }
         place(bar, on: screen)
@@ -311,6 +312,12 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     // The zoom, in the magnifier's corner, so a turn of the wheel has visible feedback.
     private let zoomBack = CALayer(), zoomLabel = CATextLayer()
     private var copiedColour: String?
+    /// Adjusting the area before it's captured, as the Mac's own tool does: once the drag is let go the box stays, a hand
+    /// inside it moves it, its edges and corners resize it, and Capture (or Return, or a double-click inside) takes it.
+    /// Settings → Screenshots can turn this off, for a capture the moment the mouse is let go.
+    private var adjusting = false
+    private var grab: (handle: String, from: CGPoint, start: CGRect)?
+    private let captureBack = CALayer(), captureLabel = CATextLayer()
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     // Still isn't the active app while selecting (so menus and Spotlight stay open); take the first click anyway.
@@ -340,7 +347,11 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         zoomBack.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor; zoomBack.cornerRadius = 4
         zoomLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium); zoomLabel.fontSize = 10
         zoomLabel.foregroundColor = NSColor.white.cgColor; zoomLabel.contentsScale = scale; zoomLabel.alignmentMode = .center
-        for layer in [frozen, shade, highlight, border, crossH, crossV, magnifier, zoomBack, zoomLabel, colourBack, colourSwatch, colourLabel, labelBack, label] as [CALayer] { layer.actions = Self.noAnimations; root.addSublayer(layer) }
+        for layer in [frozen, shade, highlight, border, crossH, crossV, magnifier, zoomBack, zoomLabel, colourBack, colourSwatch, colourLabel, labelBack, label, captureBack, captureLabel] as [CALayer] { layer.actions = Self.noAnimations; root.addSublayer(layer) }
+        captureBack.backgroundColor = NSColor(hex: "6E6E73").cgColor; captureBack.cornerRadius = 16; captureBack.isHidden = true
+        captureBack.shadowOpacity = 0.4; captureBack.shadowRadius = 10; captureBack.shadowOffset = CGSize(width: 0, height: 4)
+        captureLabel.string = "Capture  ↩"; captureLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold); captureLabel.fontSize = 13
+        captureLabel.foregroundColor = NSColor.white.cgColor; captureLabel.contentsScale = scale; captureLabel.alignmentMode = .center; captureLabel.isHidden = true
         if Preferences.shared.rememberSelection, let saved = UserDefaults.standard.dictionary(forKey: "lastSelection"), let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue, (saved["screen"] as? Double) == id, let x = saved["x"] as? Double, let y = saved["y"] as? Double, let w = saved["w"] as? Double, let h = saved["h"] as? Double {
             region = CGRect(x: x, y: y, width: w, height: h).intersection(CGRect(origin: .zero, size: screen.frame.size))
             coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height))
@@ -400,7 +411,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         guard let hovered else { return nil }
         return WindowParts.part(of: local(hovered.frame), parts: parts(of: hovered), at: pointer, depth: partDepth)
     }
-    func windowModeChanged() { anchor = nil; partDepth = 0; updateHover(); window?.invalidateCursorRects(for: self); refresh() }
+    func windowModeChanged() { anchor = nil; partDepth = 0; if coordinator.windowMode || coordinator.pickingScreen { adjusting = false; grab = nil }; updateHover(); window?.invalidateCursorRects(for: self); refresh() }
 
     func refresh() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -418,7 +429,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         if picking { highlight.frame = bounds.insetBy(dx: 2, dy: 2); highlight.isHidden = !onScreen }
         else if let part { highlight.frame = part.rect.intersection(bounds); highlight.isHidden = false } else { highlight.isHidden = true }
         let crosshair = Preferences.shared.crosshair
-        let showCross = !windowMode && onScreen && crosshair != "disabled"
+        let showCross = !windowMode && onScreen && crosshair != "disabled" && !adjusting
         crossH.isHidden = !showCross; crossV.isHidden = !showCross
         if showCross {
             let px = 1/display.backingScaleFactor
@@ -426,7 +437,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             else { crossH.frame = CGRect(x: pointer.x-20, y: pointer.y, width: 40, height: px); crossV.frame = CGRect(x: pointer.x, y: pointer.y-20, width: px, height: 40) }
         }
         // The magnifier grows with its zoom and sits on whichever side of the pointer has room, never under it.
-        let showMagnifier = Preferences.shared.magnifier && !windowMode && anchor == nil && onScreen && snapshot != nil
+        let showMagnifier = Preferences.shared.magnifier && !windowMode && anchor == nil && !adjusting && onScreen && snapshot != nil
         magnifier.isHidden = !showMagnifier; zoomBack.isHidden = !showMagnifier; zoomLabel.isHidden = !showMagnifier
         if showMagnifier, let snapshot {
             let w = CGFloat(snapshot.width), h = CGFloat(snapshot.height), sx = w/bounds.width, sy = h/bounds.height
@@ -446,7 +457,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             else if let part, part.deepest > 0 { text = "Click to \(verb) window · scroll down for the page inside" }
             else { text = "Click to \(verb) window" }
         }
-        else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" + (anchor != nil && !moving ? "  ·  hold Space to move" : "") }
+        else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" + (adjusting ? "  ·  drag to move or resize  ·  Return to capture" : anchor != nil && !moving ? "  ·  hold Space to move" : "") }
         else { text = "" }
         label.isHidden = text.isEmpty || !onScreen; labelBack.isHidden = label.isHidden
         if !label.isHidden {
@@ -456,9 +467,11 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             // Kept clear of the magnifier and its colour chip: above the pointer instead, if it would cover them.
             let lens = magnifier.frame.insetBy(dx: 0, dy: -2).union(magnifier.frame.offsetBy(dx: 0, dy: 26))
             if showMagnifier, lens.intersects(CGRect(x: origin.x-6, y: origin.y-3, width: size.width+12, height: size.height+6)) { origin.y = max(10, pointer.y-size.height-24) }
+            if adjusting, !captureBack.isHidden, captureBack.frame.insetBy(dx: -8, dy: -8).intersects(CGRect(x: origin.x-6, y: origin.y-3, width: size.width+12, height: size.height+6)) { origin.y = max(10, captureBack.frame.minY-size.height-20) }
             labelBack.frame = CGRect(x: origin.x-6, y: origin.y-3, width: size.width+12, height: size.height+6)
             label.frame = CGRect(x: origin.x, y: origin.y, width: size.width, height: size.height)
         }
+        placeCaptureButton()
         let hex = showMagnifier ? colourUnderPointer() : nil
         for layer in [colourBack, colourSwatch, colourLabel] { layer.isHidden = hex == nil }
         if let hex {
@@ -486,7 +499,32 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         copiedColour = hex; refresh()
     }
 
-    override func mouseMoved(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); updateHover(); refresh() }
+    override func mouseMoved(with event: NSEvent) { pointer = convert(event.locationInWindow, from: nil); updateHover(); if adjusting { adjustCursor().set() }; refresh() }
+    /// The Capture button sits under the box, or above it, or inside its bottom edge when there's no room.
+    private func placeCaptureButton() {
+        let show = adjusting && grab == nil && region.width > 0 && !coordinator.windowMode
+        captureBack.isHidden = !show; captureLabel.isHidden = !show
+        guard show else { return }
+        let w: CGFloat = 112, h: CGFloat = 32
+        var y = region.maxY + 10
+        if y + h > bounds.height - 8 { y = region.minY - h - 10 }
+        if y < 8 { y = region.maxY - h - 10 }
+        let x = max(8, min(bounds.width - w - 8, region.midX - w/2))
+        captureBack.frame = CGRect(x: x, y: y, width: w, height: h)
+        captureLabel.frame = CGRect(x: x, y: y + 8, width: w, height: 18)
+    }
+    private func adjustCursor() -> NSCursor {
+        if !captureBack.isHidden, captureBack.frame.contains(pointer) { return .arrow }
+        switch grab?.handle ?? SelectionGeometry.handle(of: region, at: pointer) {
+        case "inside": return grab == nil ? .openHand : .closedHand
+        case "n", "s": return .resizeUpDown
+        case "e", "w": return .resizeLeftRight
+        case .some: return .crosshair
+        case .none: return .crosshair
+        }
+    }
+    /// A new area on this display clears a box left being adjusted on another.
+    func clearAdjusting() { guard adjusting else { return }; adjusting = false; grab = nil; region = .zero; refresh() }
     /// Scrolling up zooms the magnifier in, scrolling down zooms it out.
     override func scrollWheel(with event: NSEvent) {
         // In window selection, scrolling down goes into the part of the window under the pointer, up back out. One
@@ -515,6 +553,13 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             else if let hovered { coordinator.capture(window: hovered) }
             return
         }
+        if adjusting, region.width > 0 {
+            if !captureBack.isHidden, captureBack.frame.contains(pointer) { coordinator.finish(on: display, rect: region); return }
+            if event.clickCount >= 2, region.contains(pointer) { coordinator.finish(on: display, rect: region); return }
+            if let handle = SelectionGeometry.handle(of: region, at: pointer) { grab = (handle, pointer, region); adjustCursor().set(); refresh(); return }
+            adjusting = false // A press outside starts a new area.
+        }
+        coordinator.clearAdjusting(except: self)
         anchor = pointer; region = .zero; window?.makeFirstResponder(self); refresh()
     }
     /// Space held mid-drag: the selection moves with the pointer, keeping its size, and resizing carries on from its new
@@ -523,6 +568,17 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     func setMoving(_ on: Bool) { guard on != moving else { return }; moving = on; window?.invalidateCursorRects(for: self); refresh() }
     override func mouseDragged(with event: NSEvent) {
         let next = convert(event.locationInWindow, from: nil)
+        if let grab {
+            pointer = next
+            let dx = Double(next.x - grab.from.x), dy = Double(next.y - grab.from.y)
+            if grab.handle == "inside" {
+                let mx = min(max(CGFloat(dx), -grab.start.minX), bounds.width - grab.start.maxX), my = min(max(CGFloat(dy), -grab.start.minY), bounds.height - grab.start.maxY)
+                region = grab.start.offsetBy(dx: mx, dy: my)
+            } else {
+                region = SelectionGeometry.resize(grab.start, handle: grab.handle, dx: dx, dy: dy, within: bounds, aspect: coordinator.aspect > 0 ? coordinator.aspect : event.modifierFlags.contains(.shift) ? 1 : 0)
+            }
+            coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height)); refresh(); return
+        }
         if moving, let anchor, region.width > 0, region.height > 0 {
             let dx = min(max(next.x-pointer.x, -region.minX), bounds.width-region.maxX)
             let dy = min(max(next.y-pointer.y, -region.minY), bounds.height-region.maxY)
@@ -541,9 +597,14 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     override func mouseUp(with event: NSEvent) {
         // Only a press that started a selection here can finish one (a click on empty space in window
         // mode must not capture the remembered area).
+        if grab != nil { grab = nil; pointer = convert(event.locationInWindow, from: nil); adjustCursor().set(); refresh(); return }
         guard anchor != nil else { return }
-        if region.width > 2, region.height > 2 { coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height)); coordinator.finish(on: display, rect: region) }
-        else if let fixedSize { coordinator.finish(on: display, rect: CGRect(origin: anchor ?? .zero, size: fixedSize).intersection(bounds)) }
+        if region.width <= 2 || region.height <= 2, let fixedSize { region = CGRect(origin: anchor ?? .zero, size: fixedSize).intersection(bounds) }
+        if region.width > 2, region.height > 2 {
+            coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height))
+            if Preferences.shared.adjustBeforeCapture { adjusting = true; anchor = nil; moving = false; adjustCursor().set(); refresh(); return }
+            coordinator.finish(on: display, rect: region)
+        }
         anchor = nil; moving = false; refresh()
     }
     override func keyDown(with event: NSEvent) {

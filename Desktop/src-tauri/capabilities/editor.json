@@ -15,7 +15,6 @@
     "allow-editor-drag",
     "allow-editor-pin",
     "allow-editor-open-image",
-    "allow-cloud-upload-data",
     "core:window:allow-destroy"
   ]
 }

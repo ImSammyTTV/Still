@@ -15,8 +15,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let recorder = Recorder()
     private let selection = CaptureSelection()
     private let scrolling = ScrollingSession()
-    private var cloudWindows: [UUID: NSWindow] = [:]
-    private var cloudUploads: [UUID: CloudUploadModel] = [:]
     private var historyPanel: NSPanel?
     private var lastPreviewItem: CaptureItem?
     private var previewPanels: [UUID: NSPanel] = [:]
@@ -39,8 +37,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var forceVideoEditor = false
     private var subscriptions = Set<AnyCancellable>()
     private var lastExternalApp: NSRunningApplication?
-    /// Set while a capture started from a still:// link is in progress.
-    private var urlCapture = false
     /// True while a finished recording is being exported and added to the library.
     private(set) var preparingRecording = false
     private var workspaceObserver: NSObjectProtocol?
@@ -105,7 +101,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     try self.library.attachVideoSource(item, source: url); try self.library.saveRecordingMetadata(item, metadata: metadata, camera: camera)
                     if Preferences.shared.copyRecording { self.library.copy(item) }
                     if Preferences.shared.recordingPreview { self.showPreview(item) }
-                    if Preferences.shared.autoUploadVideos { self.upload(item) }
                     if showEditor { self.openVideoEditor(item) }
                 } catch {
                     if let item = try? self.library.add(file: url, title: self.captureTitle("Original recording"), video: true) {
@@ -217,7 +212,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         for model in videoModels.values { model.close() }
         captureProcess?.interrupt()
-        selection.close(); scrolling.cancel(); DesktopCover.shared.reset(); LocalCloudServer.shared.stop()
+        selection.close(); scrolling.cancel(); DesktopCover.shared.reset()
         return .terminateNow
     }
     private func setupMenu() {
@@ -270,7 +265,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(.separator())
         let clipboard = NSMenuItem(title: "Clipboard History", action: nil, keyEquivalent: ""); clipboardMenu.delegate = self; clipboard.submenu = clipboardMenu; clipboard.tag = 13; menu.addItem(clipboard)
         menu.addItem(withTitle: "Open Image…", action: #selector(importImage), keyEquivalent: "")
-        menu.addItem(withTitle: "Show Last Link as QR Code", action: #selector(showLastLinkQR), keyEquivalent: "")
         menu.addItem(withTitle: "Capture History", action: #selector(showHistory), keyEquivalent: "").tag = 9
         menu.addItem(withTitle: "Restore Last Capture", action: #selector(restoreLastCapture), keyEquivalent: "").tag = 10
         menu.addItem(withTitle: "Unlock Pinned Screenshots", action: #selector(unlockPins), keyEquivalent: "")
@@ -500,37 +494,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         editors[oldID] = nil; editorModels[oldID] = nil
         editors[item.id] = window; editorModels[item.id] = model; window.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
     }
-    func upload(_ item: CaptureItem) {
-        presentUpload(file: library.url(item), item: item, title: item.title)
-    }
-    func uploadEditor(_ model: EditorModel) {
-        do {
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
-            try ImageRenderer.data(try model.flattened()).write(to: file, options: .atomic)
-            presentUpload(file: file, item: nil, title: model.item?.title ?? "Screenshot", temporary: true)
-        } catch { model.error = error.localizedDescription }
-    }
-    private func presentUpload(file: URL, item: CaptureItem?, title: String, temporary: Bool = false) {
-        if Preferences.shared.cloudProvider == "icloud" {
-            defer { if temporary { try? FileManager.default.removeItem(at: file) } }
-            do { try ICloudDrive.save(file, title: title); showCopyToast("Saved to iCloud Drive") }
-            catch { showError("Couldn’t save to iCloud Drive", error.localizedDescription) }
-            return
-        }
-        let usesDrive = Preferences.shared.cloudProvider == "drive"
-        guard usesDrive ? GoogleDrive.refreshToken != nil : !Preferences.shared.cloudEndpoint.isEmpty else {
-            if temporary { try? FileManager.default.removeItem(at: file) }
-            library.page = "Cloud"; showMain(); library.toast(usesDrive ? "Connect Google Drive first" : "Connect a Cloud server first"); return
-        }
-        let id = UUID(), model = CloudUploadModel(file: file, item: item, library: library, title: title, temporary: temporary)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 390), styleMask: [.titled], backing: .buffered, defer: false)
-        window.title = usesDrive ? "Upload to Google Drive" : "Upload to Cloud"; window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: CloudUploadView(model: model)); window.center()
-        cloudWindows[id] = window; cloudUploads[id] = model
-        model.completed = { [weak self, weak window] in window?.close(); self?.cloudWindows[id] = nil; self?.cloudUploads[id] = nil }
-        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
-        if !Preferences.shared.askUploadOptions && !NSEvent.modifierFlags.contains(.option) { model.upload() }
-    }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard let raw = sender.identifier?.rawValue, let id = UUID(uuidString: raw) else { return true }
         if let video = videoModels[id] {
@@ -580,7 +543,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switch url.host?.lowercased() {
             case "capture-area": capture(.area)
             case "capture-window": capture(.window)
-            case "capture-fullscreen": if confirmURLAction("capture your whole screen") { urlCapture = true; capture(.screen) }
+            case "capture-fullscreen": if confirmURLAction("capture your whole screen") { capture(.screen) }
             case "capture-text": capture(.text)
             case "capture-scrolling": showAllInOne(purpose: .scroll)
             case "all-in-one": showAllInOne()
@@ -674,7 +637,7 @@ extension AppController {
     private func decorateMenu() {
         let symbols = ["Capture Bar": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
                        "Record Screen": "record.circle", "Timed Capture": "timer", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
-                       "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward", "Show Last Link as QR Code": "qrcode",
+                       "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
                        "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Clipboard History": "doc.on.clipboard", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {
@@ -719,17 +682,6 @@ extension AppController {
         lastExternalApp?.activate()
     }
     private func restoreOverlays() { if !overlaysHidden { for panel in Array(previewPanels.values)+Array(pins.values) { panel.orderFrontRegardless() } } }
-    @objc func showLastLinkQR() {
-        if let link = library.lastLink ?? library.items.first(where: { $0.cloudURL != nil })?.cloudURL { QRCodePanel.show(link) }
-        else {
-            // From the menu bar no Still window is open, so a toast would go unseen: say it in an alert instead.
-            let alert = NSAlert(); alert.messageText = "No share link yet"
-            alert.informativeText = Preferences.shared.cloudProvider == "icloud"
-                ? "Saving to iCloud Drive doesn’t make a share link. Choose Still Cloud or Google Drive in Cloud settings, then upload a capture."
-                : "Upload a capture first (Upload and Copy Link), then its link can be shown here as a QR code."
-            alert.addButton(withTitle: "OK"); NSApp.activate(ignoringOtherApps: true); alert.runModal()
-        }
-    }
     @objc func restoreLastCapture() { if let item = lastPreviewItem ?? library.items.first { showPreview(item) } }
     @objc func showHistory() {
         if let panel = historyPanel { panel.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
@@ -795,9 +747,6 @@ extension AppController {
             if Preferences.shared.pinAfterCapture { pin(image) }
             if library.showPreview { showPreview(item) }
             if Preferences.shared.annotateAfterCapture { openItem(item) }
-            // Captures started by a still:// link are never uploaded automatically.
-            if Preferences.shared.autoUploadImages && !urlCapture { upload(item) }
-            urlCapture = false
         } catch { showError("Couldn’t save capture", error.localizedDescription) }
     }
     func showCopyToast(_ text: String) {
@@ -825,7 +774,6 @@ extension AppController {
         case "copy": library.copy(item); dismissPreview(item.id)
         case "save": library.quickSave(item); dismissPreview(item.id)
         case "edit": openItem(item); dismissPreview(item.id)
-        case "upload": upload(item)
         default: dismissPreview(item.id)
         }
     }
