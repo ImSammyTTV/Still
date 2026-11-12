@@ -155,4 +155,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         # Tag the commit that was built, not whatever main points at by now.
-        run: gh release create "$VERSION" release/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Still $VERSION" --generate-notes
+        # The notes are this version's section of CHANGELOG.md; without one, GitHub lists the merged changes instead.
+        run: |
+          node Desktop/scripts/release-notes.mjs CHANGELOG.md "$VERSION" > "$RUNNER_TEMP/notes.md"
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); else notes=(--generate-notes); fi
+          gh release create "$VERSION" release/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Still $VERSION" "${notes[@]}"
