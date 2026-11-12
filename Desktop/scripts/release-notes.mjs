@@ -1,7 +1,10 @@
 // The notes for one release: that version's section of CHANGELOG.md, without its heading.
 // Usage: node release-notes.mjs <CHANGELOG.md> <version>   (prints nothing when the version has no section)
+//        node release-notes.mjs <CHANGELOG.md> --versions   (every version with a section, one per line)
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+export const versions = (markdown) => [...markdown.matchAll(/^## (v[0-9][^\s]*)/gm)].map((m) => m[1]);
 
 export function section(markdown, version) {
   const want = `v${String(version).replace(/^v/, '')}`;
@@ -17,5 +20,6 @@ export function section(markdown, version) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [file, version] = process.argv.slice(2);
-  process.stdout.write(section(fs.readFileSync(file, 'utf8'), version));
+  const markdown = fs.readFileSync(file, 'utf8');
+  process.stdout.write(version === '--versions' ? versions(markdown).join('\n') : section(markdown, version));
 }

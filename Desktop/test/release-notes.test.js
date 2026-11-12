@@ -9,6 +9,8 @@ test('a release gets its own section of the changelog, and nothing else', async 
   assert.equal(section(log, 'v1.2.3'), '- New thing\n- Fixed thing');
   assert.equal(section(log, '1.2.2'), '- Old thing');
   assert.equal(section(log, 'v9.9.9'), '');
+  const { versions } = await import('../scripts/release-notes.mjs');
+  assert.deepEqual(versions(log), ['v1.2.3', 'v1.2.2']);
 });
 
 test('the version being released has a changelog entry', async () => {
