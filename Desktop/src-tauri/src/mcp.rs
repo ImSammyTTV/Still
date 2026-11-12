@@ -1,5 +1,5 @@
 //! Still for Claude: an MCP server, so Claude (the desktop app, Claude Code and other MCP clients) can take a
-//! screenshot, look through Capture History, read a capture's text and picture, describe it and share it.
+//! screenshot, look through Capture History, read a capture's text and picture and describe it.
 //!
 //! Two halves. The running app listens on 127.0.0.1 (a random port) for one JSON line per request, carrying a secret
 //! token; the port and token are in a private file in Still's settings folder, written only while Settings → Claude →
@@ -25,7 +25,6 @@ pub fn tools() -> Value {
               "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many, at most. Default 20." } } } },
         { "name": "still_get_capture", "description": "Get one capture from Still: its title, date, size, file path, any recognized text and description, and for a screenshot the picture itself.", "inputSchema": id },
         { "name": "still_describe_capture", "description": "Have Still describe a screenshot in words (with the service chosen in Still's settings) and keep the description with it for search.", "inputSchema": id },
-        { "name": "still_share_capture", "description": "Upload a capture with Still's cloud settings and return its share link. Ask the user before sharing anything.", "inputSchema": id },
         { "name": "still_open_capture", "description": "Open a capture in Still on the user's screen: a screenshot in the editor, a recording in the video editor.", "inputSchema": id },
     ])
 }
@@ -119,7 +118,7 @@ mod tests {
         assert!(answer(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }), &mut never).is_none());
         let list = answer(&json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }), &mut never).unwrap();
         let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["still_capture_screen", "still_list_captures", "still_get_capture", "still_describe_capture", "still_share_capture", "still_open_capture"]);
+        assert_eq!(names, ["still_capture_screen", "still_list_captures", "still_get_capture", "still_describe_capture", "still_open_capture"]);
         let unknown = answer(&json!({ "jsonrpc": "2.0", "id": 4, "method": "resources/list" }), &mut never).unwrap();
         assert_eq!(unknown["error"]["code"], -32601);
     }

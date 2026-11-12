@@ -25,7 +25,7 @@ struct ClaudeSettingsView: View {
             }
             card("Still for Claude") {
                 Toggle("Let Claude use Still", isOn: $prefs.claudeConnector).onChange(of: prefs.claudeConnector) { _, _ in ConnectorServer.shared.apply() }
-                note("With this on, Claude can take a screenshot of your screen, look through and search Capture History, read a capture’s text and picture, describe it, open it, and share it when you ask. Claude only reaches Still from this Mac, and only while Still is running. Turn it off to stop it at once.")
+                note("With this on, Claude can take a screenshot of your screen, look through and search Capture History, read a capture’s text and picture, describe it and open it. Claude only reaches Still from this Mac, and only while Still is running. Turn it off to stop it at once.")
             }
             if prefs.claudeConnector {
                 card("Claude Desktop, by hand") {

@@ -183,7 +183,6 @@ public struct CaptureItem: Codable, Identifiable, Equatable {
     public var recognizedText: String?
     /// Describe Image: what the picture shows, in words, so search can find it.
     public var imageDescription: String?
-    public var cloudURL: String?
     public var metadataFilename: String?
     public var sourceVideoFilename: String?
     /// Starred in History, to find it again quickly; starred captures outlast the history clean-up.

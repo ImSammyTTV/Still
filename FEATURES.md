@@ -34,7 +34,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 | Feature | Mac | Windows & Linux |
 |---|---|---|
-| Floating Preview with action bar (copy, save, edit, pin, upload, close) | ✅ | ✅ |
+| Floating Preview with action bar (copy, save, edit, pin, share, close) | ✅ | ✅ |
 | Copies to the clipboard automatically | ✅ | ✅ |
 | Clipboard History (⇧⌘V): text, images and files you copy, with how many to remember and how many the menu shows (the rest in an Older submenu) | ☑️ | — |
 | Closes on its own after 15 s, pauses while hovered | ✅ | ☑️ |
@@ -61,7 +61,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Resize, rotate and flip | ☑️ | ☑️ |
 | Combine images by dropping them in | ☑️ | ☑️ |
 | Backgrounds: gradients, own image, padding, corners, shadow, aspect ratio | ✅ | ✅ |
-| Copy, save, Drag to share, pin, upload | ✅ | ✅ copy · ☑️ others |
+| Copy, save, Drag to share, pin | ✅ | ✅ copy · ☑️ others |
 | Editable projects (reopen and change annotations later) | ✅ | ✅ |
 
 ## Recording
@@ -101,18 +101,6 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: cursor size, style (Arrow or Dot) and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
 | Audio transcription | ☑️ | — |
 
-## Sharing
-
-| Feature | Mac | Windows & Linux |
-|---|---|---|
-| Upload to your own Still Cloud server and copy the link | ☑️ | ✅ tested against a real server |
-| Link expiry, visibility (link, team, private) | ☑️ | ☑️ |
-| Save to iCloud Drive (no share link) | ☑️ | ☑️ Windows with iCloud for Windows · — Linux |
-| Upload to Google Drive and copy the link | ☑️ needs a sign-in client ([setup](docs/GOOGLE-DRIVE.md)) | ☑️ needs a sign-in client |
-| Copy the link as a plain link, Markdown or HTML (pictures embed as images) | ☑️ | ☑️ |
-| Show a share link as a QR code to open it on a phone (History, and the menu bar / tray for the last link) | ☑️ | ☑️ code checked by reading it back |
-| Still Cloud server: uploads, passwords, expiry, comments, teams, SSO, SCIM, Trash with Empty Trash and Delete Forever | ✅ 15 server tests | (same server) |
-
 ## App
 
 | Feature | Mac | Windows & Linux |
@@ -145,5 +133,4 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
   ([design system](docs/DESIGN-SYSTEM.md)).
 - `still --self-test`: runs on real Windows and Linux machines in GitHub Actions and checks capture, the Floating Preview,
   copying, History, the editor, capturing the previous area, scrolling capture, hiding desktop icons, the camera bubble
-  and click and keystroke overlays, text recognition and uploading to a Still Cloud server.
-- `python3 -m unittest discover -s Cloud/tests`: 15 sharing-server tests.
+  and click and keystroke overlays, and text recognition.

@@ -1,7 +1,6 @@
 .build/
 .DS_Store
 dist/
-Cloud/data/
 __pycache__/
 *.pyc
 .env

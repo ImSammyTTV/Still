@@ -1,14 +1,14 @@
 const PAGES = [
   ['Setup', 'sparkles', '#8e8e93'],
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
-  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Cloud', 'cloud', '#5ac8fa'], ['Claude', 'sparkles', '#d97757'], ['About', 'info', '#0a84ff']
+  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['AI', 'scan-text', '#5ac8fa'], ['Claude', 'sparkles', '#d97757'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
   ['allInOne', 'Capture Bar'], ['area', 'Capture Area'], ['window', 'Capture Window'], ['fullscreen', 'Capture Full Screen'],
   ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture'],
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
 ];
-let prefs, current = 'General', recordingKey = null, cloudState = { connected: false, hasToken: false }, driveState = { available: false, connected: false, email: '' }, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' }, connector = null;
+let prefs, current = 'General', recordingKey = null, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' }, connector = null;
 let searchBox = null;
 
 // Setup is a one-time guide: once finished it leaves the sidebar, and General offers to bring it back.
@@ -110,7 +110,7 @@ function render() {
 const pages = {
   Setup: () => [
     el('h2', { style: 'font-size:30px;margin:12px 0' }, 'Your first capture starts here.'),
-    el('p', { class: 'hint' }, 'Start with a screenshot. Camera, microphone and cloud setup can wait until you need them.'),
+    el('p', { class: 'hint' }, 'Start with a screenshot. Camera and microphone setup can wait until you need them.'),
     group('01 · Capture', [
       row('Choose an area, or hold Space to select a window.', el('button', { class: 'btn primary', onclick: () => still.send('capture', 'area') }, 'Try Capture Area'))
     ], prefs.wayland ? 'Your desktop will ask which screen or window to share. Choose it in the system picker each time it appears.' : 'Drag over the area you want, then release. Your capture appears in a floating preview.'),
@@ -119,7 +119,7 @@ const pages = {
     ], prefs.wayland ? 'If a global shortcut is unavailable, add it in your desktop’s Keyboard settings using: still --capture=area. The tray menu also works.' : 'If another app already uses a shortcut, Still will flag it. Capture is always available from the tray menu.'),
     group('03 · Make it yours', [
       row('Try drawing, text and export without capturing anything.', el('button', { class: 'btn', onclick: () => still.send('open:demo') }, 'Explore the Editor')),
-      row('Screenshots stay on your computer unless you upload them.', el('span', {}, 'Cloud is optional'))
+      row('Your screenshots stay on your computer.', el('span', {}, 'Nothing is uploaded'))
     ]),
     el('div', { style: 'display:flex;justify-content:flex-end;margin-top:22px' }, [el('button', { class: 'btn primary', onclick: () => { setSetupDone(true); current = 'General'; render(); } }, 'Finish Setup')])
   ],
@@ -208,20 +208,7 @@ const pages = {
       select('Text size', 'annotate.font', [[20, 'Small'], [28, 'Medium'], [40, 'Large']], true)
     ], 'Tool keys: V select · A arrow · R rectangle · O ellipse · L line · P pen · H highlight · T text · N step · B redact · U blur · X pixelate · S spotlight · C crop')
   ],
-  Cloud: () => {
-    const status = el('span', { style: 'color:var(--text-2)' }, cloudState.connected ? 'Connected' : 'Not connected');
-    const endpoint = el('input', { class: 'field', style: 'width:300px', placeholder: 'https://captures.example.com', value: prefs.cloud.endpoint || '' });
-    const token = el('input', { class: 'field', style: 'width:300px', type: 'password', placeholder: cloudState.hasToken ? 'Saved — leave empty to keep it' : 'Personal access token' });
-    const connect = el('button', { class: 'btn primary', onclick: async () => {
-      status.textContent = 'Connecting…';
-      try { const name = await still.invoke('cloud:connect', endpoint.value, token.value); cloudState = { connected: true, hasToken: true }; prefs = await still.invoke('settings:get'); render(); toast(`Connected as ${name}`); }
-      catch (error) { status.textContent = String(error); status.style.color = 'var(--red)'; }
-    } }, 'Connect');
-    const driveButton = el('button', { class: 'btn', onclick: async (event) => {
-      if (driveState.connected) { await still.invoke('drive:disconnect'); }
-      else { event.target.disabled = true; event.target.textContent = 'Waiting for your browser…'; try { await still.invoke('drive:connect'); } catch (error) { toast(explain(error)); } }
-      driveState = await still.invoke('drive:get'); prefs = await still.invoke('settings:get'); render();
-    } }, driveState.connected ? 'Disconnect' : 'Connect');
+  AI: () => {
     // Describe Image: Google's Gemini with the user's own free key, or Claude with their Anthropic API key.
     const claude = (prefs.ai && prefs.ai.provider) === 'claude', provider = claude ? 'claude' : 'gemini';
     const saved = claude ? aiState.hasClaudeKey : aiState.hasKey;
@@ -234,26 +221,12 @@ const pages = {
       catch (error) { aiStatus.textContent = explain(error); aiStatus.style.color = 'var(--red)'; }
     } }, 'Save');
     const aiForget = el('button', { class: 'btn', onclick: async () => { await still.invoke('ai:setKey', provider, ''); await refreshAi(); } }, 'Remove');
-    const disconnect = el('button', { class: 'btn', onclick: async () => { await still.invoke('cloud:disconnect'); cloudState = { connected: false, hasToken: false }; prefs = await still.invoke('settings:get'); render(); } }, 'Disconnect');
     return [
-      group('Upload to', [
-        select('Destination', 'cloud.provider', [['still', 'Still Cloud'], ['drive', 'Google Drive'], ...(driveState.icloud ? [['icloud', 'iCloud Drive']] : [])]),
-        driveState.available ? row(driveState.connected ? `Google Drive: ${driveState.email}` : 'Google Drive', driveButton) : row('Google Drive', el('span', { style: 'color:var(--text-2)' }, 'Not available in this build')),
-        driveState.connected ? select('Who can open Drive links', 'cloud.driveAccess', [['link', 'Anyone with the link'], ['private', 'Only me']]) : null
-      ], prefs.cloud.provider === 'icloud' ? 'Upload saves into a Still folder in iCloud Drive. iCloud has no share link, so nothing is copied to your clipboard.' : 'Files go into a Still folder in your Drive. Still can only see files it put there.'),
-      group('Server', [row('Server URL', endpoint), row('Access token', token), row(status, el('div', { style: 'display:flex;gap:8px' }, [cloudState.hasToken ? disconnect : null, connect]))],
-        'Run your own Still Cloud server (see Cloud/README.md in the project). Uploads only happen when you press Upload or turn on automatic upload. The token is stored in your user profile, readable only by you.'),
       group('Describe Image', [row('Describe with', el('select', { class: 'field', 'aria-label': 'Describe with', onchange: async (e) => { await set({ ai: { provider: e.target.value } }); render(); } },
           [['gemini', 'Google Gemini (free key)'], ['claude', 'Claude (Anthropic API key)']].map(([value, text]) => el('option', { value, selected: provider === value }, text)))), row(claude ? 'Anthropic API key' : 'Gemini API key', aiKey), row(aiStatus, el('div', { style: 'display:flex;gap:8px' }, [saved ? aiForget : null, aiSave]))],
         `Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. Only the picture you describe is sent, and only then. ${claude
           ? 'Claude uses your own Anthropic API key (from console.anthropic.com → API Keys) and is billed to that account: about a cent per picture.'
-          : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`),
-      group('Uploads', [
-        select('Links expire after', 'cloud.expiryDays', [[1, '1 day'], [7, '7 days'], [30, '30 days'], [0, 'Never']], true),
-        select('Who can open links', 'cloud.visibility', [['link', 'Anyone with the link'], ['team', 'My team'], ['private', 'Only me']]),
-        toggle('Upload every screenshot automatically', 'cloud.autoUpload'),
-        select('Copy link as', 'cloud.linkFormat', [['url', 'Link'], ['markdown', 'Markdown'], ['html', 'HTML']])
-      ], 'After an upload, the share link is copied to your clipboard. Markdown and HTML show pictures inline in docs, issues and chats.')
+          : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`)
     ];
   },
   // Still for Claude: lets Claude (the desktop app or Claude Code) take screenshots and look through History.
@@ -277,7 +250,7 @@ const pages = {
       ], 'Opens Claude Desktop with Still ready to install: choose Install, and Claude can use Still. This also turns on “Let Claude use Still” below.') : null,
       group('Still for Claude', [
         row('Let Claude use Still', el('input', { type: 'checkbox', class: 'switch', 'aria-label': 'Let Claude use Still', checked: on, onchange: async (e) => { await set({ claude: { connector: e.target.checked } }); render(); } }))
-      ], 'With this on, Claude can take a screenshot of your screen, look through and search Capture History, read a capture’s text and picture, describe it, open it, and share it when you ask. Claude only reaches Still from this computer, and only while Still is running. Turn it off to stop it at once.'),
+      ], 'With this on, Claude can take a screenshot of your screen, look through and search Capture History, read a capture’s text and picture, describe it and open it. Claude only reaches Still from this computer, and only while Still is running. Turn it off to stop it at once.'),
       on && connector ? group('Claude Desktop, by hand', [
         row('Add to Claude’s settings', el('button', { class: 'btn', onclick: () => copy(connector.desktop, 'Settings') }, 'Copy')), code(connector.desktop)
       ], 'In Claude Desktop, open Settings → Developer → Edit Config, paste this into claude_desktop_config.json (merge it with any “mcpServers” already there), save, and restart Claude. Then ask Claude to “take a screenshot with Still”.') : null,
@@ -366,10 +339,8 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   prefs = await applyTheme();
   if (!setupDone()) { current = 'Setup'; capturesAtStart = await captureCount(); }
   updateStatus = await still.invoke('update:status');
-  driveState = await still.invoke('drive:get');
   aiState = await still.invoke('ai:get').catch(() => ({ hasKey: false }));
   connector = await still.invoke('connector:info').catch(() => null);
-  const cloud = await still.invoke('cloud:get'); cloudState = { connected: !!cloud.endpoint && cloud.hasToken, hasToken: cloud.hasToken };
   const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings', 'aria-label': 'Search settings categories', autocomplete: 'off' });
   const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');
   searchBox = search;

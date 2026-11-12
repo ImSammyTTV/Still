@@ -13,7 +13,6 @@
     "allow-library-open",
     "allow-library-pin",
     "allow-library-save",
-    "allow-preview-edit",
-    "allow-cloud-upload"
+    "allow-preview-edit"
   ]
 }

@@ -100,22 +100,10 @@ import StillCore
     @AppStorage("annotateDefaultTool") var annotateDefaultTool = "arrow"
     @AppStorage("annotateDefaultColor") var annotateDefaultColor = "FF414E"
     @AppStorage("annotateDefaultWidth") var annotateDefaultWidth: Double = 5
-    @AppStorage("cloudEndpoint") var cloudEndpoint = ""
-    @AppStorage("cloudExpiry") var cloudExpiry = 7
-    /// Where Upload sends files: "still" (a Still Cloud server), "drive" (Google Drive) or "icloud" (iCloud Drive).
-    @AppStorage("cloudProvider") var cloudProvider = "still"
     /// Describe Image: "gemini" (Google, free key) or "claude" (Anthropic API key).
     @AppStorage("describeProvider") var describeProvider = "gemini"
     /// Still for Claude: whether Claude may use Still through its MCP connector (Settings → Claude).
     @AppStorage("claudeConnector") var claudeConnector = false
-    @AppStorage("driveAccess") var driveAccess = "link"
-    @AppStorage("driveEmail") var driveEmail = ""
-    @AppStorage("driveFolder") var driveFolder = ""
-    @AppStorage("askUploadOptions") var askUploadOptions = false
-    /// How a link is copied after an upload: "url", "markdown" or "html".
-    @AppStorage("linkFormat") var linkFormat = "url"
-    @AppStorage("autoUploadImages") var autoUploadImages = false
-    @AppStorage("autoUploadVideos") var autoUploadVideos = false
     @AppStorage("appearance") var appearance = "system"
     private var defaultsObserver: NSObjectProtocol?
     init() { defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.objectWillChange.send() } } }

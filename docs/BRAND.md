@@ -4,7 +4,7 @@ How Still looks and sounds, in one page. The design tokens that implement this a
 
 ## Name
 
-**Still.** One word, capitalised, always with the period when it stands alone as a signature (the Floating Preview header). In sentences it is simply Still. The sharing server is **Still Cloud**. Never "Still App", "StillShot" or "still" in lowercase.
+**Still.** One word, capitalised, always with the period when it stands alone as a signature (the Floating Preview header). In sentences it is simply Still. Never "Still App", "StillShot" or "still" in lowercase.
 
 ## Mark
 
@@ -15,7 +15,6 @@ The vector source is `assets/brand/mark.svg` (32 grid, stroke 1.6, square caps).
 - App icon and README: `assets/brand/icon.png`
 - Mac menu bar: `Resources/MenuBarIcon.png`, a template image so macOS draws it black or white
 - Windows and Linux tray: `Desktop/src-tauri/icons/tray-white.png` and `tray-black.png`
-- Still Cloud: `assets/brand/mark.svg` inlined in `Cloud/static/index.html`
 
 Keep the tile white, keep the folded corner at the bottom-right and the break at the top-left, and never colour the frame. The mark is the only place pure white is a brand colour.
 
@@ -25,7 +24,7 @@ Keep the tile white, keep the folded corner at the bottom-right and the break at
 
 Still speaks plainly and briefly, like a knowledgeable friend. Verbs lead: Capture Area, Copy, Save, Pin to screen, Upload and copy link. Settings explain consequences in one sentence ("Screenshots stay on your computer unless you upload them"). Privacy is stated as fact, never as a boast. No exclamation marks, no jargon, no "powerful" or "seamless".
 
-Product names are consistent on every platform: Capture Bar, Capture Area, Capture Window, Capture Fullscreen, Floating Preview, Capture History, Annotate, Record, Still Cloud.
+Product names are consistent on every platform: Capture Bar, Capture Area, Capture Window, Capture Fullscreen, Floating Preview, Capture History, Annotate, Record.
 
 ## Colour
 

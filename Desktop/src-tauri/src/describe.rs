@@ -9,6 +9,8 @@ pub const MODEL: &str = "gemini-flash-latest";
 pub const PROMPT: &str = "Describe this screenshot in one or two plain sentences for someone who can't see it, as alt text: say what app or page it shows and what matters on it. Then, on a new line starting with \"Text: \", quote any short heading or button text that stands out. No preamble.";
 
 fn http() -> Result<reqwest::Client, String> {
+    // reqwest is built without a default TLS provider, so the one Still ships with is installed before first use.
+    if rustls::crypto::CryptoProvider::get_default().is_none() { let _ = rustls::crypto::ring::default_provider().install_default(); }
     reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).build().map_err(|e| e.to_string())
 }
 
@@ -119,7 +121,7 @@ fn claude_request(client: &reqwest::Client, method: reqwest::Method, path: &str,
 }
 
 pub async fn describe_with_claude(key: &str, mime: &str, base64: &str) -> Result<String, String> {
-    if key.trim().is_empty() { return Err("Add an Anthropic API key in Settings → Cloud → Describe Image first.".into()); }
+    if key.trim().is_empty() { return Err("Add an Anthropic API key in Settings → AI first.".into()); }
     let client = http()?;
     let res = claude_request(&client, reqwest::Method::POST, "messages", key).header("anthropic-beta", FALLBACK_BETA).json(&claude_body(mime, base64)).send().await
         .map_err(|e| format!("Couldn’t reach Claude: {e}"))?;

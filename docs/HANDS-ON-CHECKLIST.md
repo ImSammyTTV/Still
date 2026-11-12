@@ -79,7 +79,6 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     should show their first frame as they come into view.
 19. **A moved file.** Move one capture's file out of Still's folder in Explorer or Finder, then open History. Its
     tile says "File moved or deleted".
-20. **Upload and copy link**, then open the link on your phone with **Show QR Code**.
 
 21. **Find Similar.** Take three screenshots of the same page (scroll a little between them) and one of something else.
     Right-click one in History and choose Find Similar: the other two show, the different one doesn't.
@@ -103,7 +102,7 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
   Desktop opens with Still ready to install; choose Install. Let Claude use Still is now on, and asking Claude to
   “take a screenshot with Still” works without copying any settings. Without Claude Desktop, Still says to get it.
 - **Send to Claude.** Right-click a screenshot in History → Send to Claude. Claude opens; pasting adds the picture.
-- **Describe with Claude.** In Settings → Cloud → Describe Image, choose Claude and save an Anthropic API key, then
+- **Describe with Claude.** In Settings → AI, choose Claude and save an Anthropic API key, then
   Describe Image on a screenshot.
 
 ## After the checklist

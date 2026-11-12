@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="#download">Download</a> · <a href="#why-still">Features</a> · <a href="#getting-started">Getting started</a> · <a href="#shortcuts">Shortcuts</a> · <a href="#sharing">Sharing</a> · <a href="#development">Development</a>
+  <a href="#download">Download</a> · <a href="#why-still">Features</a> · <a href="#getting-started">Getting started</a> · <a href="#shortcuts">Shortcuts</a> · <a href="#development">Development</a>
 </p>
 
 <picture>
@@ -43,7 +43,7 @@ Windows portable executables are included too. Each release includes `SHA256SUMS
 | Areas, windows, and whole screens | Arrows, text, shapes, and numbered steps | Automatic clipboard copy |
 | Timers and exact dimensions | Highlighter, spotlight, and solid redaction | A floating preview with quick actions |
 | Text recognition on your computer | Backgrounds, padding, corners, and shadows | Pin captures and reopen history |
-| Screen recording | Editable annotations and undo | Upload to your own Still Cloud server |
+| Screen recording | Editable annotations and undo | Save for Size: a shape, width and file size |
 
 **More on Mac:** scrolling capture, clipboard history, video editing, GIF export, camera overlays, cursor effects, QR recognition, and image Services in Finder.
 
@@ -54,9 +54,9 @@ Windows portable executables are included too. Each release includes `SHA256SUMS
 ## Your first capture
 
 1. **Install and open Still.** The setup assistant walks you through the essentials.
-2. **Allow screen capture when asked.** Camera, microphone, and cloud setup are optional.
+2. **Allow screen capture when asked.** Camera and microphone setup are optional.
 3. **Choose Capture Area** from the menu bar or tray, then drag. Hold **Space** to select a window; **Escape** cancels selection.
-4. **Paste or edit.** The capture is copied to your clipboard. Use the floating preview to annotate, save, pin, or upload it.
+4. **Paste or edit.** The capture is copied to your clipboard. Use the floating preview to annotate, save, pin, or share it.
 
 Save actions use **Documents/Still** unless you choose another export folder in Settings. Capture History keeps the app's editable originals separately.
 
@@ -114,19 +114,6 @@ Linux builds use Ubuntu 24.04 and need compatible WebKitGTK and desktop screen-s
 **While selecting:** hold **Space** for a window, press **Enter** to confirm an area, or **Escape** to cancel. Arrow keys nudge; **Shift** makes larger nudges. Scroll to zoom the magnifier in or out. Shortcuts can be changed in **Settings → Shortcuts**.
 
 macOS reserves `⇧⌘4` for its screenshot tool. To use it with Still, turn off the matching selected-area shortcut in **Keyboard → Keyboard Shortcuts → Screenshots**, or choose a different shortcut in Still.
-
-<a id="sharing"></a>
-## Your captures. Your server.
-
-Screenshots and text recognition stay on your computer unless you upload them. Still Cloud is an optional server you run yourself, with share links, comments, passwords, expiry, and team access.
-
-You can also send uploads to **Google Drive**: connect it in **Settings → Cloud**, and captures go into a Still folder in your Drive with the link copied for you. Still can only see the files it put there.
-
-On Mac and Windows you can pick **iCloud Drive** instead. Upload then saves into a Still folder that syncs to your devices. iCloud has no share links, so there’s nothing to copy.
-
-[Set up Still Cloud →](Cloud/README.md)
-
-Connect it in **Settings → Cloud**, then choose **Upload**. Uploads include recognised text and any recording transcript so your server can search them. Auto-upload is a separate opt-in setting.
 
 <a id="help"></a>
 ## Need a hand?
@@ -197,13 +184,7 @@ The shared look is documented in [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) 
 </details>
 
 <details>
-<summary><strong>Sharing server and releases</strong></summary>
-
-The server uses Python's standard library:
-
-```sh
-python3 -m unittest discover -s Cloud/tests -v
-```
+<summary><strong>Releases</strong></summary>
 
 Maintainers publish through **Actions → Release → Run workflow** with a version such as `v1.2.7`. Every platform must finish before the workflow publishes downloads, update signatures, checksums, and the updater feed.
 

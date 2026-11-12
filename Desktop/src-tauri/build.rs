@@ -1,9 +1,6 @@
 // Declaring the app's commands lets each window's capability allow only the commands that page uses
 // (see capabilities/), instead of every window being able to call all of them.
 fn main() {
-    // Set when building releases; without them Settings says Google Drive isn't available in this build.
-    println!("cargo:rerun-if-env-changed=STILL_GOOGLE_CLIENT_ID");
-    println!("cargo:rerun-if-env-changed=STILL_GOOGLE_CLIENT_SECRET");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
         "settings_get", "settings_set", "settings_reset", "settings_choose_folder", "shortcuts_pause", "overlay_done",
         "overlay_cancel", "overlay_fullscreen", "overlay_timer", "overlay_purpose", "overlay_window_mode", "overlay_pointer", "overlay_color", "overlay_ready",
@@ -13,6 +10,6 @@ fn main() {
         "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_prepared", "recording_started",
         "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save",
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",
-        "cloud_get", "cloud_connect", "cloud_disconnect", "cloud_upload", "cloud_upload_data", "qr_svg", "library_combine", "library_star", "video_music_choose", "video_image_save", "countdown_cancel", "library_qr", "library_similar", "library_similar_in_folder", "library_folder_match", "library_search_web", "library_describe", "library_send_to_claude", "connector_info", "connector_add_to_claude", "ai_get", "ai_set_key", "drive_get", "drive_connect", "drive_disconnect", "scroll_stop", "scroll_auto",
+        "library_combine", "library_star", "video_music_choose", "video_image_save", "countdown_cancel", "library_similar", "library_similar_in_folder", "library_folder_match", "library_search_web", "library_describe", "library_send_to_claude", "connector_info", "connector_add_to_claude", "ai_get", "ai_set_key", "scroll_stop", "scroll_auto",
     ]))).expect("failed to run tauri-build");
 }

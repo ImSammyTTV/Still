@@ -1,8 +1,6 @@
 mod capture;
-mod cloud;
 mod combine;
 mod desktop;
-mod drive;
 mod library;
 mod marks;
 mod mcpb;
@@ -69,8 +67,6 @@ struct Session {
     listener: Option<marks::Listener>,
     /// The pointer's path and clicks for the video editor's zooms, kept with the recording when it's saved.
     trail: Option<marks::Trail>,
-    /// The last share link made, offered as a QR code from the tray.
-    last_link: Option<String>,
     /// Still's own recorder is leaving the pointer out, for the video editor to draw from the trail.
     cursor_separate: bool,
     failed_shortcuts: Vec<String>,
@@ -162,35 +158,6 @@ fn open_settings(app: &AppHandle, page: Option<&str>) {
     if let Some(w) = focus_or(app, "settings", || glass(builder(app, "settings", "settings.html", params)).title("Still Settings").inner_size(760.0, 600.0).min_inner_size(700.0, 540.0).decorations(false).build().ok()) {
         if let Some(p) = page { let _ = w.emit("settings:page", p); }
     }
-}
-/// A share link as a QR code, to open on a phone by pointing its camera at the screen.
-fn show_qr(app: &AppHandle, link: &str) {
-    if let Some(w) = app.get_webview_window("qr") { let _ = w.destroy(); }
-    // Built hidden like every Still window, so it has to be shown (it never was, so the code never appeared).
-    if let Ok(w) = glass(builder(app, "qr", "qr.html", json!({ "link": link }))).title("Open on Phone").inner_size(340.0, 440.0).resizable(false).decorations(false).always_on_top(true).center().build() {
-        let _ = w.show(); let _ = w.set_focus();
-    }
-}
-/// The last share link is kept in a small file, so "Show Last Link as QR Code" still works after Still restarts.
-fn last_link_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("last-link")) }
-fn remember_link(app: &AppHandle, link: &str) {
-    st(app).session.lock().unwrap().last_link = Some(link.to_string());
-    if let Some(f) = last_link_file(app) { let _ = std::fs::write(f, link); }
-}
-fn saved_link(app: &AppHandle) -> Option<String> {
-    let f = last_link_file(app)?;
-    std::fs::read_to_string(f).ok().map(|s| s.trim().to_string()).filter(|s| s.starts_with("http"))
-}
-#[tauri::command]
-async fn qr_svg(link: String) -> Result<String, String> { qr::svg(&link) }
-/// History's "Upload and Show QR Code": the share link, and then its code.
-#[tauri::command]
-async fn library_qr(app: AppHandle, id: String) -> Result<(), String> {
-    let link = upload_item(&app, &id).await?;
-    if !link.starts_with("http") { return Err("This destination has no share link to show.".into()); }
-    let a = app.clone();
-    let _ = app.run_on_main_thread(move || show_qr(&a, &link));
-    Ok(())
 }
 fn open_history(app: &AppHandle) {
     focus_or(app, "history", || glass(builder(app, "history", "history.html", json!({}))).title("Capture History").inner_size(980.0, 660.0).min_inner_size(640.0, 420.0).decorations(false).build().ok());
@@ -558,7 +525,6 @@ fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
         }
     };
     if setting(app, "afterCapture.save").as_bool().unwrap_or(false) { if let Err(e) = export_item(app, &item.id, None) { notify(app, "Couldn’t save to your folder", &e); } }
-    if setting(app, "cloud.autoUpload").as_bool().unwrap_or(false) { let (a, id) = (app.clone(), item.id.clone()); tauri::async_runtime::spawn(async move { let _ = upload_item(&a, &id).await; }); }
     if setting(app, "afterCapture.annotate").as_bool().unwrap_or(false) { open_editor(app, Some(&item.id), false); }
     else if setting(app, "afterCapture.quickAccess").as_bool().unwrap_or(true) { show_preview(app, &item, true); }
     broadcast(app, "library:changed", Value::Null);
@@ -862,7 +828,7 @@ fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
         "history" => include_bytes!("../icons/menu/history.png"), "restore" => include_bytes!("../icons/menu/restore.png"),
         "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
         "update" => include_bytes!("../icons/menu/update.png"), "settings" => include_bytes!("../icons/menu/settings.png"),
-        "quit" => include_bytes!("../icons/menu/quit.png"), "qr" => include_bytes!("../icons/menu/qr.png"), "stop" => include_bytes!("../icons/menu/stop.png"), _ => return None,
+        "quit" => include_bytes!("../icons/menu/quit.png"), "stop" => include_bytes!("../icons/menu/stop.png"), _ => return None,
     };
     tauri::image::Image::from_bytes(bytes).ok()
 }
@@ -877,7 +843,6 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         b.build(app)
     };
     let recording = st(app).session.lock().unwrap().recording.is_some();
-    let last_link = st(app).session.lock().unwrap().last_link.is_some();
     let scrolling = scroll::active(app);
     let update = st(app).session.lock().unwrap().update.clone();
     let mut timers = SubmenuBuilder::new(app, "Timed Capture");
@@ -907,7 +872,6 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     if !recording { menu = menu.item(&item("record", "Record Screen", "record", accel("record"), true)?); }
     menu.separator()
         .item(&item("open-image", "Open Image…", "open", None, true)?)
-        .item(&item("last-link-qr", "Show Last Link as QR Code", "qr", None, last_link)?)
         .item(&item("history", "Capture History", "history", accel("history"), true)?)
         .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
         .item(&item("unlock-pins", "Unlock Pinned Screenshots", "unlock", None, true)?)
@@ -923,7 +887,6 @@ fn on_menu(app: &AppHandle, id: &str) {
         "settings" => open_settings(app, None),
         "quit" => app.exit(0),
         "open-image" => import_image(app),
-        "last-link-qr" => { let link = st(app).session.lock().unwrap().last_link.clone(); if let Some(link) = link { show_qr(app, &link); } }
         "unlock-pins" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") { let _ = w.set_ignore_cursor_events(false); } },
         "close-overlays" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") || l.starts_with("quick-") { let _ = w.close(); } },
         "update-check" => check_update(app, true),
@@ -1330,7 +1293,7 @@ async fn library_folder_match(index: usize, reveal_it: bool) -> Result<(), Strin
     if reveal_it { reveal(&file) } else { open_path(&file) }
     Ok(())
 }
-/// Describe Image (Settings → AI): the user's own Gemini key lives in a private file, like the Cloud token.
+/// Describe Image (Settings → AI): the user's own Gemini key lives in a private file only your account can read.
 /// Claude's key (an Anthropic API key) sits in its own file beside it.
 fn ai_key_file(app: &AppHandle, provider: &str) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join(if provider == "claude" { "anthropic-key" } else { "gemini-key" })) }
 fn ai_key(app: &AppHandle, provider: &str) -> String { ai_key_file(app, provider).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
@@ -1461,10 +1424,6 @@ async fn connector_call(app: &AppHandle, name: &str, args: &Value) -> Value {
             json!({ "content": content, "isError": false })
         }
         "still_describe_capture" => match library_describe(app.clone(), arg_id).await { Ok(t) => mcp::text_result(&t, false), Err(e) => mcp::text_result(&e, true) },
-        "still_share_capture" => {
-            if found().is_none() { return mcp::text_result("No capture with that id.", true); }
-            match upload_item(app, &arg_id).await { Ok(link) => mcp::text_result(&link, false), Err(e) => mcp::text_result(&e, true) }
-        }
         "still_open_capture" => {
             let Some(item) = found() else { return mcp::text_result("No capture with that id.", true) };
             let a = app.clone(); let id = item.id.clone(); let video = item.kind == "recording";
@@ -1969,119 +1928,15 @@ async fn video_export_copy(app: AppHandle, window: tauri::Window) -> Result<Stri
     Ok(target.to_string_lossy().to_string())
 }
 
-// ---- Sharing (self-hosted Still Cloud) -----------------------------------------------------------
-
-fn token_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("cloud-token")) }
-fn cloud_token(app: &AppHandle) -> String { token_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
-fn save_token(app: &AppHandle, token: &str) -> Result<(), String> { write_private(&token_file(app).ok_or("No settings folder")?, token) }
+/// A small file only your account can read, from the moment it exists (API keys, the Claude connector's details).
 fn write_private(file: &Path, token: &str) -> Result<(), String> {
     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
-    // Only your account can read the token, from the moment the file exists.
     let mut options = std::fs::OpenOptions::new(); options.write(true).create(true).truncate(true);
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
     use std::io::Write;
     options.open(file).and_then(|mut f| f.write_all(token.as_bytes())).map_err(|e| e.to_string())?;
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600)); }
     Ok(())
-}
-fn cloud_client(app: &AppHandle) -> Result<cloud::Cloud, String> {
-    let endpoint = setting(app, "cloud.endpoint").as_str().unwrap_or("").to_string();
-    if endpoint.is_empty() { return Err("Connect a Still Cloud server in Settings → Cloud first.".into()); }
-    cloud::Cloud::new(&endpoint, &cloud_token(app))
-}
-fn cloud_options(app: &AppHandle, title: String, text: String) -> cloud::Options {
-    cloud::Options { title, text, password: String::new(), expiry_days: setting(app, "cloud.expiryDays").as_i64().unwrap_or(7),
-        visibility: setting(app, "cloud.visibility").as_str().unwrap_or("link").to_string() }
-}
-fn drive_token_file(app: &AppHandle) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join("drive-token")) }
-fn drive_token(app: &AppHandle) -> String { drive_token_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
-async fn drive_share(app: &AppHandle, file: &Path, title: &str) -> Result<String, String> {
-    let token = drive_token(app);
-    if token.is_empty() { return Err("Connect Google Drive in Settings → Cloud first.".into()); }
-    let folder = setting(app, "cloud.driveFolder").as_str().unwrap_or("").to_string();
-    let public = setting(app, "cloud.driveAccess").as_str().unwrap_or("link") == "link";
-    let uploaded = drive::upload(&token, &folder, file, title, public).await?;
-    if uploaded.folder != folder { st(app).settings.lock().unwrap().update(&json!({ "cloud": { "driveFolder": uploaded.folder } })); }
-    Ok(uploaded.link)
-}
-fn save_to_icloud(file: &Path, title: &str) -> Result<String, String> {
-    let folder = cloud::icloud_folder().ok_or("iCloud Drive wasn’t found. Install iCloud for Windows and turn on iCloud Drive.")?.join("Still");
-    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let target = unique_path(&folder, title, file.extension().and_then(|e| e.to_str()).unwrap_or("png"));
-    std::fs::copy(file, &target).map_err(|e| e.to_string())?;
-    Ok(target.to_string_lossy().to_string())
-}
-async fn share(app: &AppHandle, file: PathBuf, title: String, text: String) -> Result<String, String> {
-    if setting(app, "cloud.provider").as_str() == Some("icloud") {
-        // iCloud has no share links: the file is saved and synced, and there's nothing to copy.
-        let saved = save_to_icloud(&file, &title);
-        match &saved { Ok(_) => notify(app, "Saved to iCloud Drive", &title), Err(e) => notify(app, "Upload failed", e) }
-        return saved;
-    }
-    let result = if setting(app, "cloud.provider").as_str() == Some("drive") { drive_share(app, &file, &title).await }
-        else { match cloud_client(app) { Ok(c) => c.upload(&file, &cloud_options(app, title.clone(), text)).await, Err(e) => Err(e) } };
-    match &result {
-        Ok(link) => {
-            let image = matches!(file.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp"));
-            let format = setting(app, "cloud.linkFormat").as_str().unwrap_or("url").to_string();
-            let copied = if link.starts_with("http") { cloud::link_text(link, &title, image, &format) } else { link.clone() };
-            let _ = app.clipboard().write_text(copied); notify(app, "Link copied", link);
-            if link.starts_with("http") { remember_link(app, link); build_tray_menu(app); }
-        }
-        Err(e) => notify(app, "Upload failed", e),
-    }
-    result
-}
-async fn upload_item(app: &AppHandle, id: &str) -> Result<String, String> {
-    let (file, title, text) = { let lib = st(app).library.lock().unwrap(); let i = lib.get(id).ok_or("Missing capture")?; (lib.file(&i), i.title.clone(), i.text.clone()) };
-    share(app, file, title, text).await
-}
-
-#[tauri::command]
-async fn cloud_get(app: AppHandle) -> Value { json!({ "endpoint": setting(&app, "cloud.endpoint"), "hasToken": !cloud_token(&app).is_empty() }) }
-#[tauri::command]
-async fn cloud_connect(app: AppHandle, endpoint: String, token: String) -> Result<String, String> {
-    // Reuse the saved token only for the server it was saved for, never send it to a new address.
-    let saved_endpoint = setting(&app, "cloud.endpoint").as_str().unwrap_or("").trim_end_matches('/').to_string();
-    let token = if token.trim().is_empty() && endpoint.trim().trim_end_matches('/') == saved_endpoint { cloud_token(&app) } else { token };
-    let name = cloud::Cloud::new(&endpoint, &token)?.test().await?;
-    save_token(&app, token.trim())?;
-    let endpoint = endpoint.trim().trim_end_matches('/').to_string();
-    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": endpoint } }));
-    Ok(name)
-}
-#[tauri::command]
-async fn cloud_disconnect(app: AppHandle) {
-    if let Some(f) = token_file(&app) { let _ = std::fs::remove_file(f); }
-    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": "", "autoUpload": false } }));
-}
-#[tauri::command]
-async fn drive_get(app: AppHandle) -> Value { json!({ "available": drive::available(), "connected": !drive_token(&app).is_empty(), "email": setting(&app, "cloud.driveEmail"), "icloud": cloud::icloud_folder().is_some() }) }
-#[tauri::command]
-async fn drive_connect(app: AppHandle) -> Result<String, String> {
-    let connected = drive::connect().await?;
-    let file = drive_token_file(&app).ok_or("No settings folder")?;
-    write_private(&file, &connected.refresh_token)?;
-    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "provider": "drive", "driveEmail": connected.email } }));
-    Ok(connected.email)
-}
-#[tauri::command]
-async fn drive_disconnect(app: AppHandle) {
-    let token = drive_token(&app);
-    if let Some(f) = drive_token_file(&app) { let _ = std::fs::remove_file(f); }
-    st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "provider": "still", "driveEmail": "", "driveFolder": "" } }));
-    if !token.is_empty() { drive::revoke(&token).await; }
-}
-#[tauri::command]
-async fn cloud_upload(app: AppHandle, id: String) -> Result<String, String> { upload_item(&app, &id).await }
-#[tauri::command]
-async fn cloud_upload_data(app: AppHandle, data_url: String, title: String) -> Result<String, String> {
-    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
-    let file = private_temp().join(format!("still-share-{}.png", uuid::Uuid::new_v4().simple()));
-    std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
-    let result = share(&app, file.clone(), if title.is_empty() { library::capture_name("Still") } else { title }, String::new()).await;
-    let _ = std::fs::remove_file(file);
-    result
 }
 
 #[tauri::command]
@@ -2177,19 +2032,6 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             log("editorCopy", json!(has_image()));
             snap("4-editor");
         }
-        // Sharing: upload to a local Still Cloud server when CI provides one.
-        if let (Ok(endpoint), Ok(token)) = (std::env::var("STILL_TEST_CLOUD"), std::env::var("STILL_TEST_CLOUD_TOKEN")) {
-            let id = st(&app).library.lock().unwrap().items.first().map(|i| i.id.clone()).unwrap_or_default();
-            let result = tauri::async_runtime::block_on(async {
-                let name = cloud::Cloud::new(&endpoint, &token)?.test().await?;
-                save_token(&app, &token)?;
-                st(&app).settings.lock().unwrap().update(&json!({ "cloud": { "endpoint": endpoint } }));
-                let link = upload_item(&app, &id).await?;
-                Ok::<_, String>(format!("{name} {link}"))
-            });
-            log("cloudUpload", json!(result.map_err(|e| format!("error: {e}")).unwrap_or_else(|e| e)));
-            log("cloudLinkCopied", json!(app.clipboard().read_text().map(|t| t.starts_with("http")).unwrap_or(false)));
-        }
         // Recording extras: they open and listen, a missing camera closes only the bubble, and nothing outlives the recording.
         st(&app).settings.lock().unwrap().update(&json!({ "recording": { "clicks": true, "keys": true } }));
         let (area, screen) = (marks::Area { x: 100.0, y: 100.0, w: 400.0, h: 300.0 }, marks::Area { x: 0.0, y: 0.0, w: 1280.0, h: 720.0 });
@@ -2284,7 +2126,6 @@ pub fn run() {
                 library: Mutex::new(Library::open(data.join("Library"))),
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
-            let saved = saved_link(&handle); st(&handle).session.lock().unwrap().last_link = saved;
             apply_name_pattern(&handle);
             apply_history_days(&handle);
             apply_connector(&handle);
@@ -2330,7 +2171,7 @@ pub fn run() {
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
-            cloud_get, cloud_connect, cloud_disconnect, cloud_upload, cloud_upload_data, qr_svg, library_qr, drive_get, drive_connect, drive_disconnect, scroll::scroll_stop, scroll::scroll_auto
+            scroll::scroll_stop, scroll::scroll_auto
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")

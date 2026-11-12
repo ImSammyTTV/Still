@@ -56,7 +56,7 @@ public enum ImageDescriber {
     }
     /// Describes a picture with the user's key.
     public static func describe(key: String, mime: String, data: Data) async throws -> String {
-        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add a Gemini key in Settings → Cloud → Describe Image first.") }
+        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add a Gemini key in Settings → AI first.") }
         let payload = body(mime: mime, data: data)
         do {
             var (status, response) = try await json(request("models/\(model):generateContent", key: key, body: payload))
@@ -116,7 +116,7 @@ public enum ImageDescriber {
         return r
     }
     public static func describeWithClaude(key: String, mime: String, data: Data) async throws -> String {
-        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add an Anthropic API key in Settings → Cloud → Describe Image first.") }
+        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add an Anthropic API key in Settings → AI first.") }
         do {
             let (status, response) = try await json(claudeRequest("messages", key: key, body: claudeBody(mime: mime, data: data)))
             return try claudeText(status: status, response).get()

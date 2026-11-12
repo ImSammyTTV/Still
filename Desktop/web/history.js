@@ -8,8 +8,8 @@ async function describe(item) {
   try { const text = await still.invoke('library:describe', item.id); await navigator.clipboard.writeText(text).catch(() => {}); toast(`${text.split('\n')[0]} (copied)`); }
   catch (error) {
     const why = explain(error);
-    toast(/Settings/.test(why) ? 'Add a key in Settings → Cloud → Describe Image first' : why);
-    if (/Settings/.test(why)) still.invoke('open:settings', 'Cloud').catch(() => {});
+    toast(/Settings/.test(why) ? 'Add a key in Settings → AI first' : why);
+    if (/Settings/.test(why)) still.invoke('open:settings', 'AI').catch(() => {});
   }
 }
 // Find Similar in a Folder: pictures anywhere in a folder the user picks that look like this capture.
@@ -152,8 +152,6 @@ async function load() {
           { label: item.description ? 'Describe Again' : 'Describe Image', icon: 'sparkles', action: () => describe(item) },
           ...(item.description ? [{ label: 'Copy Description', icon: 'copy', action: () => navigator.clipboard.writeText(item.description).then(() => toast('Description copied')) }] : []),
           { label: 'Search the Web for This Image', icon: 'globe', action: () => searchWeb(item) }]),
-        { label: 'Upload and Copy Link', icon: 'cloud-upload', action: () => still.invoke('cloud:upload', item.id).then((result) => toast(String(result).startsWith('http') ? 'Link copied' : 'Saved to iCloud Drive')).catch((error) => toast(explain(error))) },
-        { label: 'Upload and Show QR Code', icon: 'qr-code', action: () => still.invoke('library:qr', item.id).catch((error) => toast(explain(error))) },
         ...(item.kind === 'recording' ? [] : picks.length >= 2 && picks.includes(item.id)
           ? [{ label: `Combine ${picks.length} Side by Side`, icon: 'columns-2', action: () => combinePicks(false) }, { label: `Combine ${picks.length} Top to Bottom`, icon: 'rows-2', action: () => combinePicks(true) }]
           : [{ label: picks.includes(item.id) ? 'Remove from Combine' : 'Select to Combine', icon: 'copy-plus', action: () => togglePick(item) }]),
