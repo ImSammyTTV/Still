@@ -66,7 +66,7 @@ import StillCore
     @AppStorage("freezeScreen") var freezeScreen = false
     @AppStorage("crosshair") var crosshair = "full"
     @AppStorage("magnifier") var magnifier = true
-    @AppStorage("rememberSelection") var rememberSelection = true
+    @AppStorage("rememberSelection") var rememberSelection = false
     @AppStorage("exportFormat") var exportFormat = "png"
     @AppStorage("filenamePattern") var filenamePattern = "Screenshot {date} at {time}"
     @AppStorage("watermarkText") var watermarkText = ""
