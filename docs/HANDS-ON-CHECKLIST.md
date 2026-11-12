@@ -23,6 +23,10 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
      Screen, then click the laptop's display: that one is captured. With Record chosen, it is recorded. In Record
      Screen's panel, the full-screen button lists each display by name.
    - Dock icon (Mac): clicking Still in the Dock opens the Capture Bar; right-click it for Settings.
+   - Adjust before capturing: drag an area and let go. The box stays. Inside it the pointer is a hand: drag to move it.
+     Its edges and corners resize it. Capture (under the box), Return or a double-click inside takes it; Esc cancels;
+     a press outside starts a new area. Settings → Screenshots → "Adjust the area before capturing" off captures as
+     soon as you let go, as before.
    - Move a selection: start dragging an area, hold Space and keep moving: the box moves without changing size. Let
      go of Space to carry on resizing; release the mouse to capture. Shift still makes it square.
 2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the

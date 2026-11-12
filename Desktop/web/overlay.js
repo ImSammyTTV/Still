@@ -118,7 +118,7 @@ function setWindowMode(on, fromOthers = false) {
     if (on && !fromOthers) toastWindowUnavailable();
     on = false;
   }
-  windowMode = on; anchor = null; partDepth = 0;
+  windowMode = on; anchor = null; partDepth = 0; if (on) stopAdjusting();
   document.body.classList.toggle('window-mode', on);
   hovered = on ? partsOf(G.windowAt(config.windows, pointer)) : null;
   if (!fromOthers) still.send('overlay:windowMode', on);
@@ -168,7 +168,7 @@ function draw() {
   if (region && region.w > 0) {
     ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = 1; ctx.strokeRect(region.x + 0.5, region.y + 0.5, region.w - 1, region.h - 1);
   }
-  if (config.crosshair !== 'disabled' && pointer.x >= 0) {
+  if (config.crosshair !== 'disabled' && pointer.x >= 0 && !adjusting) {
     ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 0.6; ctx.beginPath();
     if (config.crosshair === 'full') { ctx.moveTo(pointer.x, 0); ctx.lineTo(pointer.x, innerHeight); ctx.moveTo(0, pointer.y); ctx.lineTo(innerWidth, pointer.y); }
     else { ctx.moveTo(pointer.x - 20, pointer.y); ctx.lineTo(pointer.x + 20, pointer.y); ctx.moveTo(pointer.x, pointer.y - 20); ctx.lineTo(pointer.x, pointer.y + 20); }
@@ -176,8 +176,11 @@ function draw() {
   }
   if (pointer.x < 0) return;
   const hint = purpose === 'record' ? 'Drag to record · hold Space for a window' : purpose === 'scroll' ? 'Drag over the area you will scroll' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
-  const lens = config.magnifier && !anchor ? drawMagnifier() : null;
-  label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}${anchor && !moving ? '  ·  hold Space to move' : ''}` : hint, pointer.x, pointer.y, lens);
+  const lens = config.magnifier && !anchor && !adjusting ? drawMagnifier() : null;
+  const size = region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : '';
+  placeCaptureButton();
+  const button = adjusting && !$('#selCapture').hidden ? $('#selCapture').getBoundingClientRect() : null;
+  label(adjusting ? `${size}  ·  drag to move or resize  ·  Enter to capture` : size ? `${size}${anchor && !moving ? '  ·  hold Space to move' : ''}` : hint, pointer.x, pointer.y, lens || (button && { x: button.left - 8, y: button.top - 8, w: button.width + 16, h: button.height + 16 }));
 }
 
 // Draws the magnifier and returns the area it covers, colour chip included.
@@ -240,7 +243,28 @@ $('#barHandle').addEventListener('pointerdown', (e) => {
   const end = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', end); handle.removeEventListener('pointercancel', end); document.body.classList.remove('moving-bar'); };
   handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
 });
-const onBar = (e) => $('#bar').contains(e.target) || e.target.closest('.menu');
+const onBar = (e) => $('#bar').contains(e.target) || e.target.closest('.menu') || e.target.closest('#selCapture');
+
+// Adjusting the area before it's captured, as the Mac's own tool does: once the drag is let go, the box stays. Inside
+// it the pointer is a hand that moves it, its edges and corners resize it, and Capture (or Enter, or a double-click
+// inside) takes it. Settings can turn this off, for a capture the moment the mouse is let go.
+let adjusting = false, grab = null;
+const adjusts = () => !config || config.adjust !== false;
+const CURSORS = { inside: 'grab', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize' };
+function setCursor(handle, held) { document.body.style.cursor = handle ? (held && handle === 'inside' ? 'grabbing' : CURSORS[handle]) : ''; }
+function stopAdjusting() { adjusting = false; grab = null; setCursor(null); $('#selCapture').hidden = true; }
+// The Capture button sits under the box, or above it, or inside its bottom edge when there's no room.
+function placeCaptureButton() {
+  const b = $('#selCapture');
+  if (!adjusting || grab || !region || region.w <= 0) { b.hidden = true; return; }
+  b.hidden = false;
+  const w = b.offsetWidth || 120, h = b.offsetHeight || 32;
+  let top = region.y + region.h + 10;
+  if (top + h > innerHeight - 8) top = region.y - h - 10;
+  if (top < 8) top = region.y + region.h - h - 10;
+  b.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, region.x + region.w / 2 - w / 2))}px`; b.style.top = `${top}px`;
+}
+$('#selCapture').addEventListener('click', (e) => { e.stopPropagation(); if (region && region.w > 2) finish(region); });
 
 // A mouse can report a thousand moves a second. The page keeps only the latest and draws once per screen refresh,
 // and tells the other screens just once when the pointer arrives here, so the pointer never waits on the overlay.
@@ -252,6 +276,13 @@ let here = false, frame = 0, backup = 0, square = false;
 let moving = false, moveFrom = null;
 function follow() {
   if (!config) return;
+  if (grab) {
+    const dx = pointer.x - grab.from.x, dy = pointer.y - grab.from.y;
+    if (grab.handle === 'inside') { const d = G.moveWithin(grab.start, dx, dy, bounds()); region = { ...grab.start, x: grab.start.x + d.dx, y: grab.start.y + d.dy }; }
+    else region = G.resizeRect(grab.start, grab.handle, dx, dy, { bounds: bounds(), aspect: aspect || (square ? 1 : 0) });
+    return;
+  }
+  if (adjusting) { setCursor(G.handleAt(region, pointer)); return; }
   if (anchor && moving && region && region.w > 0) {
     const { dx, dy } = G.moveWithin(region, pointer.x - moveFrom.x, pointer.y - moveFrom.y, bounds());
     region = { ...region, x: region.x + dx, y: region.y + dy }; anchor = { x: anchor.x + dx, y: anchor.y + dy };
@@ -297,16 +328,25 @@ addEventListener('mousedown', (e) => {
     else if (hovered) finish(G.intersect(hovered, bounds()), hovered.id);
     return;
   }
+  if (adjusting && region) {
+    if (e.detail >= 2 && G.contains(region, pointer)) return finish(region);
+    const handle = G.handleAt(region, pointer);
+    if (handle) { grab = { handle, from: { ...pointer }, start: { ...region } }; setCursor(handle, true); draw(); return; }
+    stopAdjusting(); // A press outside starts a new area.
+  }
   anchor = pointer; region = fixed ? G.intersect({ ...pointer, ...fixed }, bounds()) : null; draw();
 });
 
 addEventListener('mouseup', (e) => {
+  if (grab) { pointer = point(e); square = e.shiftKey; follow(); grab = null; setCursor(G.handleAt(region, pointer)); updateBar(); draw(); return; }
   if (!anchor || windowMode) return;
   // Where the button came up is the selection, whether or not a frame was drawn since the last move.
   pointer = point(e); square = e.shiftKey; follow();
   anchor = null; stopMoving();
-  if (region && region.w > 2 && region.h > 2) finish(region);
-  else draw();
+  if (region && region.w > 2 && region.h > 2) {
+    if (!adjusts()) return finish(region);
+    adjusting = true; setCursor(G.handleAt(region, pointer)); updateBar(); draw();
+  } else draw();
 });
 
 document.documentElement.addEventListener('mouseleave', leave);

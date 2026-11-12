@@ -17,6 +17,7 @@ pub fn defaults() -> Value {
         "crosshair": "partial",
         "magnifier": true,
         "rememberSelection": false,
+        "adjustBeforeCapture": true,
         "hideDesktopIcons": false,
         "fileName": "{type} {date} at {time}",
         "historyDays": 0,

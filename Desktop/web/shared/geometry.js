@@ -43,6 +43,39 @@
     dy: Math.min(Math.max(dy, bounds.y - r.y), bounds.y + bounds.h - (r.y + r.h))
   });
 
+  // Adjusting a finished selection before it's captured. Which part of it is under the pointer: an edge or corner
+  // ('n', 'se', …) within `tolerance` of it, 'inside', or null. Corners win over edges, edges over the inside, so a
+  // small selection can still be resized.
+  const handleAt = (r, p, tolerance = 7) => {
+    if (!r || r.w <= 0 || r.h <= 0) return null;
+    const near = (a, b) => Math.abs(a - b) <= tolerance;
+    const inX = p.x >= r.x - tolerance && p.x <= r.x + r.w + tolerance, inY = p.y >= r.y - tolerance && p.y <= r.y + r.h + tolerance;
+    if (!inX || !inY) return null;
+    const v = near(p.y, r.y) ? 'n' : near(p.y, r.y + r.h) ? 's' : '';
+    const h = near(p.x, r.x) ? 'w' : near(p.x, r.x + r.w) ? 'e' : '';
+    if (v || h) return v + h;
+    return contains(r, p) ? 'inside' : null;
+  };
+  // The selection with one edge or corner dragged by (dx, dy) from where it was when the drag began, never smaller
+  // than `min`, inside `bounds`, and keeping `aspect` (width / height) when one is set.
+  const resizeRect = (start, handle, dx, dy, { bounds, aspect = 0, min = 4 } = {}) => {
+    let x0 = start.x, y0 = start.y, x1 = start.x + start.w, y1 = start.y + start.h;
+    if (handle.includes('w')) x0 = Math.min(x1 - min, x0 + dx);
+    if (handle.includes('e')) x1 = Math.max(x0 + min, x1 + dx);
+    if (handle.includes('n')) y0 = Math.min(y1 - min, y0 + dy);
+    if (handle.includes('s')) y1 = Math.max(y0 + min, y1 + dy);
+    if (bounds) { x0 = Math.max(bounds.x, x0); y0 = Math.max(bounds.y, y0); x1 = Math.min(bounds.x + bounds.w, x1); y1 = Math.min(bounds.y + bounds.h, y1); }
+    let r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    if (aspect > 0) {
+      // Width leads unless only the top or bottom edge moved; the opposite side stays put.
+      if (handle === 'n' || handle === 's') r.w = r.h * aspect; else r.h = r.w / aspect;
+      if (handle.includes('w')) r.x = x1 - r.w;
+      if (handle.includes('n')) r.y = y1 - r.h;
+      if (bounds) r = intersect(r, bounds);
+    }
+    return r;
+  };
+
   // Maps a rectangle in display points to image pixels.
   const toPixels = (r, scale) => ({
     x: Math.round(r.x * scale), y: Math.round(r.y * scale),
@@ -168,5 +201,5 @@
     return { x, y };
   };
 
-  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, moveWithin, toPixels, windowAt, windowPartAt, bandParts, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
+  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, moveWithin, handleAt, resizeRect, toPixels, windowAt, windowPartAt, bandParts, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
 });

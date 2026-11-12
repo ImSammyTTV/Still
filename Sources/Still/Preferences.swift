@@ -67,6 +67,8 @@ import StillCore
     @AppStorage("crosshair") var crosshair = "full"
     @AppStorage("magnifier") var magnifier = true
     @AppStorage("rememberSelection") var rememberSelection = false
+    /// After dragging an area, keep it on screen to move or resize before capturing (Capture, Return or a double-click).
+    @AppStorage("adjustBeforeCapture") var adjustBeforeCapture = true
     @AppStorage("exportFormat") var exportFormat = "png"
     @AppStorage("filenamePattern") var filenamePattern = "Screenshot {date} at {time}"
     @AppStorage("watermarkText") var watermarkText = ""

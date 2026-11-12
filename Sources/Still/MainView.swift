@@ -189,6 +189,7 @@ struct MainView: View {
             section("Selection") {
                 choice("Crosshair", selection: $prefs.crosshair) { Text("Small").tag("cross"); Text("Full Screen").tag("full"); Text("Off").tag("disabled") }
                 Toggle("Show magnifier", isOn: $prefs.magnifier)
+                Toggle("Adjust the area before capturing", isOn: $prefs.adjustBeforeCapture)
                 Toggle("Remember last selection", isOn: $prefs.rememberSelection)
             }
         }

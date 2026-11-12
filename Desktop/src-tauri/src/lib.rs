@@ -353,7 +353,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
             let init = json!({
                 "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(), "canScroll": scroll::supported(),
                 "imageParts": parts, "imageWidth": w, "imageHeight": h, "windows": mine,
-                "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"),
+                "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"), "adjust": setting(&app, "adjustBeforeCapture").as_bool().unwrap_or(true),
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
                 "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
             });
