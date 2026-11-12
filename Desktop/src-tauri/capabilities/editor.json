@@ -6,6 +6,7 @@
     "editor-*"
   ],
   "permissions": [
+    "allow-editor-save-file",
     "allow-library-get",
     "allow-settings-set",
     "allow-editor-save",

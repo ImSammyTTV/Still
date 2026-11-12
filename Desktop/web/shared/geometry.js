@@ -37,6 +37,12 @@
     return next;
   };
 
+  // Space held mid-drag moves the selection: how far it can go towards (dx, dy) without leaving `bounds`.
+  const moveWithin = (r, dx, dy, bounds) => ({
+    dx: Math.min(Math.max(dx, bounds.x - r.x), bounds.x + bounds.w - (r.x + r.w)),
+    dy: Math.min(Math.max(dy, bounds.y - r.y), bounds.y + bounds.h - (r.y + r.h))
+  });
+
   // Maps a rectangle in display points to image pixels.
   const toPixels = (r, scale) => ({
     x: Math.round(r.x * scale), y: Math.round(r.y * scale),
@@ -162,5 +168,5 @@
     return { x, y };
   };
 
-  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, toPixels, windowAt, windowPartAt, bandParts, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
+  return { MAGNIFIER_ZOOMS, magnifierSize, magnifierPlace, DEFAULT_NAME, fileName, hexColor, rememberColor, inkOn, videoBitrate, normalize, intersect, contains, dragRect, nudge, moveWithin, toPixels, windowAt, windowPartAt, bandParts, fit, canvasSize, formatDuration, captureName, shortcutLabel, exportSize, estimateBytes, sizeLabel };
 });

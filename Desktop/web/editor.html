@@ -116,6 +116,7 @@
   <button class="btn icon" id="pin" title="Pin to Screen"><i data-lucide="pin"></i></button>
   <button class="btn icon" id="upload" title="Upload and Copy Link"><i data-lucide="cloud-upload"></i></button>
   <button class="btn icon" id="saveAs" title="Save As…"><i data-lucide="folder-down"></i></button>
+  <button class="btn icon" id="saveForSize" title="Save for Size… (square, width, file size)"><i data-lucide="scaling"></i></button>
   <button class="btn" id="copy"><i data-lucide="copy"></i>Copy</button>
   <button class="btn primary" id="save"><i data-lucide="download"></i>Save</button>
 </footer>
@@ -136,10 +137,38 @@
     </div>
   </form>
 </div>
+<div class="sheet-backdrop" id="sizeSheet" hidden>
+  <form class="sheet" id="sizeForm" role="dialog" aria-modal="true" aria-labelledby="sizeTitle" novalidate>
+    <h3 id="sizeTitle">Save for Size</h3>
+    <div class="row"><span>Square (keeps the middle)</span><input type="checkbox" class="switch" id="sizeSquare"></div>
+    <div class="sheet-size">
+      <span>Width</span>
+      <input class="field" id="sizeWidth" type="number" min="1" max="8000" step="1" aria-label="Width in pixels">
+      <span>pixels</span>
+      <span class="meta" id="sizeOut"></span>
+    </div>
+    <div class="row"><span>Keep under a file size</span><input type="checkbox" class="switch" id="sizeLimitOn"></div>
+    <div class="sheet-size">
+      <span>Under</span>
+      <input class="field" id="sizeLimit" type="number" min="1" step="1" aria-label="Largest file size in KB">
+      <span>KB</span>
+    </div>
+    <div class="row"><span>Format</span>
+      <select class="field" id="sizeFormat"><option value="jpg">JPEG (smaller)</option><option value="png">PNG (exact)</option></select>
+    </div>
+    <p class="meta" id="sizeNote"></p>
+    <p class="sheet-error" id="sizeError" role="alert"></p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="sizeCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="sizeSave">Save…</button>
+    </div>
+  </form>
+</div>
 <script src="bridge.js"></script>
 <script src="vendor/icons.js"></script>
 <script src="shared/geometry.js"></script>
 <script src="shared/sizes.js"></script>
+<script src="shared/fit-size.js"></script>
 <script src="shared/backdrop.js"></script>
 <script src="shared/marks.js"></script>
 <script src="shared/private.js"></script>

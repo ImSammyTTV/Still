@@ -10,7 +10,7 @@ struct EditSnapshot {
     var presentation: PresentationState
 }
 struct PresentationState { var frame: FrameStyle; var padding: Double; var radius: Double; var shadow: Double; var aspect: Double?; var image: Data?; var x: Double; var y: Double }
-enum EditorSheet: String, Identifiable { case text, ocr, background, resize, palette; var id: String { rawValue } }
+enum EditorSheet: String, Identifiable { case text, ocr, background, resize, palette, saveForSize; var id: String { rawValue } }
 
 @MainActor
 final class EditorModel: ObservableObject {
@@ -249,6 +249,31 @@ final class EditorModel: ObservableObject {
     func export() {
         do { library.export(try flattened(), title: item?.title ?? "Still capture") }
         catch { self.error = error.localizedDescription }
+    }
+    @Published var makingSize = false
+    /// Save for Size: the edited picture as a square or as it is, at a width, under a file size, then a Save panel.
+    func saveForSize(square: Bool, width: Int, limitKB: Int, jpeg: Bool) {
+        guard !makingSize else { return }
+        let image: CGImage
+        do { image = try flattened() } catch { self.error = error.localizedDescription; return }
+        makingSize = true
+        let plan = ExportSize.plan(width: image.width, height: image.height, square: square, width: width)
+        let title = item?.title ?? "Still capture"
+        Task {
+            defer { makingSize = false }
+            do {
+                let out = try await Task.detached(priority: .userInitiated) { try ExportSize.make(image, plan: plan, limit: limitKB*1024, jpeg: jpeg) }.value
+                activeSheet = nil
+                let panel = NSSavePanel(); panel.allowedContentTypes = [jpeg ? .jpeg : .png]
+                panel.nameFieldStringValue = "\(title) \(out.width)×\(out.height).\(jpeg ? "jpg" : "png")"
+                if !library.exportFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: library.exportFolder) }
+                NSApp.activate(ignoringOtherApps: true)
+                guard panel.runModal() == .OK, let destination = panel.url else { return }
+                try out.data.write(to: destination, options: .atomic)
+                let size = "\(out.width) × \(out.height), \(ExportSize.label(out.data.count))"
+                library.toast(out.fits ? "Saved \(destination.lastPathComponent): \(size)" : "Saved at \(size): the smallest Still could make, still over \(limitKB) KB")
+            } catch { self.error = error.localizedDescription }
+        }
     }
     /// Covers every email address, card number, key, IP address and phone number found in the picture with a redact
     /// box, as one step that a single undo takes back.

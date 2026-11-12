@@ -195,7 +195,9 @@ async fn library_qr(app: AppHandle, id: String) -> Result<(), String> {
 fn open_history(app: &AppHandle) {
     focus_or(app, "history", || glass(builder(app, "history", "history.html", json!({}))).title("Capture History").inner_size(980.0, 660.0).min_inner_size(640.0, 420.0).decorations(false).build().ok());
 }
-fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
+fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) { open_editor_with(app, id, recognize, ""); }
+/// `sheet` "size" opens it with Save for Size up (from the Floating Preview or History, without opening it first).
+fn open_editor_with(app: &AppHandle, id: Option<&str>, recognize: bool, sheet: &str) {
     let label = format!("editor-{}", id.unwrap_or("demo"));
     let title = id.and_then(|i| st(app).library.lock().unwrap().get(i)).map(|i| i.title).unwrap_or_else(|| "Still — Annotate".into());
     close_preview(app, id.unwrap_or(""));
@@ -203,7 +205,9 @@ fn open_editor(app: &AppHandle, id: Option<&str>, recognize: bool) {
     let (w, h) = app.cursor_position().ok().and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())
         .map(|m| { let a = m.work_area(); let s = m.scale_factor(); ((a.size.width as f64 / s - 40.0).min(1180.0), (a.size.height as f64 / s - 40.0).min(800.0)) })
         .unwrap_or((1180.0, 800.0));
-    focus_or(app, &label, || glass(builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" } })))
+    // Already open: the sheet goes up in that window.
+    if !sheet.is_empty() { if let Some(w) = app.get_webview_window(&label) { let _ = w.emit("editor:sheet", sheet); } }
+    focus_or(app, &label, || glass(builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" }, "sheet": sheet })))
         .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false).center().build().ok());
 }
 
@@ -1653,7 +1657,24 @@ fn pin_image(app: &AppHandle, image: &RgbaImage) {
 }
 
 #[tauri::command]
-async fn preview_edit(app: AppHandle, window: tauri::Window, id: String) { let _ = window.close(); open_editor(&app, Some(&id), false); }
+async fn preview_edit(app: AppHandle, window: tauri::Window, id: String, sheet: Option<String>) { let _ = window.close(); open_editor_with(&app, Some(&id), false, sheet.as_deref().unwrap_or("")); }
+/// History's "Save for Size…": the editor opens with the sheet up.
+#[tauri::command]
+async fn library_save_for_size(app: AppHandle, id: String) {
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || open_editor_with(&a, Some(&id), false, "size"));
+}
+/// Save for Size's finished file: the bytes the editor made, saved where the person chooses.
+#[tauri::command]
+async fn editor_save_file(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> {
+    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+    let ext = if ext == "jpg" { "jpg" } else { "png" };
+    let name = if name.is_empty() { library::capture_name("Still") } else { name.replace(['/', '\\', ':'], "-") };
+    let Some(file) = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{name}.{ext}"))
+        .add_filter(if ext == "jpg" { "JPEG" } else { "PNG" }, &[ext]).blocking_save_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
+    std::fs::write(&file, bytes).map_err(|e| format!("Couldn’t save to {}: {e}", file.display()))?;
+    Ok(Some(file.to_string_lossy().to_string()))
+}
 #[tauri::command]
 async fn open_settings_cmd(app: AppHandle, page: Option<String>) { open_settings(&app, page.as_deref()); }
 #[tauri::command]
@@ -2304,7 +2325,7 @@ pub fn run() {
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, connector_add_to_claude, library_search_web, library_pin, library_drag,
-            editor_save, editor_copy, editor_export, editor_drag, editor_pin, editor_open_image,
+            editor_save, editor_copy, editor_export, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save, video_music_choose, video_image_save,

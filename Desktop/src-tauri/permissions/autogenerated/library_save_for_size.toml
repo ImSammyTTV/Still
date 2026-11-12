@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-library-save-for-size"
+description = "Enables the library_save_for_size command without any pre-configured scope."
+commands.allow = ["library_save_for_size"]
+
+[[permission]]
+identifier = "deny-library-save-for-size"
+description = "Denies the library_save_for_size command without any pre-configured scope."
+commands.deny = ["library_save_for_size"]

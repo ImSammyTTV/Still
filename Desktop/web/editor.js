@@ -747,10 +747,74 @@ async function hidePrivate() {
 }
 dragOut($('#dragMe'), () => { finishTextEdit(); still.send('editor:drag', flatten()); });
 
+// ---- Save for Size --------------------------------------------------------------------------------
+// Square or as it is, a width, and a file size to stay under (a profile picture under 500 KB, say). The choices are
+// remembered. The picture is made here, where the canvas can encode JPEG at any quality, then saved where chosen.
+const FS = StillFitSize;
+const SIZE_KEY = 'stillSaveForSize';
+let sizeFull = null, sizeBusy = false;
+function sizeChoices() { try { return { square: false, width: '', limitOn: true, limit: 500, format: 'jpg', ...JSON.parse(localStorage.getItem(SIZE_KEY) || '{}') }; } catch { return { square: false, width: '', limitOn: true, limit: 500, format: 'jpg' }; } }
+function readSize() {
+  return { square: $('#sizeSquare').checked, width: Number($('#sizeWidth').value) || 0, limitOn: $('#sizeLimitOn').checked, limit: Number($('#sizeLimit').value) || 0, format: $('#sizeFormat').value };
+}
+function showSizePlan() {
+  const c = readSize(), plan = FS.plan(sizeFull, { square: c.square, width: c.width });
+  $('#sizeWidth').placeholder = String(plan.crop.w);
+  $('#sizeOut').textContent = `→ ${plan.w} × ${plan.h}`;
+  $('#sizeLimit').disabled = !c.limitOn;
+  $('#sizeNote').textContent = c.limitOn ? 'Still lowers the quality first, then the size, until the file fits.' : 'Saved at the size above.';
+  $('#sizeError').textContent = c.limitOn && !(c.limit >= 1) ? 'Enter a file size in KB.' : '';
+  $('#sizeSave').disabled = sizeBusy || !!$('#sizeError').textContent;
+}
+function openSaveForSize() {
+  finishTextEdit();
+  const out = flattened(); sizeFull = { w: out.width, h: out.height };
+  const c = sizeChoices();
+  $('#sizeSquare').checked = !!c.square; $('#sizeWidth').value = c.width || ''; $('#sizeLimitOn').checked = c.limitOn !== false;
+  $('#sizeLimit').value = c.limit || 500; $('#sizeFormat').value = c.format === 'png' ? 'png' : 'jpg';
+  $('#sizeSheet').hidden = false; showSizePlan(); $('#sizeWidth').focus();
+}
+const closeSaveForSize = () => { if (!sizeBusy) $('#sizeSheet').hidden = true; };
+['#sizeSquare', '#sizeWidth', '#sizeLimitOn', '#sizeLimit', '#sizeFormat'].forEach((s) => $(s).addEventListener('input', showSizePlan));
+$('#sizeCancel').onclick = closeSaveForSize;
+$('#sizeSheet').addEventListener('mousedown', (e) => { if (e.target === e.currentTarget) closeSaveForSize(); });
+$('#saveForSize').onclick = openSaveForSize;
+still.on('editor:sheet', (sheet) => { if (sheet === 'size') openSaveForSize(); });
+const blobOf = (canvas, type, quality) => new Promise((done, failed) => canvas.toBlob((b) => b ? done(b) : failed(new Error('The image is too large')), type, quality));
+const dataUrlOf = (blob) => new Promise((done, failed) => { const r = new FileReader(); r.onload = () => done(r.result); r.onerror = () => failed(r.error); r.readAsDataURL(blob); });
+$('#sizeForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); if (sizeBusy) return;
+  const c = readSize(); if (c.limitOn && !(c.limit >= 1)) return;
+  try { localStorage.setItem(SIZE_KEY, JSON.stringify({ ...c, width: c.width || '' })); } catch { /* remembered next time only */ }
+  sizeBusy = true; $('#sizeSave').disabled = true; $('#sizeSave').textContent = 'Making it fit…';
+  try {
+    const source = flattened(), plan = FS.plan({ w: source.width, h: source.height }, { square: c.square, width: c.width });
+    const jpeg = c.format === 'jpg', type = jpeg ? 'image/jpeg' : 'image/png';
+    const make = (scale) => {
+      const w = Math.max(1, Math.round(plan.w * scale)), h = Math.max(1, Math.round(plan.h * scale));
+      const out = document.createElement('canvas'); out.width = w; out.height = h;
+      const t = out.getContext('2d'); t.imageSmoothingQuality = 'high';
+      if (jpeg) { t.fillStyle = '#fff'; t.fillRect(0, 0, w, h); } // JPEG has no transparency: white, not black.
+      t.drawImage(source, plan.crop.x, plan.crop.y, plan.crop.w, plan.crop.h, 0, 0, w, h);
+      return out;
+    };
+    let last = null;
+    const result = await FS.fit(async (scale, quality) => { const blob = await blobOf(make(scale), type, quality); last = { scale, quality, blob }; return blob.size; }, { limit: c.limitOn ? c.limit * 1024 : 0, jpeg });
+    const blob = last && last.scale === result.scale && last.quality === result.quality ? last.blob : await blobOf(make(result.scale), type, result.quality);
+    const w = Math.max(1, Math.round(plan.w * result.scale)), h = Math.max(1, Math.round(plan.h * result.scale));
+    sizeBusy = false; $('#sizeSheet').hidden = true;
+    const file = await still.invoke('editor:saveFile', await dataUrlOf(blob), `${document.title} ${w}x${h}`, c.format);
+    if (file) toast(result.fits ? `Saved: ${w} × ${h}, ${FS.kb(blob.size)}` : `Saved at ${w} × ${h}, ${FS.kb(blob.size)}: the smallest Still could make, still over ${c.limit} KB`);
+  } catch (error) { toast(`Couldn’t save: ${explain(error)}`); }
+  finally { sizeBusy = false; $('#sizeSave').textContent = 'Save…'; showSizePlan(); }
+});
+
 // ---- Keyboard -----------------------------------------------------------------------------------
 
 addEventListener('keydown', (e) => {
   if (!$('#resizeSheet').hidden) { if (e.key === 'Escape') closeResize(); return; }
+  if (!$('#sizeSheet').hidden) { if (e.key === 'Escape') closeSaveForSize(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'e') { e.preventDefault(); openSaveForSize(); return; }
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (mod && key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
@@ -819,4 +883,5 @@ function demoImage() {
   refreshIcons(); syncPanel(); updateButtons(); setTool(doc.marks.length ? 'select' : 'arrow');
   render(); fitZoom(); listenForDrops();
   if (params.get('recognize') === '1') recognize();
+  if (params.get('sheet') === 'size') openSaveForSize();
 })();

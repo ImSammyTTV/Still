@@ -177,7 +177,7 @@ function draw() {
   if (pointer.x < 0) return;
   const hint = purpose === 'record' ? 'Drag to record · hold Space for a window' : purpose === 'scroll' ? 'Drag over the area you will scroll' : purpose === 'text' ? 'Drag over the text to copy' : 'Drag to select · hold Space for a window';
   const lens = config.magnifier && !anchor ? drawMagnifier() : null;
-  label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}` : hint, pointer.x, pointer.y, lens);
+  label(region && region.w > 0 ? `${Math.round(region.w)} × ${Math.round(region.h)}${anchor && !moving ? '  ·  hold Space to move' : ''}` : hint, pointer.x, pointer.y, lens);
 }
 
 // Draws the magnifier and returns the area it covers, colour chip included.
@@ -247,8 +247,17 @@ const onBar = (e) => $('#bar').contains(e.target) || e.target.closest('.menu');
 let here = false, frame = 0, backup = 0, square = false;
 // What's selected follows the pointer at once, on every move; only the drawing waits for the next frame. Windows'
 // web view can hand a full-screen window few or no frames, so a timer draws if no frame comes within 50 ms.
+// Space held mid-drag moves the selection with the pointer, keeping its size; resizing carries on from its new place
+// once Space is let go (as in the Mac's own screenshot tool).
+let moving = false, moveFrom = null;
 function follow() {
   if (!config) return;
+  if (anchor && moving && region && region.w > 0) {
+    const { dx, dy } = G.moveWithin(region, pointer.x - moveFrom.x, pointer.y - moveFrom.y, bounds());
+    region = { ...region, x: region.x + dx, y: region.y + dy }; anchor = { x: anchor.x + dx, y: anchor.y + dy };
+    moveFrom = { ...pointer };
+    return;
+  }
   if (windowMode) { const next = partsOf(G.windowAt(config.windows, pointer)); if (next !== hovered) partDepth = 0; hovered = next; }
   else if (anchor) {
     if (fixed) region = G.intersect({ x: pointer.x, y: pointer.y, w: fixed.w, h: fixed.h }, bounds());
@@ -295,14 +304,15 @@ addEventListener('mouseup', (e) => {
   if (!anchor || windowMode) return;
   // Where the button came up is the selection, whether or not a frame was drawn since the last move.
   pointer = point(e); square = e.shiftKey; follow();
-  anchor = null;
+  anchor = null; stopMoving();
   if (region && region.w > 2 && region.h > 2) finish(region);
   else draw();
 });
 
 document.documentElement.addEventListener('mouseleave', leave);
 
-addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
+function stopMoving() { if (moving) { moving = false; moveFrom = null; document.body.classList.remove('moving-selection'); } }
+addEventListener('keyup', (e) => { if (e.code === 'Space') { stopMoving(); if (anchor) draw(); } if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
 
 addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
 
@@ -329,6 +339,7 @@ addEventListener('keydown', (e) => {
   if (action === 'cancel') { e.preventDefault(); e.stopImmediatePropagation(); cancel(); return; }
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') applyDimensions(); return; }
   shift = e.shiftKey;
+  if (e.code === 'Space' && anchor) { e.preventDefault(); if (!moving) { moving = true; moveFrom = { ...pointer }; document.body.classList.add('moving-selection'); draw(); } return; }
   // Hold Space to pick a window; releasing it returns to area selection.
   if (action === 'window') { e.preventDefault(); if (!e.repeat && !anchor && !windowMode) { spaceHeld = true; setWindowMode(true); } return; }
   if (e.key === 'Enter' && region && region.w > 2) return finish(region);

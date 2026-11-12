@@ -226,9 +226,12 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             switch CaptureKeyboardPolicy.action(keyCode: event.keyCode, keyUp: event.type == .keyUp, editingText: editing, windowSelectionAllowed: self.allowsWindowSelection, hasCommandModifier: !event.modifierFlags.intersection([.command, .control, .option]).isEmpty) {
             case .cancel: self.cancel(); return nil
             case .beginWindowSelection:
-                if !event.isARepeat, !self.windowMode, !self.views.contains(where: { $0.isSelecting }) { self.holdingSpace = true; self.setWindowMode(true) }
+                // Mid-drag, Space moves the selection instead (like the system tool); otherwise it picks a window.
+                if let dragging = self.views.first(where: { $0.isSelecting }) { dragging.setMoving(true); return nil }
+                if !event.isARepeat, !self.windowMode { self.holdingSpace = true; self.setWindowMode(true) }
                 return nil
             case .endWindowSelection:
+                self.views.forEach { $0.setMoving(false) }
                 if self.holdingSpace { self.holdingSpace = false; self.setWindowMode(false); return nil }
                 return event
             case .passThrough: return event
@@ -351,7 +354,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     override func layout() { super.layout(); root.frame = bounds; frozen.frame = bounds; refresh() }
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); refresh() }
     override func updateTrackingAreas() { super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea); addTrackingArea(NSTrackingArea(rect: bounds, options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect], owner: self)) }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: coordinator.pickingScreen ? .pointingHand : coordinator.windowMode ? Self.cameraCursor : .crosshair) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: moving ? .closedHand : coordinator.pickingScreen ? .pointingHand : coordinator.windowMode ? Self.cameraCursor : .crosshair) }
     private static let cameraCursor: NSCursor = {
         let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .regular).applying(.init(paletteColors: [.white]))
         guard let symbol = NSImage(systemSymbolName: "camera.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return .pointingHand }
@@ -443,7 +446,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             else if let part, part.deepest > 0 { text = "Click to \(verb) window · scroll down for the page inside" }
             else { text = "Click to \(verb) window" }
         }
-        else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" }
+        else if region.width > 0 { text = "\(Int(region.width)) × \(Int(region.height))" + (anchor != nil && !moving ? "  ·  hold Space to move" : "") }
         else { text = "" }
         label.isHidden = text.isEmpty || !onScreen; labelBack.isHidden = label.isHidden
         if !label.isHidden {
@@ -514,8 +517,19 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         }
         anchor = pointer; region = .zero; window?.makeFirstResponder(self); refresh()
     }
+    /// Space held mid-drag: the selection moves with the pointer, keeping its size, and resizing carries on from its new
+    /// place once Space is let go.
+    private var moving = false
+    func setMoving(_ on: Bool) { guard on != moving else { return }; moving = on; window?.invalidateCursorRects(for: self); refresh() }
     override func mouseDragged(with event: NSEvent) {
-        pointer = convert(event.locationInWindow, from: nil)
+        let next = convert(event.locationInWindow, from: nil)
+        if moving, let anchor, region.width > 0, region.height > 0 {
+            let dx = min(max(next.x-pointer.x, -region.minX), bounds.width-region.maxX)
+            let dy = min(max(next.y-pointer.y, -region.minY), bounds.height-region.maxY)
+            region = region.offsetBy(dx: dx, dy: dy); self.anchor = CGPoint(x: anchor.x+dx, y: anchor.y+dy)
+            pointer = next; refresh(); return
+        }
+        pointer = next
         guard let anchor, !coordinator.windowMode else { refresh(); return }
         let dx = pointer.x-anchor.x, dy = pointer.y-anchor.y
         var size = fixedSize ?? CGSize(width: abs(dx), height: abs(dy))
@@ -530,12 +544,13 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         guard anchor != nil else { return }
         if region.width > 2, region.height > 2 { coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height)); coordinator.finish(on: display, rect: region) }
         else if let fixedSize { coordinator.finish(on: display, rect: CGRect(origin: anchor ?? .zero, size: fixedSize).intersection(bounds)) }
-        anchor = nil; refresh()
+        anchor = nil; moving = false; refresh()
     }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { coordinator.cancel(); return }
         // Hold Space to pick a window; releasing it returns to area selection.
         if event.keyCode == 49 {
+            if anchor != nil { setMoving(true); return }
             if !event.isARepeat, anchor == nil, !coordinator.windowMode, coordinator.allowsWindowSelection { spaceHeld = true; coordinator.setWindowMode(true) }
             return
         }
@@ -559,6 +574,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         }
     }
     override func keyUp(with event: NSEvent) {
+        if event.keyCode == 49 { setMoving(false) }
         if event.keyCode == 49, spaceHeld { spaceHeld = false; coordinator.setWindowMode(false); return }
         super.keyUp(with: event)
     }

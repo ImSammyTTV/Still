@@ -9,7 +9,7 @@ fn main() {
         "overlay_cancel", "overlay_fullscreen", "overlay_timer", "overlay_purpose", "overlay_window_mode", "overlay_pointer", "overlay_color", "overlay_ready",
         "library_list", "library_get", "library_rename", "library_delete", "library_copy", "library_save",
         "library_save_as", "library_reveal", "library_open", "library_play", "library_pin", "library_drag", "editor_save",
-        "editor_copy", "editor_export", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
+        "editor_copy", "editor_export", "editor_save_file", "library_save_for_size", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
         "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_prepared", "recording_started",
         "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save",
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",

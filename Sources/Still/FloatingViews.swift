@@ -35,7 +35,7 @@ struct PreviewView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.15)))
         .tint(Studio.accent).onHover { hovering = $0 }
-        .contextMenu { Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Save") { library.quickSave(item) }; Button("Save As…") { library.export(item) }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Button("Close Preview") { dismiss() } }
+        .contextMenu { Button(item.isVideo ? "Open Video Editor" : "Annotate") { AppController.shared.openItem(item); dismiss() }; Button("Copy") { library.copy(item) }; Button("Save") { library.quickSave(item) }; Button("Save As…") { library.export(item) }; if !item.isVideo { Button("Save for Size…") { AppController.shared.saveForSize(item); dismiss() } }; Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(item)]) }; Button("Close Preview") { dismiss() } }
         .accessibilityLabel("Floating Preview for \(item.title)")
         .task {
             let timeout = Preferences.shared.previewTimeout

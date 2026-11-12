@@ -23,6 +23,8 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
      Screen, then click the laptop's display: that one is captured. With Record chosen, it is recorded. In Record
      Screen's panel, the full-screen button lists each display by name.
    - Dock icon (Mac): clicking Still in the Dock opens the Capture Bar; right-click it for Settings.
+   - Move a selection: start dragging an area, hold Space and keep moving: the box moves without changing size. Let
+     go of Space to carry on resizing; release the mouse to capture. Shift still makes it square.
 2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the
    screenshot taken at zero has no countdown in it.
 3. **Move the Capture Bar.** Drag it by the Still icon, take a capture, then start a new one. It should be back in
@@ -38,6 +40,10 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 7. **Crop to a size.** Pick YouTube Channel Banner in the crop tool (the Size list on Windows, Crop to Size in the
    resize menu on Mac). Drag a crop: it keeps the banner's shape and shows the part every device shows. The result is
    exactly 2560 × 1440, and one undo brings the original back.
+- **Save for Size.** From the Floating Preview (Windows/Linux: the resize icon; Mac: right-click) or History's
+  right-click menu, choose Save for Size…. Turn on Square, width 500, keep under 500 KB, JPEG, Save. The file is
+  500 × 500 and under 500 KB, and the message says its size. Try a very small limit (10 KB): it still saves, smaller,
+  and says it couldn't get under. Also in the editor: Save As → Image for Size… (⇧⌘E / Ctrl+Shift+E).
 8. **Save, close, reopen.** Edit a capture, close the editor, then open it again from History. The marks are still
    editable.
 
