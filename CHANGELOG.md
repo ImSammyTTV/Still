@@ -4,6 +4,16 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.54 — 2026-11-13
+
+- **Image watermark** (Mac, Windows, Linux). Settings → Screenshots → Watermark now has a Type: choose **Image** and pick
+  a logo of your own. It's sized from the picture, placed in the corner you choose, at the opacity you choose. A PNG with
+  a transparent background looks best.
+- **Fixed: Stop recording** (Mac). The Stop and Pause buttons on the recording bar now work on the first click. Drag
+  the dot or the timer to move the bar.
+- **Describe Image keeps trying when the service is busy** (Mac, Windows, Linux). If the AI service is overloaded,
+  Still waits and tries again, then tries a lighter model, and only then says to try again in a minute.
+
 ## v1.2.53 — 2026-11-12
 
 - **Adjust the area before capturing** (Mac, Windows, Linux). After you drag out an area, the box stays on screen. Move
