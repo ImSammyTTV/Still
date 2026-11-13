@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import ServiceManagement
 import Carbon
 import StillCore
@@ -75,8 +77,38 @@ import StillCore
     @AppStorage("watermarkPosition") var watermarkPosition = "bottomRight"
     @AppStorage("watermarkSize") var watermarkSize = "medium"
     @AppStorage("watermarkOpacity") var watermarkOpacity = 0.7
-    /// Your text over every picture the editor copies, saves or shares; nil when there's none.
-    var watermark: Watermark? { Watermark(text: watermarkText, position: watermarkPosition, size: watermarkSize, opacity: watermarkOpacity) }
+    /// "text" or "image" (a picture of your own, such as a logo).
+    @AppStorage("watermarkKind") var watermarkKind = "text"
+    /// Bumped each time a new image is chosen, so the copy in memory is read again.
+    @AppStorage("watermarkImageVersion") var watermarkImageVersion = 0
+    /// The chosen image, copied into Still's own folder so moving or deleting the original doesn't lose it.
+    static var watermarkImageURL: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Still/watermark.png") }
+    private var loadedWatermarkImage: (version: Int, image: CGImage?)?
+    var watermarkImage: CGImage? {
+        if let loaded = loadedWatermarkImage, loaded.version == watermarkImageVersion { return loaded.image }
+        let image = ImageRenderer.load(Self.watermarkImageURL); loadedWatermarkImage = (watermarkImageVersion, image); return image
+    }
+    /// Your text or image over every picture the editor copies, saves or shares; nil when there's none.
+    var watermark: Watermark? {
+        if watermarkKind == "image" { return watermarkImage.flatMap { Watermark(text: "", position: watermarkPosition, size: watermarkSize, opacity: watermarkOpacity, image: $0) } }
+        return Watermark(text: watermarkText, position: watermarkPosition, size: watermarkSize, opacity: watermarkOpacity)
+    }
+    /// Settings → Screenshots → Watermark → Choose Image: a PNG or JPEG, scaled down if it's very large, saved as a PNG
+    /// in Still's folder. Returns why it couldn't, if it couldn't.
+    func chooseWatermarkImage() -> String? {
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.png, .jpeg]; panel.allowsMultipleSelection = false
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        guard var image = ImageRenderer.load(url) else { return "That file isn’t a picture Still can read." }
+        let longest = max(image.width, image.height)
+        if longest > 1200, let smaller = try? ImageRenderer.resize(image, width: max(1, image.width * 1200 / longest), height: max(1, image.height * 1200 / longest)) { image = smaller }
+        do {
+            try FileManager.default.createDirectory(at: Self.watermarkImageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try ImageRenderer.data(image).write(to: Self.watermarkImageURL, options: .atomic)
+        } catch { return error.localizedDescription }
+        watermarkKind = "image"; watermarkImageVersion += 1
+        return nil
+    }
     @AppStorage("retentionDays") var retentionDays = 0
     @AppStorage("ocrLanguage") var ocrLanguage = "auto"
     @AppStorage("ocrLineBreaks") var ocrLineBreaks = true

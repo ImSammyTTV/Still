@@ -16,7 +16,7 @@
     'library:saveAs': ['library_save_as', 'id'], 'library:reveal': ['library_reveal', 'id'], 'library:open': ['library_open', 'id'],
     'library:pin': ['library_pin', 'id'], 'library:drag': ['library_drag', 'id'], 'library:play': ['library_play', 'id'],
     'editor:save': ['editor_save', 'id', 'dataUrl', 'project'], 'editor:copy': ['editor_copy', 'dataUrl'],
-    'editor:export': ['editor_export', 'dataUrl', 'name', 'saveAs'], 'editor:drag': ['editor_drag', 'dataUrl'],
+    'editor:export': ['editor_export', 'dataUrl', 'name', 'saveAs'], 'watermark:chooseImage': ['watermark_choose_image'], 'editor:drag': ['editor_drag', 'dataUrl'],
     'editor:pin': ['editor_pin', 'dataUrl'], 'editor:openImage': ['editor_open_image'],
     'preview:edit': ['preview_edit', 'id', 'sheet'], 'library:saveForSize': ['library_save_for_size', 'id'], 'editor:saveFile': ['editor_save_file', 'dataUrl', 'name', 'ext'], 'open:settings': ['open_settings_cmd', 'page'], 'open:history': ['open_history_cmd'],
     'open:demo': ['open_demo'], 'capture': ['capture_action', 'action'],

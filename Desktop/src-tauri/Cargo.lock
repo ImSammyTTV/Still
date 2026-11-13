@@ -4450,7 +4450,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "still"
-version = "1.2.53"
+version = "1.2.54"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4471,6 +4471,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tokio",
  "uuid",
  "webkit2gtk",
  "windows 0.62.2",

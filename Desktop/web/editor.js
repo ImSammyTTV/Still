@@ -68,7 +68,7 @@ function render(target = ctx, { handles = true } = {}) {
   if (handles && target === ctx && selected && tool === 'select') drawHandles(target, selected);
   target.restore();
   // The watermark from Settings sits over the whole picture, background included; the toolbar can leave it off this one.
-  if (doc.watermark !== false) StillWatermark.draw(target, L.w, L.h, prefs.watermark, fontFamily());
+  if (doc.watermark !== false) StillWatermark.draw(target, L.w, L.h, prefs.watermark, fontFamily(), watermarkPicture);
   if (target === ctx) syncStyleButton();
 }
 
@@ -84,6 +84,14 @@ function drawArrow(t, m) {
 }
 
 const fontFamily = () => getComputedStyle(document.body).fontFamily;
+// An image watermark, loaded once when the editor opens (drawing has to wait for it, so it's ready before any copy).
+let watermarkPicture = null;
+async function loadWatermarkPicture() {
+  const wm = StillWatermark.normalize(prefs.watermark);
+  if (!wm || wm.kind !== 'image') return;
+  const img = new Image(); img.crossOrigin = 'anonymous'; img.src = `${still.fileUrl(wm.image)}?t=${Date.now()}`;
+  try { await img.decode(); watermarkPicture = img; } catch { /* a missing file: no watermark rather than no editor */ }
+}
 function measureText(t, m) {
   t.save(); t.font = M.textFont(m, fontFamily());
   const width = Math.max(...m.text.split('\n').map((line) => t.measureText(line).width)); t.restore();
@@ -861,6 +869,7 @@ function demoImage() {
 
 (async () => {
   prefs = await applyTheme();
+  await loadWatermarkPicture();
   color = prefs.annotate?.color || color; stroke = prefs.annotate?.stroke || stroke;
   if (M.ARROW_STYLES.includes(prefs.annotate?.arrowStyle)) styles.arrow = prefs.annotate.arrowStyle;
   if (M.TEXT_STYLES.includes(prefs.annotate?.textStyle)) styles.text = prefs.annotate.textStyle;
