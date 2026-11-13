@@ -1589,6 +1589,24 @@ async fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
 async fn editor_pin(app: AppHandle, data_url: String) {
     if let Some(img) = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)) { pin_image(&app, &img); }
 }
+/// Settings → Screenshots → Watermark → Choose Image: a copy of the chosen picture (a logo, say) kept with Still's
+/// data, where the editor can load it, and the watermark switched to it. Very large pictures are scaled down first.
+#[tauri::command]
+async fn watermark_choose_image(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(source) = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).blocking_pick_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
+    let image = capture::decode(&std::fs::read(&source).map_err(|e| e.to_string())?).ok_or("That file isn’t a picture Still can read.")?;
+    let image = if image.width().max(image.height()) > 1200 {
+        let k = 1200.0 / image.width().max(image.height()) as f64;
+        image::imageops::resize(&image, ((image.width() as f64 * k).round() as u32).max(1), ((image.height() as f64 * k).round() as u32).max(1), image::imageops::FilterType::Lanczos3)
+    } else { image };
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join("watermark.png");
+    std::fs::write(&file, capture::png(&image)).map_err(|e| e.to_string())?;
+    let path = file.to_string_lossy().to_string();
+    st(&app).settings.lock().unwrap().update(&json!({ "watermark": { "kind": "image", "image": path } }));
+    Ok(Some(path))
+}
 #[tauri::command]
 async fn editor_open_image(app: AppHandle) -> Option<String> {
     use base64::Engine;
@@ -2166,7 +2184,7 @@ pub fn run() {
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
             library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, connector_add_to_claude, library_search_web, library_pin, library_drag,
-            editor_save, editor_copy, editor_export, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
+            editor_save, editor_copy, editor_export, watermark_choose_image, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save, video_music_choose, video_image_save,

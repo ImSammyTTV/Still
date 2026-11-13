@@ -40,4 +40,9 @@ final class ImageDescriberTests: XCTestCase {
         XCTAssertEqual((content.first?["source"] as? [String: Any])?["media_type"] as? String, "image/png")
         XCTAssertEqual(content.last?["text"] as? String, ImageDescriber.prompt)
     }
+    func testBusyAnswersAreAskedAgain() {
+        XCTAssertTrue(ImageDescriber.busy(503) && ImageDescriber.busy(429) && ImageDescriber.busy(500))
+        XCTAssertFalse(ImageDescriber.busy(200) || ImageDescriber.busy(400) || ImageDescriber.busy(403) || ImageDescriber.busy(404))
+        XCTAssertTrue(ImageDescriber.explain(503, "This model is currently experiencing high demand.").contains("busy"))
+    }
 }

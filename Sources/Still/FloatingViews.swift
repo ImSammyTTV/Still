@@ -91,8 +91,10 @@ struct RecordingHUD: View {
     @ObservedObject var recorder: Recorder
     var body: some View {
         HStack(spacing: 14) {
-            Circle().fill(recorder.paused ? .yellow : .red).frame(width: 7, height: 7)
-            Text(recorder.stopping ? "Saving…" : recorder.pausing ? "Pausing…" : String(format: "%02d:%02d", Int(recorder.elapsed)/60, Int(recorder.elapsed)%60)).monospacedDigit().font(.system(size: 12, weight: .medium)).frame(minWidth: 55)
+            HStack(spacing: 14) {
+                Circle().fill(recorder.paused ? .yellow : .red).frame(width: 7, height: 7)
+                Text(recorder.stopping ? "Saving…" : recorder.pausing ? "Pausing…" : String(format: "%02d:%02d", Int(recorder.elapsed)/60, Int(recorder.elapsed)%60)).monospacedDigit().font(.system(size: 12, weight: .medium)).frame(minWidth: 55)
+            }.overlay(BarHandle()).help("Drag to move")
             Button { recorder.togglePause() } label: { Image(systemName: recorder.paused ? "play.fill" : "pause.fill") }.buttonStyle(.plain).disabled(recorder.stopping || recorder.pausing).help(recorder.paused ? "Resume" : "Pause").accessibilityLabel(recorder.paused ? "Resume recording" : "Pause recording")
             Button { recorder.stop() } label: { Image(systemName: "stop.fill").foregroundStyle(.red) }.buttonStyle(.plain).disabled(recorder.stopping || recorder.pausing).help("Stop recording").accessibilityLabel("Stop recording")
         }.padding(.horizontal, 18).frame(height: 42).background(.ultraThickMaterial, in: Capsule()).environment(\.colorScheme, .dark)

@@ -33,6 +33,7 @@ public enum ImageDescriber {
         case 400 where message.lowercased().contains("api key"): return "That Gemini key isn’t valid. Copy it again from Google AI Studio."
         case 401, 403: return "Gemini refused the key. Check it in Google AI Studio, or make a new one."
         case 429: return "Gemini’s free limit is used up for now. Try again in a minute (or later today)."
+        case 500, 502, 503, 504: return "Google’s servers are busy right now, so Gemini couldn’t describe this. Try again in a minute."
         default: return message.isEmpty ? "Gemini answered with an error (\(code))." : "Gemini: \(message)"
         }
     }
@@ -54,12 +55,26 @@ public enum ImageDescriber {
         if let body { r.httpMethod = "POST"; r.setValue("application/json", forHTTPHeaderField: "Content-Type"); r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
         return r
     }
+    /// Google's lighter model, asked when the main one is busy.
+    public static let liteModel = "gemini-flash-lite-latest"
+    /// Answers that mean "busy right now", worth asking again (or asking another model) rather than giving up.
+    public static func busy(_ status: Int) -> Bool { [429, 500, 502, 503, 504].contains(status) }
     /// Describes a picture with the user's key.
     public static func describe(key: String, mime: String, data: Data) async throws -> String {
         guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add a Gemini key in Settings → AI first.") }
         let payload = body(mime: mime, data: data)
         do {
             var (status, response) = try await json(request("models/\(model):generateContent", key: key, body: payload))
+            // Google turns requests away when its servers are busy ("high demand"), usually for moments: wait and ask
+            // again, then ask its lighter model, which has its own capacity and free-tier limits.
+            if busy(status) {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                (status, response) = try await json(request("models/\(model):generateContent", key: key, body: payload))
+            }
+            if busy(status) {
+                let (liteStatus, liteResponse) = try await json(request("models/\(liteModel):generateContent", key: key, body: payload))
+                if liteStatus != 404 { (status, response) = (liteStatus, liteResponse) }
+            }
             if status == 404 {
                 let (_, list) = try await json(request("models?pageSize=200", key: key))
                 guard let other = pickModel(list) else { throw Failure(message: "This Gemini key has no Flash model to describe pictures with.") }

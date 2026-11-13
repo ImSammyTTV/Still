@@ -604,11 +604,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let screen = NSScreen.main else { return }
         // Resuming after a pause shows the HUD again; replace the earlier one rather than stacking another.
         recordingHUD?.close(); recordingHUD = nil
-        let panel = NSPanel(contentRect: NSRect(x: screen.visibleFrame.midX-110, y: screen.visibleFrame.minY+24, width: 220, height: 44), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        // Its buttons must work on the first click while another app is in front: the view takes the first mouse, and
+        // only the dot and timer drag the bar (a bar that moves from anywhere can swallow clicks on its buttons).
+        let panel = SelectionPanel(contentRect: NSRect(x: screen.visibleFrame.midX-110, y: screen.visibleFrame.minY+24, width: 220, height: 44), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.level = .floating
-        panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false; panel.isMovableByWindowBackground = false; panel.becomesKeyOnlyIfNeeded = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: RecordingHUD(recorder: recorder))
+        panel.contentView = FirstClickHostingView(rootView: RecordingHUD(recorder: recorder))
         NSApp.unhideWithoutActivation(); panel.orderFrontRegardless(); recordingHUD = panel
     }
     private func captureTitle(_ type: String) -> String {

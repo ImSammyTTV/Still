@@ -55,15 +55,22 @@ const fileNameRow = () => {
 // Your own text over every picture the editor copies, saves or shares; empty for none.
 const watermarkGroup = () => {
   const wm = get('watermark') || {};
-  const on = !!String(wm.text || '').trim();
+  const image = wm.kind === 'image';
+  const on = !!StillWatermark.normalize(wm);
   const text = el('input', { type: 'text', class: 'field', value: wm.text || '', placeholder: 'e.g. © Your Name', 'aria-label': 'Watermark text', style: 'width:260px', maxlength: '120',
     onchange: async (e) => { await set(patchFor('watermark.text', e.target.value.trim())); render(); } });
+  // An image of your own (a logo): the chosen picture is copied into Still's data, so moving the original is fine.
+  const choose = el('button', { class: 'btn', onclick: async () => {
+    try { if (await still.invoke('watermark:chooseImage')) { prefs = await still.invoke('settings:get'); render(); } } catch (error) { toast(explain(error)); }
+  } }, wm.image ? 'Choose Another…' : 'Choose Image…');
+  const preview = wm.image ? el('img', { src: `${still.fileUrl(wm.image)}?t=${Date.now()}`, alt: 'Watermark image', style: 'max-width:72px;max-height:36px;object-fit:contain;margin-right:8px;vertical-align:middle' }) : null;
   return group('Watermark', [
-    row('Text', text),
+    select('Type', 'watermark.kind', [['text', 'Text'], ['image', 'Image']]),
+    image ? row('Image', el('div', { style: 'display:flex;align-items:center' }, [preview, choose])) : row('Text', text),
     select('Position', 'watermark.position', [['bottomRight', 'Bottom right'], ['bottomLeft', 'Bottom left'], ['topRight', 'Top right'], ['topLeft', 'Top left'], ['center', 'Centre']], false, { disabled: !on }),
     select('Size', 'watermark.size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], false, { disabled: !on }),
     select('Opacity', 'watermark.opacity', [[1, '100%'], [0.7, '70%'], [0.5, '50%'], [0.3, '30%']], true, { disabled: !on })
-  ], on ? 'Added to pictures you copy, save or share from the editor. The stamp button in the editor leaves it off one picture.' : 'Type some text to add it to pictures you copy, save or share from the editor.');
+  ], on ? 'Added to pictures you copy, save or share from the editor. The stamp button in the editor leaves it off one picture.' : image ? 'Choose a picture, such as a logo (a PNG with a transparent background works best), to add it to pictures you copy, save or share from the editor.' : 'Type some text to add it to pictures you copy, save or share from the editor.');
 };
 
 // High, Balanced, Smaller File, a named preset, or a bitrate you choose. A bitrate is saved as the Mac's

@@ -37,6 +37,7 @@ pub fn explain(code: u64, message: &str) -> String {
         400 if message.to_lowercase().contains("api key") => "That Gemini key isn’t valid. Copy it again from Google AI Studio.".into(),
         401 | 403 => "Gemini refused the key. Check it in Google AI Studio, or make a new one.".into(),
         429 => "Gemini’s free limit is used up for now. Try again in a minute (or later today).".into(),
+        500 | 502 | 503 | 504 => "Google’s servers are busy right now, so Gemini couldn’t describe this. Try again in a minute.".into(),
         _ if message.is_empty() => format!("Gemini answered with an error ({code})."),
         _ => format!("Gemini: {message}"),
     }
@@ -57,12 +58,27 @@ async fn call(client: &reqwest::Client, key: &str, model: &str, body: &Value) ->
     Ok((status, res.json().await.unwrap_or(Value::Null)))
 }
 
+/// Google's lighter model, asked when the main one is busy.
+pub const LITE_MODEL: &str = "gemini-flash-lite-latest";
+/// Answers that mean "busy right now", worth asking again (or asking another model) rather than giving up.
+pub fn busy(status: u16) -> bool { matches!(status, 429 | 500 | 502 | 503 | 504) }
+
 /// Describes a picture with the user's key.
 pub async fn describe(key: &str, mime: &str, base64: &str) -> Result<String, String> {
     if key.trim().is_empty() { return Err("Add a Gemini key in Settings → AI first.".into()); }
     let client = http()?;
     let request = body(mime, base64);
-    let (status, response) = call(&client, key, MODEL, &request).await?;
+    let (mut status, mut response) = call(&client, key, MODEL, &request).await?;
+    // Google turns requests away when its servers are busy ("high demand"), usually for moments: wait and ask again,
+    // then ask its lighter model, which has its own capacity and free-tier limits.
+    if busy(status) {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        (status, response) = call(&client, key, MODEL, &request).await?;
+    }
+    if busy(status) {
+        let (lite_status, lite_response) = call(&client, key, LITE_MODEL, &request).await?;
+        if lite_status != 404 { (status, response) = (lite_status, lite_response); }
+    }
     if status == 404 {
         let list: Value = client.get(format!("{BASE}/models?pageSize=200")).header("x-goog-api-key", key).send().await
             .map_err(|e| format!("Couldn’t reach Gemini: {e}"))?.json().await.unwrap_or(Value::Null);
@@ -143,6 +159,12 @@ pub async fn check_claude(key: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     // The same cases are in the Mac app's ImageDescriberTests.
+    #[test]
+    fn busy_answers_are_asked_again() {
+        assert!(busy(503) && busy(429) && busy(500));
+        assert!(!busy(200) && !busy(400) && !busy(403) && !busy(404));
+        assert!(explain(503, "This model is currently experiencing high demand.").contains("busy"));
+    }
     #[test]
     fn the_text_comes_from_every_part_and_errors_are_plain() {
         let ok = json!({ "candidates": [{ "content": { "parts": [{ "text": "A settings page " }, { "text": "with a dark sidebar.\n" }] } }] });

@@ -25,4 +25,17 @@ final class WatermarkTests: XCTestCase {
         XCTAssertGreaterThan(brightest(200..<400, 200..<300), 200, "text in the bottom right")
         XCTAssertLessThan(brightest(0..<200, 0..<150), 40, "nothing in the top left")
     }
+    /// The same cases as Desktop/test/watermark.test.js.
+    func testAnImageWatermarkFitsASquareFromTheShorterSideInItsCorner() throws {
+        let ctx = CGContext(data: nil, width: 4, height: 2, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let logo = ctx.makeImage()!
+        XCTAssertNil(Watermark(text: "  "))
+        let wm = try XCTUnwrap(Watermark(text: "", position: "bottomRight", size: "medium", image: logo))
+        XCTAssertEqual(wm.imageFrame(width: 1000, height: 600, imageWidth: 400, imageHeight: 200), CGRect(x: 1000 - 18 - 108, y: 600 - 18 - 54, width: 108, height: 54))
+        var top = wm; top.position = "topLeft"
+        XCTAssertEqual(top.imageFrame(width: 1000, height: 600, imageWidth: 100, imageHeight: 300), CGRect(x: 18, y: 18, width: 36, height: 108))
+        var middle = wm; middle.position = "center"
+        XCTAssertEqual(middle.imageFrame(width: 1000, height: 600, imageWidth: 200, imageHeight: 200), CGRect(x: 446, y: 246, width: 108, height: 108))
+        XCTAssertEqual(wm.apply(to: ctx.makeImage()!).width, 4)
+    }
 }

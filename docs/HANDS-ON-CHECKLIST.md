@@ -48,6 +48,9 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
   right-click menu, choose Save for Size…. Turn on Square, width 500, keep under 500 KB, JPEG, Save. The file is
   500 × 500 and under 500 KB, and the message says its size. Try a very small limit (10 KB): it still saves, smaller,
   and says it couldn't get under. Also in the editor: Save As → Image for Size… (⇧⌘E / Ctrl+Shift+E).
+- **Image watermark.** Settings → Screenshots → Watermark → Type: Image, then Choose Image… and pick a logo (a PNG with
+  a transparent background). Copy a capture from the editor: the logo sits in the chosen corner at the chosen size and
+  opacity. The stamp button in the editor leaves it off one picture.
 8. **Save, close, reopen.** Edit a capture, close the editor, then open it again from History. The marks are still
    editable.
 

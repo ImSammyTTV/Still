@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-watermark-choose-image"
+description = "Enables the watermark_choose_image command without any pre-configured scope."
+commands.allow = ["watermark_choose_image"]
+
+[[permission]]
+identifier = "deny-watermark-choose-image"
+description = "Denies the watermark_choose_image command without any pre-configured scope."
+commands.deny = ["watermark_choose_image"]

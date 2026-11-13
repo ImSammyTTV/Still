@@ -679,7 +679,7 @@ struct CaptureBar: View {
 }
 
 /// An invisible patch over the Capture Bar's Still mark that drags the bar's window when pressed.
-private struct BarHandle: NSViewRepresentable {
+struct BarHandle: NSViewRepresentable {
     final class HandleView: NSView {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override var mouseDownCanMoveWindow: Bool { true }
