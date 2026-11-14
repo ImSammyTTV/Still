@@ -4,6 +4,31 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.55 — 2026-11-14
+
+A release about smoothness: places where Still could freeze, stutter or get stuck.
+
+- **Window selection no longer freezes the pointer** (Mac). Moving over a browser or other app in window mode used to
+  pause while Still worked out the window's parts. That now happens in the background.
+- **Shortcuts can't get stuck** (Mac). If macOS doesn't hand over the screen (it can happen after waking from sleep),
+  Still now gives up after a few seconds and says so, instead of quietly ignoring every shortcut until it's restarted.
+  A scrolling capture that can't start no longer causes the same problem.
+- **No more hidden alerts behind the capture overlay** (Mac). Messages and the update prompt wait until the capture is
+  over.
+- **Saving in the editor no longer freezes it** (Mac). Save and Done work in the background on big screenshots; Done
+  closes the window once it's saved. Drawing is smoother too.
+- **Recording never stays stuck on "Saving…"** (Mac). If macOS doesn't finish the file, Still keeps what was recorded
+  and lets you carry on.
+- **Escape always closes the capture overlay** (Windows, Linux). Cancelling while the overlay was still opening could
+  leave a frozen picture over the screen. Escape now works from the moment it appears.
+- **The capture shortcut responds straight away** (Windows, Linux). Saving, copying, exporting, file dialogs and
+  stopping a recording no longer hold up the capture overlay or other windows.
+- **Smoother capture overlay** (Windows, Linux). No more hitch just after it opens.
+- **Exporting a video no longer freezes the app** (Windows, Linux).
+- **Smoother drawing in the editor** (Windows, Linux). Changes are saved after a short pause, never in the middle of a
+  stroke, and Copy, Save and Pin don't lock up the window.
+- **History stays smooth while you edit** (Windows, Linux), and moving a pinned screenshot is smoother.
+
 ## v1.2.54 — 2026-11-13
 
 - **Image watermark** (Mac, Windows, Linux). Settings → Screenshots → Watermark now has a Type: choose **Image** and pick
