@@ -17,7 +17,8 @@ pub fn defaults() -> Value {
         "crosshair": "partial",
         "magnifier": true,
         "rememberSelection": false,
-        "adjustBeforeCapture": true,
+        // Off unless turned on; a new name so it starts off for everyone, including those who had the earlier default.
+        "adjustAreaBeforeCapture": false,
         "hideDesktopIcons": false,
         "fileName": "{type} {date} at {time}",
         "historyDays": 0,

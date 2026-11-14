@@ -70,7 +70,9 @@ import StillCore
     @AppStorage("magnifier") var magnifier = true
     @AppStorage("rememberSelection") var rememberSelection = false
     /// After dragging an area, keep it on screen to move or resize before capturing (Capture, Return or a double-click).
-    @AppStorage("adjustBeforeCapture") var adjustBeforeCapture = true
+    /// Off unless turned on in Settings; stored under a new name so it starts off for everyone, including those who had
+    /// the earlier default.
+    @AppStorage("adjustAreaBeforeCapture") var adjustBeforeCapture = false
     @AppStorage("exportFormat") var exportFormat = "png"
     @AppStorage("filenamePattern") var filenamePattern = "Screenshot {date} at {time}"
     @AppStorage("watermarkText") var watermarkText = ""
