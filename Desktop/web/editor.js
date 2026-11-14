@@ -688,7 +688,16 @@ async function saveEdits() {
     toast(`Couldn’t save your changes: ${explain(e)}`); throw e;
   }
 }
-function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => persist().catch(() => {}), 900); }
+// Saving re-renders and encodes the whole picture, so it waits for a real pause rather than landing mid-stroke, and
+// never runs while the mouse button is down.
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { if (pointerDown) return scheduleSave(); persist().catch(() => {}); }, 2000);
+}
+let pointerDown = false;
+addEventListener('pointerdown', () => { pointerDown = true; }, true);
+addEventListener('pointerup', () => { pointerDown = false; }, true);
+addEventListener('blur', () => { pointerDown = false; });
 // Closing the window (the close button, Alt+F4, Ctrl+W) waits for the last edits to be saved first;
 // a save fired from beforeunload could be cut off when the page goes away.
 window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async (event) => {
@@ -700,14 +709,14 @@ window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async 
 });
 addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); still.send('window:close'); } });
 
-$('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:copy', flatten()); toast('Copied to clipboard'); };
-$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', flatten(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
-$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', flatten(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
-$('#pin').onclick = () => still.invoke('editor:pin', flatten());
+$('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:copy', await flattenInBackground()); toast('Copied to clipboard'); };
+$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', await flattenInBackground(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
+$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', await flattenInBackground(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
+$('#pin').onclick = async () => still.invoke('editor:pin', await flattenInBackground());
 $('#ocr').onclick = () => recognize();
 async function recognize() {
   toast('Recognizing text…');
-  try { const text = (await still.invoke('editor:ocr', flatten())).trim(); if (!text) return toast('No text found'); await navigator.clipboard.writeText(text); toast('Text copied'); }
+  try { const text = (await still.invoke('editor:ocr', await flattenInBackground())).trim(); if (!text) return toast('No text found'); await navigator.clipboard.writeText(text); toast('Text copied'); }
   catch (error) { toast(`Text recognition failed: ${explain(error)}`); }
 }
 // Covers every email address, card number, key, IP address and phone number the text recognition finds with a

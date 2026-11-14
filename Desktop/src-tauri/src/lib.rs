@@ -52,6 +52,8 @@ struct Session {
     /// Overlays waiting to show until their page has drawn the frozen screen, and the one that takes the keyboard.
     unshown: Vec<String>,
     focus_overlay: Option<String>,
+    /// Counts selections, so one that was cancelled while its overlays were still being built can tell.
+    generation: u64,
     from_shortcut: bool,
     previews: Vec<(String, String)>,
     recording: Option<Value>,
@@ -82,6 +84,12 @@ struct Session {
     qr: std::collections::HashMap<String, std::sync::mpsc::Receiver<Vec<String>>>,
 }
 
+/// Runs slow work (decoding and encoding pictures, writing files, waiting on a file dialog) on a thread of its own.
+/// Commands share a few worker threads with the pages' picture loads, so slow work there held up the capture overlay
+/// and every other window.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    tauri::async_runtime::spawn_blocking(work).await.expect("background work stopped")
+}
 fn occupied(s: &Session) -> bool { s.busy || s.recording.is_some() || s.scroll.is_some() }
 
 struct State { settings: Mutex<Settings>, library: Mutex<Library>, session: Mutex<Session> }
@@ -307,11 +315,11 @@ fn warm_overlay(app: &AppHandle, g: &Grab, init: &Value) -> Option<(String, Webv
 }
 
 fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool) {
-    let from_shortcut = {
+    let (from_shortcut, generation) = {
         let mut s = st(app).session.lock().unwrap();
         if occupied(&s) { drop(s); notify(app, "Still", "Finish the current capture or recording first."); return; }
-        s.busy = true; s.purpose = purpose.to_string();
-        s.from_shortcut
+        s.busy = true; s.purpose = purpose.to_string(); s.generation += 1;
+        (s.from_shortcut, s.generation)
     };
     let app = app.clone();
     let purpose = purpose.to_string();
@@ -323,6 +331,8 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         // Floating windows take a moment to leave the screen, and so does a tray menu or the desktop icons. A shortcut with nothing to clear has nothing to wait for.
         if floating || !from_shortcut || _icons.is_some() { std::thread::sleep(Duration::from_millis(80)); }
         let grabs = match capture::grab_all() { Ok(g) => g, Err(e) => { end_selection(&app); notify(&app, "Capture failed", &e); return; } };
+        // Escape works from the moment the first overlay can appear, not only once they all have.
+        watch_escape(&app);
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
         let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let last = setting(&app, "lastSelection");
@@ -375,14 +385,21 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 labels.push(label);
             }
         }
-        watch_escape(&app);
-        {
+        let cancelled = {
             let mut s = st(&app).session.lock().unwrap();
-            s.grabs = grabs; s.overlays = labels;
+            let cancelled = s.generation != generation || !s.busy;
+            if !cancelled { s.grabs = grabs; s.overlays = labels.clone(); }
+            cancelled
+        };
+        // Cancelled while the overlays were being built (Escape on one that had already appeared): nothing else may
+        // stay on screen, or a frozen picture would sit over everything with nothing left to close it.
+        if cancelled {
+            for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
+            return;
         }
         // A page that never says it has drawn (a picture that fails to load) is shown anyway, so the capture isn't stuck invisible.
         std::thread::sleep(Duration::from_millis(800));
-        let late: Vec<String> = std::mem::take(&mut st(&app).session.lock().unwrap().unshown);
+        let late: Vec<String> = { let mut s = st(&app).session.lock().unwrap(); if s.generation != generation { vec![] } else { std::mem::take(&mut s.unshown) } };
         for label in late { show_overlay(&app, &label); }
     });
 }
@@ -443,7 +460,7 @@ async fn countdown_cancel() { COUNTDOWN_CANCELLED.store(true, std::sync::atomic:
 
 fn end_selection(app: &AppHandle) {
     let _ = app.global_shortcut().unregister("Escape");
-    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
+    let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.generation += 1; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
     for i in 0..16 { for k in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}-{}.jpg", std::process::id(), i, k))); } }
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
@@ -607,7 +624,7 @@ fn window_gone(app: &AppHandle, label: &str) {
             end_recording_extras(app);
             // The controls went away mid-recording (Alt+F4, a crashed page): keep what was recorded up to then.
             if st(app).session.lock().unwrap().recorder.is_some() { let a = app.clone(); std::thread::spawn(move || { let _ = finish_native(&a); }); }
-            else if st(app).session.lock().unwrap().recording.is_some() { salvage_recording(app); }
+            else if st(app).session.lock().unwrap().recording.is_some() { let a = app.clone(); std::thread::spawn(move || { salvage_recording(&a); }); }
         }
         // Never keep watching the keyboard with nothing on screen to show for it.
         "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
@@ -1070,7 +1087,8 @@ fn after_settings(app: &AppHandle, patch: &Value) {
 }
 #[tauri::command]
 async fn settings_choose_folder(app: AppHandle) -> Option<String> {
-    let folder = app.dialog().file().blocking_pick_folder()?.into_path().ok()?;
+    let dialog = app.clone();
+    let folder = blocking(move || dialog.dialog().file().blocking_pick_folder()).await?.into_path().ok()?;
     let path = folder.to_string_lossy().to_string();
     settings_set(app, json!({ "exportFolder": path })).await;
     Some(path)
@@ -1083,7 +1101,8 @@ async fn overlay_done(app: AppHandle, payload: Value) { let a = app.clone(); std
 #[tauri::command]
 async fn overlay_cancel(app: AppHandle) { end_selection(&app); }
 #[tauri::command]
-async fn overlay_fullscreen(app: AppHandle, display_id: u32) {
+async fn overlay_fullscreen(app: AppHandle, display_id: u32) { blocking(move || overlay_fullscreen_now(app, display_id)).await }
+fn overlay_fullscreen_now(app: AppHandle, display_id: u32) {
     let grab = { let mut s = st(&app).session.lock().unwrap(); std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id) };
     end_selection(&app);
     if let Some(g) = grab { complete_image(&app, g.image, false); }
@@ -1157,8 +1176,12 @@ fn backfill_thumbs(app: &AppHandle) {
     });
 }
 #[tauri::command]
-async fn library_list(app: AppHandle, query: Value) -> Vec<Value> {
-    let list = { let lib = st(&app).library.lock().unwrap(); lib.search(query["query"].as_str().unwrap_or(""), query["kind"].as_str().unwrap_or("all")).iter().map(|i| item_json(&lib, i)).collect() };
+async fn library_list(app: AppHandle, query: Value) -> Vec<Value> { blocking(move || library_list_now(app, query)).await }
+fn library_list_now(app: AppHandle, query: Value) -> Vec<Value> {
+    // Checking every capture's thumbnail on disk takes a while with a long history, and the library is also locked
+    // from the thread every window shares, so the files are looked at after letting go of it.
+    let (found, paths) = { let lib = st(&app).library.lock().unwrap(); (lib.search(query["query"].as_str().unwrap_or(""), query["kind"].as_str().unwrap_or("all")), lib.paths()) };
+    let list = found.iter().map(|i| item_json(&paths, i)).collect();
     backfill_thumbs(&app);
     list
 }
@@ -1192,16 +1215,19 @@ async fn library_delete(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-async fn library_copy(app: AppHandle, id: String) -> Result<(), String> {
+async fn library_copy(app: AppHandle, id: String) -> Result<(), String> { blocking(move || library_copy_now(app, id)).await }
+fn library_copy_now(app: AppHandle, id: String) -> Result<(), String> {
     let (file, kind) = { let lib = st(&app).library.lock().unwrap(); let item = lib.get(&id).ok_or("Missing capture")?; (lib.file(&item), item.kind) };
     if kind == "recording" { return app.clipboard().write_text(file.to_string_lossy().to_string()).map_err(|e| e.to_string()); }
     let image = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).ok_or("Couldn’t read the capture")?;
     copy_image(&app, &image)
 }
 #[tauri::command]
-async fn library_save(app: AppHandle, id: String) -> Result<String, String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
+async fn library_save(app: AppHandle, id: String) -> Result<String, String> { blocking(move || library_save_now(app, id)).await }
+fn library_save_now(app: AppHandle, id: String) -> Result<String, String> { export_item(&app, &id, None).map(|p| p.to_string_lossy().to_string()) }
 #[tauri::command]
-async fn library_save_as(app: AppHandle, id: String) -> Result<Option<String>, String> {
+async fn library_save_as(app: AppHandle, id: String) -> Result<Option<String>, String> { blocking(move || library_save_as_now(app, id)).await }
+fn library_save_as_now(app: AppHandle, id: String) -> Result<Option<String>, String> {
     let item = st(&app).library.lock().unwrap().get(&id).ok_or("That capture no longer exists.")?;
     let ext = Path::new(&item.file_name).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "png".into());
     let Some(target) = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{}.{ext}", item.title)).blocking_save_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
@@ -1252,7 +1278,8 @@ const FOLDER_SCAN_LIMIT: usize = 5000;
 #[tauri::command]
 async fn library_similar_in_folder(app: AppHandle, id: String) -> Result<Value, String> {
     let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be compared.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
-    let Some(folder) = app.dialog().file().set_title("Find Similar Pictures In…").blocking_pick_folder().and_then(|f| f.into_path().ok()) else { return Ok(Value::Null) };
+    let dialog = app.clone();
+    let Some(folder) = blocking(move || dialog.dialog().file().set_title("Find Similar Pictures In…").blocking_pick_folder()).await.and_then(|f| f.into_path().ok()) else { return Ok(Value::Null) };
     let scan = folder.clone();
     let (found, scanned, capped) = tauri::async_runtime::spawn_blocking(move || -> Result<(Vec<(PathBuf, u32)>, usize, bool), String> {
         let target = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).map(|i| similar::fingerprint(&i)).ok_or("Couldn’t read this screenshot.")?;
@@ -1490,7 +1517,8 @@ async fn library_open(app: AppHandle, id: String) {
 /// History's Combine: the chosen screenshots joined into one new capture, in the order they were picked, which opens
 /// in the editor.
 #[tauri::command]
-async fn library_combine(app: AppHandle, ids: Vec<String>, vertical: bool) -> Result<(), String> {
+async fn library_combine(app: AppHandle, ids: Vec<String>, vertical: bool) -> Result<(), String> { blocking(move || library_combine_now(app, ids, vertical)).await }
+fn library_combine_now(app: AppHandle, ids: Vec<String>, vertical: bool) -> Result<(), String> {
     if ids.len() < 2 { return Err("Choose two or more screenshots to combine.".into()); }
     let files: Vec<PathBuf> = {
         let lib = st(&app).library.lock().unwrap();
@@ -1538,7 +1566,8 @@ fn start_drag(app: &AppHandle, window: tauri::Window, file: PathBuf) {
 }
 
 #[tauri::command]
-async fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
+async fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> { blocking(move || editor_save_now(app, id, data_url, project)).await }
+fn editor_save_now(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
     // The page's PNG is already lossless, so unless JPEG is wanted it can go straight to disk.
     let (encoded, ext, (w, h)) = match capture::png_size(&bytes).filter(|_| setting(&app, "imageFormat").as_str() != Some("jpg")) {
@@ -1558,12 +1587,14 @@ async fn editor_save(app: AppHandle, id: String, data_url: String, project: Valu
     Ok(id)
 }
 #[tauri::command]
-async fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> {
+async fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> { blocking(move || editor_copy_now(app, data_url)).await }
+fn editor_copy_now(app: AppHandle, data_url: String) -> Result<(), String> {
     let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
     copy_image(&app, &image)
 }
 #[tauri::command]
-async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> {
+async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> { blocking(move || editor_export_now(app, data_url, name, save_as)).await }
+fn editor_export_now(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> {
     let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
     let (bytes, ext) = encode(&app, &image);
     let name = if name.is_empty() { library::capture_name("Still") } else { name };
@@ -1592,7 +1623,8 @@ async fn editor_pin(app: AppHandle, data_url: String) {
 /// Settings → Screenshots → Watermark → Choose Image: a copy of the chosen picture (a logo, say) kept with Still's
 /// data, where the editor can load it, and the watermark switched to it. Very large pictures are scaled down first.
 #[tauri::command]
-async fn watermark_choose_image(app: AppHandle) -> Result<Option<String>, String> {
+async fn watermark_choose_image(app: AppHandle) -> Result<Option<String>, String> { blocking(move || watermark_choose_image_now(app)).await }
+fn watermark_choose_image_now(app: AppHandle) -> Result<Option<String>, String> {
     let Some(source) = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).blocking_pick_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
     let image = capture::decode(&std::fs::read(&source).map_err(|e| e.to_string())?).ok_or("That file isn’t a picture Still can read.")?;
     let image = if image.width().max(image.height()) > 1200 {
@@ -1608,7 +1640,8 @@ async fn watermark_choose_image(app: AppHandle) -> Result<Option<String>, String
     Ok(Some(path))
 }
 #[tauri::command]
-async fn editor_open_image(app: AppHandle) -> Option<String> {
+async fn editor_open_image(app: AppHandle) -> Option<String> { blocking(move || editor_open_image_now(app)).await }
+fn editor_open_image_now(app: AppHandle) -> Option<String> {
     use base64::Engine;
     let path = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).blocking_pick_file()?.into_path().ok()?;
     let image = capture::decode(&std::fs::read(path).ok()?)?;
@@ -1643,7 +1676,8 @@ async fn library_save_for_size(app: AppHandle, id: String) {
 }
 /// Save for Size's finished file: the bytes the editor made, saved where the person chooses.
 #[tauri::command]
-async fn editor_save_file(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> {
+async fn editor_save_file(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> { blocking(move || editor_save_file_now(app, data_url, name, ext)).await }
+fn editor_save_file_now(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
     let ext = if ext == "jpg" { "jpg" } else { "png" };
     let name = if name.is_empty() { library::capture_name("Still") } else { name.replace(['/', '\\', ':'], "-") };
@@ -1662,7 +1696,8 @@ async fn open_demo(app: AppHandle) { open_editor(&app, None, false); }
 async fn capture_action(app: AppHandle, action: String) { run_action(&app, &action); }
 
 #[tauri::command]
-async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
+async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) { blocking(move || ocr_result_now(app, window, text, error)).await }
+fn ocr_result_now(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
     let _ = window.close();
     if let Ok(entries) = std::fs::read_dir(private_temp()) { for e in entries.flatten() { if e.file_name().to_string_lossy().starts_with("still-ocr-") { let _ = std::fs::remove_file(e.path()); } } }
     // A large, noisy picture can keep the QR scan busy for many seconds. The text shouldn't wait for that.
@@ -1718,7 +1753,8 @@ fn native_part() -> PathBuf { private_temp().join(format!("still-native-{}.mp4",
 
 /// Starts Still's own recorder on the area chosen for this recording.
 #[tauri::command]
-async fn recording_begin(app: AppHandle) -> Result<(), String> {
+async fn recording_begin(app: AppHandle) -> Result<(), String> { blocking(move || recording_begin_now(app)).await }
+fn recording_begin_now(app: AppHandle) -> Result<(), String> {
     let (params, place) = { let s = st(&app).session.lock().unwrap(); (s.recording.clone(), s.recorded) };
     let (Some(params), Some(place)) = (params, place) else { return Err("There is no recording to start.".into()) };
     let rect = &params["rect"];
@@ -1742,7 +1778,8 @@ async fn recording_begin(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-async fn recording_stop(app: AppHandle) -> Result<(), String> { finish_native(&app) }
+async fn recording_stop(app: AppHandle) -> Result<(), String> { blocking(move || recording_stop_now(app)).await }
+fn recording_stop_now(app: AppHandle) -> Result<(), String> { finish_native(&app) }
 #[tauri::command]
 async fn recording_pause(app: AppHandle, on: bool) {
     let recorder = st(&app).session.lock().unwrap().recorder.clone();
@@ -1802,7 +1839,8 @@ async fn recording_reset(app: AppHandle) {
     if let Some(trail) = &st(&app).session.lock().unwrap().trail { trail.restart(); }
 }
 #[tauri::command]
-async fn recording_save(app: AppHandle, ext: String, duration: f64) -> Result<(), String> {
+async fn recording_save(app: AppHandle, ext: String, duration: f64) -> Result<(), String> { blocking(move || recording_save_now(app, ext, duration)).await }
+fn recording_save_now(app: AppHandle, ext: String, duration: f64) -> Result<(), String> {
     let part = recording_part(&app);
     // Still may already have ended and saved this recording itself (see request_stop); then there is nothing left to do.
     if st(&app).session.lock().unwrap().recording.is_none() { let _ = std::fs::remove_file(&part); return Ok(()); }
@@ -1887,7 +1925,8 @@ fn take_export_target(app: &AppHandle, window: &tauri::Window) -> Result<PathBuf
     st(app).session.lock().unwrap().export_targets.remove(window.label()).ok_or_else(|| "Choose where to save the export first.".to_string())
 }
 #[tauri::command]
-async fn video_export_target(app: AppHandle, window: tauri::Window, ext: String) -> Result<Option<String>, String> {
+async fn video_export_target(app: AppHandle, window: tauri::Window, ext: String) -> Result<Option<String>, String> { blocking(move || video_export_target_now(app, window, ext)).await }
+fn video_export_target_now(app: AppHandle, window: tauri::Window, ext: String) -> Result<Option<String>, String> {
     if !video::EXPORT_TYPES.contains(&ext.as_str()) { return Err(format!("Still can’t export .{ext} files.")); }
     let (item, source) = video_source(&app, &window)?;
     let folder = export_folder(&app);
@@ -1902,13 +1941,31 @@ async fn video_export_target(app: AppHandle, window: tauri::Window, ext: String)
 async fn video_export_save(app: AppHandle, window: tauri::Window, request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected the exported file".into()) };
     let target = take_export_target(&app, &window)?;
+    let part = export_part_file(&window);
+    // Sent in pieces (video_export_part) then finished with an empty call: Windows reads each message on the thread
+    // every window shares, so one message the size of the whole video froze the app for seconds.
+    if bytes.is_empty() && part.exists() {
+        return blocking(move || { let done = video::place(&part, &target); let _ = std::fs::remove_file(&part); done.map(|_| target.to_string_lossy().to_string()) }).await;
+    }
     video::save_bytes(&private_temp(), bytes, &target)?;
     Ok(target.to_string_lossy().to_string())
+}
+fn export_part_file(window: &tauri::Window) -> PathBuf { private_temp().join(format!("still-export-{}-{}.part", std::process::id(), window.label())) }
+/// One piece of an export on its way to disk; the first piece starts the file again.
+#[tauri::command]
+async fn video_export_part(window: tauri::Window, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    use std::io::Write;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected part of the exported file".into()) };
+    let first = request.headers().get("x-first").map(|v| v.as_bytes() == b"1").unwrap_or(false);
+    let file = export_part_file(&window);
+    let mut out = std::fs::OpenOptions::new().create(true).write(true).append(!first).truncate(first).open(&file).map_err(|e| format!("Couldn’t write the export: {e}"))?;
+    out.write_all(bytes).map_err(|e| format!("Couldn’t write the export: {e}"))
 }
 /// A picture made in the video editor (a frame, or a storyboard of frames): added to History, copied, and opened in
 /// the image editor when asked.
 #[tauri::command]
-async fn video_image_save(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> {
+async fn video_image_save(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> { blocking(move || video_image_save_now(app, data_url, title, open)).await }
+fn video_image_save_now(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
     let image = capture::decode(&bytes).ok_or("Bad image")?;
     let (w, h) = image.dimensions();
@@ -1922,7 +1979,8 @@ async fn video_image_save(app: AppHandle, data_url: String, title: String, open:
 /// Background music for a recording: the chosen file is copied in beside it (as music.<ext>), so the editor and
 /// later exports keep finding it even if the original moves.
 #[tauri::command]
-async fn video_music_choose(app: AppHandle, window: tauri::Window) -> Result<Option<Value>, String> {
+async fn video_music_choose(app: AppHandle, window: tauri::Window) -> Result<Option<Value>, String> { blocking(move || video_music_choose_now(app, window)).await }
+fn video_music_choose_now(app: AppHandle, window: tauri::Window) -> Result<Option<Value>, String> {
     let (_, source) = video_source(&app, &window)?;
     let Some(picked) = app.dialog().file().add_filter("Music", &["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "webm"]).blocking_pick_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
     let ext = picked.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).filter(|e| e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric())).unwrap_or_else(|| "mp3".into());
@@ -2187,7 +2245,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, watermark_choose_image, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_copy, video_project_save, video_music_choose, video_image_save,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
             scroll::scroll_stop, scroll::scroll_auto
         ])
