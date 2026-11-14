@@ -119,6 +119,14 @@ if (window.__STILL_PARAMS__.init) init(window.__STILL_PARAMS__.init);
 else { refreshIcons(); still.on('overlay:init', init, () => still.send('overlay:ready')); }
 still.on('overlay:purpose', (next) => { purpose = next; if (!StillCaptureInput.allowsWindowSelection(next)) setWindowMode(false, true); updateBar(); });
 still.on('overlay:windowMode', (on) => setWindowMode(on, true));
+// Timer: choose what to capture first; it's taken after the countdown. Set from any display's bar, so every overlay
+// shows it, and an area already waiting on this display goes straight to the countdown.
+let timerDelay = 0;
+still.on('overlay:timer', (delay) => {
+  timerDelay = delay || 0; updateBar();
+  if (timerDelay && adjusting && region && region.w > 2 && region.h > 2) finish(region);
+  else if (timerDelay && here) toast(`Choose what to capture. It’s taken ${timerDelay} seconds later.`);
+});
 still.on('overlay:clear', () => { here = false; if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
 
 function resize() {
@@ -150,8 +158,10 @@ function setPurpose(next) { purpose = next; still.send('overlay:purpose', next);
 function updateBar() {
   $$('.mode[data-mode]').forEach((b) => {
     const m = b.dataset.mode;
-    b.classList.toggle('active', (m === 'area' && purpose === 'screenshot' && !windowMode) || (m === 'window' && windowMode) || (m === 'text' && purpose === 'text') || (m === 'scroll' && purpose === 'scroll') || (m === 'record' && purpose === 'record'));
+    b.classList.toggle('active', (m === 'area' && purpose === 'screenshot' && !windowMode) || (m === 'window' && windowMode) || (m === 'text' && purpose === 'text') || (m === 'scroll' && purpose === 'scroll') || (m === 'record' && purpose === 'record') || (m === 'timer' && timerDelay > 0));
   });
+  const timer = $('.mode[data-mode="timer"]');
+  if (timer) { const words = [...timer.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()); if (words) words.textContent = timerDelay ? `Timer ${timerDelay} s` : 'Timer'; }
   if (region && region.w > 0) { $('#width').value = Math.round(region.w); $('#height').value = Math.round(region.h); }
 }
 
@@ -414,7 +424,7 @@ addEventListener('keydown', (e) => {
   else if (key === 'o') { setWindowMode(false); setPurpose('text'); }
   else if (key === 'v') { setWindowMode(false); setPurpose('record'); }
   else if (key === 's' && config.canScroll) { setWindowMode(false); setPurpose('scroll'); }
-  else if (key === 't') still.send('overlay:timer', 5);
+  else if (key === 't') still.send('overlay:timer', timerDelay ? 0 : 5);
   else if (key === 'c' && pointer.x >= 0) {
     // Copy the colour under the crosshair and keep selecting: grab a few, then capture or press Esc.
     const hex = colourAt(pointer);
@@ -448,7 +458,7 @@ $('#bar').addEventListener('click', (e) => {
     if (purpose === 'record' || purpose === 'scroll') return finish({ x: 0, y: 0, w: config.width, h: config.height });
     still.send('overlay:fullscreen', config.displayId);
   }
-  else if (mode === 'timer') popupMenu(button, [3, 5, 10].map((s) => ({ label: `${s} seconds`, icon: 'timer', action: () => still.send('overlay:timer', s) })));
+  else if (mode === 'timer') popupMenu(button, [...[3, 5, 10].map((s) => ({ label: `${s} seconds`, icon: 'timer', action: () => still.send('overlay:timer', s) })), ...(timerDelay ? [{ label: 'Off', icon: 'x', action: () => still.send('overlay:timer', 0) }] : [])]);
   else if (mode === 'text') { setWindowMode(false); setPurpose(purpose === 'text' ? 'screenshot' : 'text'); }
   else if (mode === 'record') { setWindowMode(false); setPurpose(purpose === 'record' ? 'screenshot' : 'record'); }
   else if (mode === 'scroll') { setWindowMode(false); setPurpose(purpose === 'scroll' ? 'screenshot' : 'scroll'); }

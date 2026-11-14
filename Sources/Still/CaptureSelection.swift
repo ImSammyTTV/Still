@@ -54,6 +54,9 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     @Published var purpose = SelectionPurpose.screenshot { didSet { if pickingScreen { pickingScreen = false; views.forEach { $0.windowModeChanged() } } } }
     /// Space toggles between dragging an area and clicking a window, like the system screenshot overlay.
     @Published var windowMode = false
+    /// Timer: the seconds to wait between choosing what to capture and taking it, so a menu or hover can be opened
+    /// first. 0 = off.
+    @Published var timerDelay = 0
     /// With more than one display, the bar's Screen button asks which: each display lights up under the pointer and
     /// a click takes it. (The bar is on one display, so "the display under the pointer" would always be that one.)
     @Published private(set) var pickingScreen = false
@@ -76,7 +79,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     var onError: ((Error) -> Void)?
     func begin(_ purpose: SelectionPurpose) {
         guard !active else { return }
-        self.purpose = purpose; active = true; windowMode = false
+        self.purpose = purpose; active = true; windowMode = false; timerDelay = 0
         installKeyboardMonitor()
         // Grab every display first, before Still takes focus, so open menus, Spotlight and hover states
         // are in the picture. The overlay then sits on that frozen image, like the system tool.
@@ -182,6 +185,17 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         if Preferences.shared.rememberSelection {
             UserDefaults.standard.set(["screen": (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue ?? 0, "x": rect.minX, "y": rect.minY, "w": rect.width, "h": rect.height], forKey: "lastSelection")
         }
+        if timerDelay > 0, purpose == .screenshot || purpose == .text {
+            // Timer: the overlay goes, the countdown runs, then that same area is taken from the live screen.
+            let delay = timerDelay
+            close(); AppController.shared.returnFocusForTimer()
+            Task {
+                guard await CaptureCountdown.run(seconds: delay) else { onCancel?(); return }
+                try? await Task.sleep(for: .milliseconds(150))
+                do { onSelected?(try await ScreenCaptureAPI.image(screen: screen, rect: rect), screen, rect, purpose) } catch { onError?(error) }
+            }
+            return
+        }
         close()
         Task {
             do {
@@ -225,9 +239,16 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             let local = CGRect(x: window.frame.minX-screen.frame.minX, y: window.frame.minY-(primary.frame.maxY-screen.frame.maxY), width: window.frame.width, height: window.frame.height)
             finish(on: screen, rect: local.intersection(CGRect(origin: .zero, size: screen.frame.size))); return
         }
-        close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window, windowID: window.id) } }
-    /// Starts again after a five-second countdown, keeping what was being captured (a screenshot, text or a recording).
-    func timer() { let purpose = purpose; close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.showAllInOne(purpose: purpose, delay: 5) } }
+        let delay = timerDelay
+        close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.capture(.window, delay: delay, windowID: window.id) } }
+    /// Timer: choose the area (or window) first, then a five-second countdown, then it's taken. With an area already
+    /// on screen, the countdown starts straight away. Pressing it again turns it off. A recording starts after the
+    /// countdown as before.
+    func timer() {
+        guard purpose == .screenshot || purpose == .text else { let purpose = purpose; close(); onCancel?(); DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { AppController.shared.showAllInOne(purpose: purpose, delay: 5) }; return }
+        timerDelay = timerDelay == 0 ? 5 : 0
+        if timerDelay > 0, let view = views.first(where: { $0.adjustedRegion != nil }), let region = view.adjustedRegion { finish(on: view.display, rect: region) }
+    }
     func cancel() { close(); onCancel?() }
     private func installKeyboardMonitor() {
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }
@@ -548,6 +569,8 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         }
     }
     /// A new area on this display clears a box left being adjusted on another.
+    /// The area waiting to be captured (see Adjust the area before capturing), if there is one.
+    var adjustedRegion: CGRect? { adjusting && region.width > 2 && region.height > 2 ? region : nil }
     func clearAdjusting() { guard adjusting else { return }; adjusting = false; grab = nil; region = .zero; refresh() }
     /// Scrolling up zooms the magnifier in, scrolling down zooms it out.
     override func scrollWheel(with event: NSEvent) {
@@ -680,7 +703,7 @@ struct CaptureBar: View {
             divider
             mode("Text", "text.viewfinder", selected: selection.purpose == .text) { selection.setWindowMode(false); selection.purpose = .text }
             mode("Record", "record.circle", selected: selection.purpose == .recording) { selection.setWindowMode(false); selection.purpose = .recording }
-            mode("Timer", "timer") { selection.timer() }
+            mode(selection.timerDelay > 0 ? "Timer \(selection.timerDelay) s" : "Timer", "timer", selected: selection.timerDelay > 0) { selection.timer() }.help(selection.timerDelay > 0 ? "Choose what to capture; it's taken after the countdown" : "Capture after a 5-second countdown")
             divider
             HStack(spacing: 4) {
                 TextField("W", text: $selection.width).frame(width: 40).onSubmit { selection.setDimensions() }.accessibilityLabel("Capture width")

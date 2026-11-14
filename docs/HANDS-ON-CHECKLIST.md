@@ -23,14 +23,16 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
      Screen, then click the laptop's display: that one is captured. With Record chosen, it is recorded. In Record
      Screen's panel, the full-screen button lists each display by name.
    - Dock icon (Mac): clicking Still in the Dock opens the Capture Bar; right-click it for Settings.
-   - Adjust before capturing: drag an area and let go. The box stays. Inside it the pointer is a hand: drag to move it.
-     Its edges and corners resize it. Capture (under the box), Return or a double-click inside takes it; Esc cancels;
-     a press outside starts a new area. Settings → Screenshots → "Adjust the area before capturing" off captures as
-     soon as you let go, as before.
+   - Adjust before capturing (off by default): turn on Settings → Screenshots → "Adjust the area before capturing",
+     then drag an area and let go. The box stays. Inside it the pointer is a hand: drag to move it. Its edges and
+     corners resize it. Capture (under the box), Return or a double-click inside takes it; Esc cancels; a press outside
+     starts a new area. With the setting off, letting go captures straight away.
    - Move a selection: start dragging an area, hold Space and keep moving: the box moves without changing size. Let
      go of Space to carry on resizing; release the mouse to capture. Shift still makes it square.
-2. **Timer capture.** Start a capture with the 3-second timer. The countdown shows, Esc cancels it, and the
-   screenshot taken at zero has no countdown in it.
+2. **Timer capture.** Open the Capture Bar, click Timer (or press T): it reads "Timer 5 s". Drag an area: the overlay
+   goes and the countdown shows. Open a menu during it: the screenshot taken at zero is of that area, with the menu
+   in it and no countdown. Clicking the countdown cancels it. With an area already waiting (adjust setting on),
+   Timer starts the countdown straight away. Pressing T again turns the timer off.
 3. **Move the Capture Bar.** Drag it by the Still icon, take a capture, then start a new one. It should be back in
    its usual place.
 4. **Copy colour (C)** in the capture overlay. Paste somewhere: you should get the colour under the pointer.

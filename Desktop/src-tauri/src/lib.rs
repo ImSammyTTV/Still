@@ -54,6 +54,8 @@ struct Session {
     focus_overlay: Option<String>,
     /// Counts selections, so one that was cancelled while its overlays were still being built can tell.
     generation: u64,
+    /// Timer: seconds between choosing what to capture and taking it from the live screen; 0 = straight away.
+    timer: u64,
     from_shortcut: bool,
     previews: Vec<(String, String)>,
     recording: Option<Value>,
@@ -318,7 +320,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
     let (from_shortcut, generation) = {
         let mut s = st(app).session.lock().unwrap();
         if occupied(&s) { drop(s); notify(app, "Still", "Finish the current capture or recording first."); return; }
-        s.busy = true; s.purpose = purpose.to_string(); s.generation += 1;
+        s.busy = true; s.purpose = purpose.to_string(); s.generation += 1; s.timer = 0;
         (s.from_shortcut, s.generation)
     };
     let app = app.clone();
@@ -363,7 +365,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
             let init = json!({
                 "displayId": g.id, "purpose": purpose, "windowMode": window_mode && !mine.is_empty(), "canSelectWindows": !mine.is_empty(), "wayland": is_wayland(), "canScroll": scroll::supported(),
                 "imageParts": parts, "imageWidth": w, "imageHeight": h, "windows": mine,
-                "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"), "adjust": setting(&app, "adjustBeforeCapture").as_bool().unwrap_or(true),
+                "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"), "adjust": setting(&app, "adjustAreaBeforeCapture").as_bool().unwrap_or(false),
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
                 "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
             });
@@ -473,14 +475,37 @@ fn finish_selection(app: &AppHandle, payload: Value) {
     let purpose = payload["purpose"].as_str().unwrap_or("screenshot").to_string();
     let px = &payload["px"];
     let (x, y, w, h) = (px["x"].as_f64().unwrap_or(0.0), px["y"].as_f64().unwrap_or(0.0), px["w"].as_f64().unwrap_or(0.0), px["h"].as_f64().unwrap_or(0.0));
-    let grab = {
+    let (grab, delay) = {
         let mut s = st(app).session.lock().unwrap();
         let grabs = std::mem::take(&mut s.grabs);
-        grabs.into_iter().find(|g| g.id == display)
+        (grabs.into_iter().find(|g| g.id == display), s.timer)
     };
     end_selection(app);
     let Some(grab) = grab else { return };
     if w < 2.0 || h < 2.0 { return; }
+    if delay > 0 && (purpose == "screenshot" || purpose == "text") {
+        // Timer: the area was chosen first. After the countdown it's taken from the live screen, so whatever was
+        // opened meanwhile (a menu, a hover) is in the picture.
+        if setting(app, "rememberSelection").as_bool().unwrap_or(false) && payload["windowId"].is_null() {
+            st(app).settings.lock().unwrap().update(&json!({ "lastSelection": { "displayId": display, "rect": payload["rect"] } }));
+        }
+        { st(app).session.lock().unwrap().busy = true; }
+        let go = countdown(app, delay);
+        let fresh = if go {
+            let floating = hide_floating(app, true);
+            let icons = desktop::hide(app);
+            if floating || icons.is_some() { std::thread::sleep(Duration::from_millis(80)); }
+            let result = capture::grab_all();
+            drop(icons); hide_floating(app, false);
+            result.ok().and_then(|grabs| grabs.into_iter().find(|g| g.id == display))
+        } else { None };
+        { st(app).session.lock().unwrap().busy = false; }
+        if !go { return; }
+        let Some(fresh) = fresh else { notify(app, "Capture failed", "The screen couldn’t be captured after the countdown."); return; };
+        previous::remember(app, &payload, &fresh);
+        complete_image(app, capture::crop(&fresh.image, x, y, w, h), purpose == "text");
+        return;
+    }
     if setting(app, "rememberSelection").as_bool().unwrap_or(false) && payload["windowId"].is_null() {
         st(app).settings.lock().unwrap().update(&json!({ "lastSelection": { "displayId": display, "rect": payload["rect"] } }));
     }
@@ -1110,6 +1135,14 @@ fn overlay_fullscreen_now(app: AppHandle, display_id: u32) {
 #[tauri::command]
 async fn overlay_timer(app: AppHandle, delay: u64) {
     let purpose = st(&app).session.lock().unwrap().purpose.clone();
+    // A screenshot or text: what to capture is chosen first and taken after the countdown (see finish_selection).
+    if purpose == "screenshot" || purpose == "text" {
+        st(&app).session.lock().unwrap().timer = delay.min(60);
+        broadcast(&app, "overlay:timer", json!(delay.min(60)));
+        return;
+    }
+    // A recording or scrolling capture starts again after the countdown, as before.
+    if delay == 0 { return; }
     end_selection(&app);
     start_selection(&app, &purpose, delay, false);
 }

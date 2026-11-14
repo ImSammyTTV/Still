@@ -682,6 +682,8 @@ extension AppController {
         for panel in Array(previewPanels.values)+Array(pins.values) { if overlaysHidden { panel.orderOut(nil) } else { panel.orderFrontRegardless() } }
     }
     /// The overlay takes keyboard focus; give it back so ⌘V lands in the app you were using.
+    /// The app that was in front gets the keyboard back for a timed capture, so its menus can be opened during the countdown.
+    func returnFocusForTimer() { lastExternalApp?.activate() }
     private func returnFocus() {
         guard !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
         lastExternalApp?.activate()
