@@ -4,6 +4,16 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.56 — 2026-11-14
+
+- **The timer now waits for you to choose** (Mac, Windows, Linux). Click Timer on the Capture Bar (or press T): it
+  reads "Timer 5 s". Drag the area or click the window you want; the overlay steps aside and the countdown runs, then
+  that area is captured from the live screen, with any menu or hover you opened in the meantime. With an area already
+  waiting, the countdown starts straight away. Press T again to turn the timer off.
+- **Adjusting the area before capturing is now off by default** (Mac, Windows, Linux). Letting go of the mouse
+  captures straight away again. To keep the box on screen to move and resize first, turn on Settings → Screenshots →
+  "Adjust the area before capturing".
+
 ## v1.2.55 — 2026-11-14
 
 A release about smoothness: places where Still could freeze, stutter or get stuck.
