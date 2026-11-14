@@ -119,7 +119,7 @@ struct EditorView: View {
                 Button("Editable Project…") { model.saveProject() }
                 Button("Save to Capture History") { model.save() }.keyboardShortcut("s", modifiers: .command)
             }.menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 11).padding(.vertical, 6).background(Color.primary.opacity(0.07), in: Capsule())
-            Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } }.buttonStyle(.borderedProminent).controlSize(.small).clipShape(Capsule())
+            Button("Done") { let window = NSApp.keyWindow; model.save { window?.performClose(nil) } }.disabled(model.saving).buttonStyle(.borderedProminent).controlSize(.small).clipShape(Capsule())
         }
         .padding(.leading, 79).padding(.trailing, 14).frame(height: 48)
         .background(Studio.surface).overlay(alignment: .bottom) { Divider() }

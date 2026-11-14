@@ -49,6 +49,15 @@ final class PreviewAndEncodingTests: XCTestCase {
         let other = image(width: 900, height: 600, transparent: true)
         XCTAssertEqual(pixels(try ImageRenderer.preview(other, marks: marks, cache: cache)), pixels(try ImageRenderer.preview(other, marks: marks)))
     }
+    func testPreviewFromAReadyMadeBaseMatchesTheFullPreview() throws {
+        let source = image(width: 900, height: 600)
+        let marks = [Mark(tool: .arrow, points: [.init(x: 30, y: 500), .init(x: 700, y: 120)], width: 7), Mark(tool: .blur, points: [.init(x: 40, y: 40), .init(x: 300, y: 260)], width: 8)]
+        let base = try ImageRenderer.previewBase(source)
+        XCTAssertEqual(pixels(try ImageRenderer.preview(base: base, source: source, marks: marks)), pixels(try ImageRenderer.preview(source, marks: marks)))
+        let large = image(width: 4000, height: 2000), largeBase = try ImageRenderer.previewBase(large)
+        let fromBase = try ImageRenderer.preview(base: largeBase, source: large, marks: marks), direct = try ImageRenderer.preview(large, marks: marks)
+        XCTAssertEqual(fromBase.width, direct.width); XCTAssertEqual(fromBase.height, direct.height)
+    }
     func testScaledRenderLooksLikeTheFullRenderAndExportsStayFullSize() throws {
         let source = image(width: 1600, height: 900)
         let background = try ImageRenderer.data(image(width: 640, height: 480), jpeg: true)

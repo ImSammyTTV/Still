@@ -7,9 +7,17 @@ const show = (text) => { $('#level').textContent = text; $('#level').classList.a
 // Scroll to resize, Ctrl+scroll to change opacity, drag anywhere to move.
 addEventListener('wheel', (e) => {
   if (e.ctrlKey || e.metaKey) { opacity = Math.min(1, Math.max(0.15, opacity - Math.sign(e.deltaY) * 0.05)); still.send('pin:opacity', opacity); show(`Opacity ${Math.round(opacity * 100)}%`); }
-  else still.send('pin:resize', e.deltaY < 0 ? 0.05 : -0.05);
+  else { resizeBy += e.deltaY < 0 ? 0.05 : -0.05; if (!resizeFrame) resizeFrame = requestAnimationFrame(() => { still.send('pin:resize', resizeBy); resizeBy = 0; resizeFrame = 0; }); }
 });
-$('#img').addEventListener('mousedown', (e) => { if (e.button === 0) dragFrom = { x: e.screenX, y: e.screenY }; });
+// A fast scroll sends one resize per frame, not one per notch.
+let resizeBy = 0, resizeFrame = 0;
+// Dragging is the system's own window move: moving it by messages on every mouse move flooded the app.
+$('#img').addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  const win = window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow?.();
+  if (win?.startDragging) { e.preventDefault(); win.startDragging().catch(() => { dragFrom = { x: e.screenX, y: e.screenY }; }); }
+  else dragFrom = { x: e.screenX, y: e.screenY };
+});
 addEventListener('mousemove', (e) => {
   if (!dragFrom) return;
   still.send('pin:move', e.screenX - dragFrom.x, e.screenY - dragFrom.y);

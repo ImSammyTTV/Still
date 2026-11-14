@@ -14,6 +14,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let library = Library()
     let recorder = Recorder()
     private let selection = CaptureSelection()
+    var capturing: Bool { selection.isActive || library.busy }
     private let scrolling = ScrollingSession()
     private var historyPanel: NSPanel?
     private var lastPreviewItem: CaptureItem?
@@ -510,7 +511,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let alert = NSAlert(); alert.messageText = "Save your edits?"; alert.informativeText = "Save annotations to your local library before closing."
         alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Discard Edits"); alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
-        case .alertFirstButtonReturn: model.save(); return !model.dirty
+        case .alertFirstButtonReturn: model.saveNow(); return !model.dirty
         case .alertSecondButtonReturn: return true
         default: return false
         }
@@ -617,6 +618,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         "\(type) \(Date().formatted(date: .abbreviated, time: .standard))".replacingOccurrences(of: ":", with: ".")
     }
     func showError(_ title: String, _ text: String) {
+        // An alert opened under the full-screen capture overlay can't be seen or clicked, so wait until it's gone.
+        if selection.isActive { DispatchQueue.main.asyncAfter(deadline: .now()+0.5) { [weak self] in MainActor.assumeIsolated { self?.showError(title, text) } }; return }
         showMain(); let alert = NSAlert(); alert.messageText = title; alert.informativeText = text; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     private func hideForCapture() {

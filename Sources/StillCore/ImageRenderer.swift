@@ -73,6 +73,17 @@ public enum ImageRenderer {
         context.interpolationQuality = .high; context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height)); draw(marks: marks, in: context, source: source, cache: cache)
         guard let result = context.makeImage() else { throw RenderError.allocation }; return result
     }
+    /// The preview with the scaled-down picture already made (`previewBase`), so a redraw while drawing or dragging
+    /// a mark only paints the marks instead of scaling the full-size picture again.
+    public static func preview(base: CGImage, source: CGImage, marks: [Mark], cache: PreviewCache? = nil) throws -> CGImage {
+        let width = base.width, height = base.height
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw RenderError.allocation }
+        context.draw(base, in: CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: CGFloat(width)/CGFloat(source.width), y: CGFloat(height)/CGFloat(source.height))
+        context.interpolationQuality = .high; draw(marks: marks, in: context, source: source, cache: cache)
+        guard let result = context.makeImage() else { throw RenderError.allocation }; return result
+    }
+    public static func previewBase(_ source: CGImage, maxDimension: Int = 1800) throws -> CGImage { try preview(source, marks: [], maxDimension: maxDimension) }
     public static func contentBounds(_ source: CGImage) -> CGRect {
         let factor = min(1, 800/Double(max(source.width, source.height)))
         let w = max(1, Int(Double(source.width)*factor)), h = max(1, Int(Double(source.height)*factor))

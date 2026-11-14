@@ -1089,7 +1089,15 @@ async function runExport(title, work) {
   } finally { job = null; $('#sheet').hidden = true; }
 }
 
-const save = (bytes) => { setProgress(1); $('#cancel').disabled = true; return still.raw('video_export_save', bytes, {}); };
+// The file goes across in pieces: Windows reads each message on the thread every window shares, so one message the
+// size of the whole video froze the app until it was through.
+const EXPORT_PIECE = 4 * 1024 * 1024;
+async function save(bytes) {
+  setProgress(1); $('#cancel').disabled = true;
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let at = 0; at < data.length; at += EXPORT_PIECE) await still.raw('video_export_part', data.slice(at, at + EXPORT_PIECE), { 'x-first': at === 0 ? '1' : '0' });
+  return still.raw('video_export_save', new Uint8Array(0), {});
+}
 
 // Where the frames come from. Chromium (WebView2) can record a media element directly, audio included.
 // WebKitGTK can't, so there the picture goes through a canvas, as in the HUD, and the sound through Web Audio.

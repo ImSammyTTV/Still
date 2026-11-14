@@ -26,7 +26,7 @@ pub fn is_same_file(a: &Path, b: &Path) -> bool {
 /// Moves a finished temporary file over the target in one step, so the target is either the old file or the
 /// whole new one. Still's temp folder can be on another drive, where a move isn't possible: then the copy
 /// goes next to the target first, so a full disk can't leave half a file in its place.
-fn place(temp: &Path, target: &Path) -> Result<(), String> {
+pub fn place(temp: &Path, target: &Path) -> Result<(), String> {
     if fs::rename(temp, target).is_ok() { return Ok(()); }
     let part = target.with_file_name(format!(".still-part-{}", uuid::Uuid::new_v4().simple()));
     let moved = fs::copy(temp, &part).and_then(|_| fs::rename(&part, target));

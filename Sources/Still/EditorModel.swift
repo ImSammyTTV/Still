@@ -45,7 +45,10 @@ final class EditorModel: ObservableObject {
     @Published var alignmentY: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentY { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var zoom: Double = 0
     @Published var isRecognizing = false
-    @Published var dirty = false
+    @Published var dirty = false { didSet { if dirty { edits &+= 1 } } }
+    /// Counts edits, so a save running in the background knows whether more were made while it ran.
+    private var edits = 0
+    @Published private(set) var saving = false
     @Published var error: String?
     @Published var recognizedText: String?
     var showTextSheet: Bool {
@@ -178,7 +181,37 @@ final class EditorModel: ObservableObject {
         alignmentX = document.alignmentX ?? 0.5; alignmentY = document.alignmentY ?? 0.5
         suppressChanges = false
     }
-    func save() {
+    /// Saves to Capture History. Rendering and encoding a full-size picture takes a second or more on a big display,
+    /// so it runs in the background and the editor stays responsive; `done` runs once it's saved.
+    func save(then done: (() -> Void)? = nil) {
+        if !dirty, let current = item, library.items.contains(where: { $0.id == current.id }) { done?(); return }
+        guard !saving else { return }
+        saving = true
+        let source = source, marks = marks, frame = frame, padding = padding, cornerRadius = cornerRadius, shadow = shadow
+        let aspectRatio = aspectRatio, customBackground = customBackground, alignmentX = alignmentX, alignmentY = alignmentY
+        let watermark = watermarkOn ? Preferences.shared.watermark : nil, started = edits
+        Task {
+            do {
+                let (png, project, width, height) = try await Task.detached(priority: .userInitiated) { () throws -> (Data, ProjectDocument, Int, Int) in
+                    var image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
+                    if let watermark { image = watermark.apply(to: image) }
+                    let document = try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
+                    return (try ImageRenderer.libraryData(image), document, image.width, image.height)
+                }.value
+                // The capture was deleted from history while this editor was open: save it as a new one.
+                if let current = item, !library.items.contains(where: { $0.id == current.id }) { item = nil }
+                if item == nil { item = try library.add(png: png, width: width, height: height, title: isSample ? "Sample annotation" : "Edited image") }
+                if let item { try await library.update(item, png: png, width: width, height: height, document: project) }
+                if edits == started { dirty = false }
+                saving = false
+                AppController.shared?.rekeyEditor(self)
+                library.toast("Changes saved to library")
+                done?()
+            } catch { saving = false; self.error = error.localizedDescription }
+        }
+    }
+    /// Saves before returning, for the "Save your edits?" prompt when the window closes.
+    func saveNow() {
         do {
             let image = try flattened()
             // The capture was deleted from history while this editor was open: save it as a new one.

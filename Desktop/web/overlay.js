@@ -12,14 +12,30 @@ canvas.before(image);
 // Its pixels, read back once, for the colour under the crosshair and for finding a window's parts. Reading a pixel
 // from the picture itself on every move made the browser copy the whole screen back from the graphics card each
 // time, which on a large display could stall the graphics card, and with it the pointer and the whole screen.
-let pixels = null;
+// They're read in a worker (pixel-worker.js); until they arrive there's simply no colour yet. If the worker can't
+// do it, they're read here once, when first needed.
+let pixels = null, pixelsFailed = false;
 function pixelData() {
-  if (!pixels && image.width > 0) { try { pixels = image.getContext('2d').getImageData(0, 0, image.width, image.height); } catch { pixels = null; } }
+  if (!pixels && pixelsFailed && image.width > 0) { try { pixels = image.getContext('2d').getImageData(0, 0, image.width, image.height); } catch { pixels = null; } }
   return pixels;
 }
+function readPixels(parts, width, height) {
+  let worker;
+  try { worker = new Worker('pixel-worker.js'); } catch { pixelsFailed = true; return; }
+  worker.onmessage = ({ data }) => {
+    worker.terminate();
+    if (data.ok) { pixels = { width: data.width, height: data.height, data: new Uint8ClampedArray(data.buffer) }; refreshPixels(); }
+    else pixelsFailed = true;
+  };
+  worker.onerror = () => { worker.terminate(); pixelsFailed = true; };
+  worker.postMessage({ width, height, parts: parts.map((part) => ({ url: still.fileUrl(part.path), y: part.y || 0 })) });
+}
+// Windows whose parts were looked for before the pixels came are looked at again, and the colour shown.
+function refreshPixels() { for (const win of config?.windows || []) if (win.picturedParts && !(win.parts && win.parts.length)) { win.picturedParts = false; win.parts = null; } if (config) draw(); }
 function loadPicture(data) {
   const parts = data.imageParts || [{ path: data.imagePath, y: 0 }];
   image.width = data.imageWidth; image.height = data.imageHeight;
+  readPixels(parts, data.imageWidth, data.imageHeight);
   const paint = image.getContext('2d');
   return Promise.all(parts.map(async (part) => {
     const img = new Image();
@@ -50,7 +66,7 @@ function partsOf(win) {
     const px = { x: Math.round(r.x * pixelScale), y: Math.round(r.y * pixelScale), w: Math.round(r.w * pixelScale), h: Math.round(r.h * pixelScale) };
     if (px.w < 120 || px.h < 120) return win;
     const all = pixelData();
-    if (!all) { win.parts = []; return win; }
+    if (!all) { win.parts = []; return win; } // Looked at again once the pixels arrive (refreshPixels).
     const data = all.data, stride = all.width;
     const lum = (x, y) => { const i = ((y + px.y) * stride + x + px.x) * 4; return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114; };
     win.parts = G.bandParts(lum, px.w, px.h).map((p) => ({ x: r.x + p.x / pixelScale, y: r.y + p.y / pixelScale, w: p.w / pixelScale, h: p.h / pixelScale }));
@@ -85,7 +101,7 @@ function init(data) {
   let told = false;
   const tell = () => { if (!told) { told = true; still.send('overlay:drawn'); } };
   // The pixels are read back once, just after the window is up, so the first move of the pointer doesn't wait for it.
-  const shown = () => { requestAnimationFrame(() => requestAnimationFrame(tell)); setTimeout(tell, 120); setTimeout(pixelData, 160); };
+  const shown = () => { requestAnimationFrame(() => requestAnimationFrame(tell)); setTimeout(tell, 120); };
   loadPicture(data).then(() => { resize(); setWindowMode(data.windowMode); updateBar(); draw(); shown(); }, shown);
   refreshIcons();
   window.focus();

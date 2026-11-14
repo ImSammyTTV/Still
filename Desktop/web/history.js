@@ -173,6 +173,13 @@ $('#filter').addEventListener('click', (e) => {
 });
 let searchTimer;
 $('#search').addEventListener('input', () => { similarTo = null; folderMatches = null; clearTimeout(searchTimer); searchTimer = setTimeout(load, 150); });
-still.on('library:changed', load);
+// Changes come in bursts (an editor saves as you draw), and each reload rebuilds every tile, so wait for a pause, and
+// for the window to be on screen at all.
+let changedTimer, changedWhileHidden = false;
+still.on('library:changed', () => {
+  if (document.hidden) { changedWhileHidden = true; return; }
+  clearTimeout(changedTimer); changedTimer = setTimeout(load, 400);
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden && changedWhileHidden) { changedWhileHidden = false; load(); } });
 still.on('library:thumb', ({ id, thumb }) => { const image = images.get(id); if (image) image.src = `${still.fileUrl(thumb)}?t=${Date.now()}`; });
 applyTheme().then((prefs) => { if (prefs.platform !== 'darwin') addWindowControls(); load(); });

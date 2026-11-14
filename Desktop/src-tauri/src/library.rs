@@ -85,6 +85,8 @@ impl Library {
         fs::write(&temp, text).map_err(|e| e.to_string())?;
         fs::rename(&temp, self.dir.join("library.json")).map_err(|e| e.to_string())
     }
+    /// The same folder without the list, for working out paths (and checking files on disk) outside the lock.
+    pub fn paths(&self) -> Library { Library { dir: self.dir.clone(), items: Vec::new(), name_pattern: String::new(), keep_days: 0 } }
     pub fn folder(&self, item: &Item) -> PathBuf { self.dir.join(&item.id) }
     pub fn file(&self, item: &Item) -> PathBuf { lib_file(&self.dir, item) }
     pub fn original(&self, item: &Item) -> PathBuf { self.folder(item).join(&item.original_name) }

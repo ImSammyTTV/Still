@@ -140,7 +140,15 @@ import StillCore
     @AppStorage("claudeConnector") var claudeConnector = false
     @AppStorage("appearance") var appearance = "system"
     private var defaultsObserver: NSObjectProtocol?
-    init() { defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.objectWillChange.send() } } }
+    init() { defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.defaultsChanged() } } }
+    /// Settings change in bursts (a slider, a resized window, the magnifier's zoom), and every change used to redraw
+    /// every view watching this. Gather a burst into one update.
+    private var defaultsPending = false
+    private func defaultsChanged() {
+        guard !defaultsPending else { return }
+        defaultsPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now()+0.15) { [weak self] in MainActor.assumeIsolated { self?.defaultsPending = false; self?.objectWillChange.send() } }
+    }
     func setLaunchAtLogin(_ value: Bool) throws {
         if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         objectWillChange.send()

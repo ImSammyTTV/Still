@@ -61,6 +61,8 @@ import CryptoKit
     }
 
     private func offer(_ release: Release) {
+        // Never over a capture or recording: the alert would sit under the overlay, and Return would install.
+        if let app = AppController.shared, app.capturing || app.recorder.recording { DispatchQueue.main.asyncAfter(deadline: .now()+30) { [weak self] in MainActor.assumeIsolated { self?.offer(release) } }; return }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Still \(release.version) is available"

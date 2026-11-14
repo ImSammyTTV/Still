@@ -8,7 +8,7 @@ fn main() {
         "library_save_as", "library_reveal", "library_open", "library_play", "library_pin", "library_drag", "editor_save",
         "editor_copy", "editor_export", "watermark_choose_image", "editor_save_file", "library_save_for_size", "editor_drag", "editor_pin", "editor_open_image", "preview_edit",
         "open_settings_cmd", "open_history_cmd", "open_demo", "capture_action", "ocr_result", "recording_prepared", "recording_started",
-        "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save",
+        "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save", "video_export_part",
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",
         "library_combine", "library_star", "video_music_choose", "video_image_save", "countdown_cancel", "library_similar", "library_similar_in_folder", "library_folder_match", "library_search_web", "library_describe", "library_send_to_claude", "connector_info", "connector_add_to_claude", "ai_get", "ai_set_key", "scroll_stop", "scroll_auto",
     ]))).expect("failed to run tauri-build");
