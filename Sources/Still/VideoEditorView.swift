@@ -407,7 +407,7 @@ import StillCore
             guard let self else { return }
             do {
                 let prepared = try await VideoEngine.prepare(url: source, settings: settings, metadata: metadata, cameraURL: camera, musicURL: music)
-                let progress: @Sendable (Double) -> Void = { [weak self] value in Task { @MainActor in self?.exportProgress = value } }
+                let progress: @Sendable (Double) -> Void = { [weak self] value in Task { @MainActor in guard let self, value >= 1 || Int(value*100) != Int(self.exportProgress*100) else { return }; self.exportProgress = value } }
                 if gif { try await VideoEngine.gif(prepared, to: temp, fps: Preferences.shared.gifFPS, width: Preferences.shared.gifWidth, progress: progress) }
                 else { try await VideoEngine.export(prepared, to: temp, progress: progress) }
                 if FileManager.default.fileExists(atPath: url.path) { _ = try FileManager.default.replaceItemAt(url, withItemAt: temp) }

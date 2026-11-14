@@ -122,7 +122,7 @@ import StillCore
     func togglePause() {
         guard recording, !stopping, !pausing else { return }
         if paused { guard let filter else { return }; starting = true; paused = false; Task { await start(filter) } }
-        else { pausing = true; stopMonitoring(); Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
+        else { pausing = true; stopMonitoring(); watchFinish(output); Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
     }
     /// Stop was pressed while a resumed segment was still starting; stop as soon as it has.
     private var stopWhenStarted = false
@@ -131,7 +131,17 @@ import StillCore
         if starting { stopWhenStarted = true; return }
         stopping = true; stopMonitoring()
         if paused { Task { await finishAll() } }
-        else { Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
+        else { watchFinish(output); Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
+    }
+    /// macOS normally hands the file back within a second of stopping. If it never does, the controls would stay on
+    /// "Saving…" with nothing able to start a new capture, so after a while give up and keep what was recorded.
+    private func watchFinish(_ waiting: SCRecordingOutput?) {
+        guard let waiting else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard let self, self.output === waiting else { return }
+            self.fail(NSError(domain: "Still", code: 4, userInfo: [NSLocalizedDescriptionKey: "macOS didn’t finish the recording in time."]))
+        }
     }
     nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
         Task { @MainActor in

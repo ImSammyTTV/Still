@@ -26,7 +26,7 @@ import StillCore
     func start(first: CGImage, screen: NSScreen, rect: CGRect) {
         self.display = screen; self.rect = rect
         firstImage = first
-        do { stitcher = try ScrollingStitcher(first, axis: axis) } catch { message = error.localizedDescription; return }
+        do { stitcher = try ScrollingStitcher(first, axis: axis) } catch { message = error.localizedDescription; AppController.shared?.showError("Scrolling capture couldn’t start", error.localizedDescription); onCancel?(); return }
         dimensions = "\(first.width) × \(first.height)"; frames = 1; running = true
         let panel = SelectionPanel(contentRect: CGRect(x: screen.visibleFrame.midX-245, y: screen.visibleFrame.minY+20, width: 490, height: 112), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .floating; panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = true; panel.hidesOnDeactivate = false

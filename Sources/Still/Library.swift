@@ -55,7 +55,15 @@ final class Library: ObservableObject {
                 }
             }
         } catch { message = "Couldn’t load capture history: \(error.localizedDescription)" }
-        defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.objectWillChange.send() } }
+        defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.defaultsChanged() } }
+    }
+    /// Settings change in bursts (a slider, a resized window, the magnifier's zoom), and every change used to redraw
+    /// every view watching this. Gather a burst into one update.
+    private var defaultsPending = false
+    private func defaultsChanged() {
+        guard !defaultsPending else { return }
+        defaultsPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now()+0.15) { [weak self] in MainActor.assumeIsolated { self?.defaultsPending = false; self?.objectWillChange.send() } }
     }
 
     /// Every capture file in the folder, newest first, for when the index can't be read.
@@ -114,6 +122,21 @@ final class Library: ObservableObject {
         if let document, let idx = items.firstIndex(where: { $0.id == item.id }) {
             let name = "\(item.id.uuidString).stillshot"
             try document.write(root.appendingPathComponent(name)); items[idx].projectFilename = name
+        }
+        forgetThumbnail(item.id)
+        try persist()
+        objectWillChange.send()
+    }
+    /// Like update(_:image:document:), with the picture already encoded; the files are written off the main thread.
+    func update(_ item: CaptureItem, png: Data, width: Int, height: Int, document: ProjectDocument?) async throws {
+        let file = url(item), projectName = "\(item.id.uuidString).stillshot", projectURL = root.appendingPathComponent(projectName)
+        try await Task.detached(priority: .userInitiated) {
+            try png.write(to: file, options: .atomic)
+            if let document { try document.write(projectURL) }
+        }.value
+        if let idx = items.firstIndex(where: { $0.id == item.id }) {
+            items[idx].width = width; items[idx].height = height
+            if document != nil { items[idx].projectFilename = projectName }
         }
         forgetThumbnail(item.id)
         try persist()

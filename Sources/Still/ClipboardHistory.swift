@@ -122,7 +122,7 @@ final class ClipboardThumbnails: @unchecked Sendable {
             let item = ClipItem(kind: .files, files: urls.map(\.path), source: source)
             return Task { item }
         }
-        if let text = pasteboard.string(forType: .string), !text.isEmpty, text.count <= Self.maxTextLength {
+        if let text = pasteboard.string(forType: .string), !text.isEmpty, text.utf16.count <= Self.maxTextLength {
             let item = ClipItem(kind: .text, text: text, source: source)
             return Task { item }
         }
@@ -188,7 +188,9 @@ final class ClipboardThumbnails: @unchecked Sendable {
             try? FileManager.default.removeItem(at: imageFolder.appendingPathComponent(file))
         }
     }
-    private func save() { if let data = try? JSONEncoder().encode(items) { try? data.write(to: indexURL, options: .atomic) } }
+    /// Encoding and writing up to a hundred long entries is slow, so it's done in order on a background queue.
+    private static let saving = DispatchQueue(label: "Still.clipboard-save", qos: .utility)
+    private func save() { let items = items, url = indexURL; Self.saving.async { if let data = try? JSONEncoder().encode(items) { try? data.write(to: url, options: .atomic) } } }
 
     /// Builds menu items for the history: the newest `menuCount` (the first ten get 1–9 and 0 as keys), then an
     /// Older submenu with the rest, so a long history keeps the menu short without losing anything.

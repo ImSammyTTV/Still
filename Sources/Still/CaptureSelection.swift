@@ -65,6 +65,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
     private var images: [ObjectIdentifier: CGImage] = [:]
     private var views: [SelectionSurface] = []
     private var active = false
+    var isActive: Bool { active }
     private var keyboardMonitor: Any?
     private var captureTask: Task<Void, Never>?
     private var holdingSpace = false
@@ -120,6 +121,15 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
             showBar()
             NSApp.activate(ignoringOtherApps: true)
             if let key = panels.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? panels.first { key.makeKeyAndOrderFront(nil); key.makeFirstResponder(key.contentView) }
+        }
+        // The grab waits on macOS. If it never answers (it can stall after waking from sleep), give up instead of
+        // leaving Still busy with no overlay, where every shortcut seems to do nothing.
+        let started = captureTask
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, self.active, self.panels.isEmpty, self.captureTask == started else { return }
+            self.captureTask?.cancel(); self.close()
+            self.onError?(NSError(domain: "Still", code: 3, userInfo: [NSLocalizedDescriptionKey: "macOS didn’t hand over the screen in time. Try again; if it keeps happening, restart your Mac."]))
         }
     }
     /// Builds the overlay's views once, unseen, so the first capture after launch doesn't pay for loading them.
@@ -296,6 +306,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     /// window, in this view's coordinates.
     private var partDepth = 0, lastPartStep: TimeInterval = 0
     private var windowParts: [CGWindowID: [CGRect]] = [:]
+    private var findingParts: Set<CGWindowID> = []
     private var spaceHeld = false
     private let root = CALayer()
     private let frozen = CALayer()
@@ -400,12 +411,25 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
     /// picture. Found once per window, when first needed.
     private func parts(of window: OverlayWindow) -> [CGRect] {
         if let known = windowParts[window.id] { return known }
-        let frame = local(window.frame)
-        var found = WindowPartsFinder.accessibility(pid: window.pid, frame: window.frame).map { local($0) }
-        if found.isEmpty, let snapshot { found = WindowPartsFinder.picture(snapshot, region: frame.intersection(bounds), viewSize: bounds.size) }
-        let useful = WindowParts.useful(found, in: frame)
-        windowParts[window.id] = useful
-        return useful
+        guard !findingParts.contains(window.id) else { return [] }
+        findingParts.insert(window.id)
+        // Another app can take seconds to answer for its accessibility tree (a browser builds it on the first ask),
+        // so the parts are found in the background and the highlight updates when they arrive. Until then the whole
+        // window is highlighted, and the pointer never waits.
+        let frame = local(window.frame), region = frame.intersection(bounds), viewSize = bounds.size, picture = snapshot
+        let id = window.id, pid = window.pid, global = window.frame
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let fromTree = WindowPartsFinder.accessibility(pid: pid, frame: global)
+            let fromPicture = fromTree.isEmpty ? (picture.map { WindowPartsFinder.picture($0, region: region, viewSize: viewSize) } ?? []) : []
+            await MainActor.run {
+                guard let self else { return }
+                self.findingParts.remove(id)
+                let found = fromTree.isEmpty ? fromPicture : fromTree.map { self.local($0) }
+                self.windowParts[id] = WindowParts.useful(found, in: frame)
+                self.refresh()
+            }
+        }
+        return []
     }
     private func selectedPart() -> (rect: CGRect, depth: Int, deepest: Int)? {
         guard let hovered else { return nil }

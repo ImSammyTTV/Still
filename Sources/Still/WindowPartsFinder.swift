@@ -15,9 +15,12 @@ enum WindowPartsFinder {
         AXUIElementSetMessagingTimeout(app, 0.25)
         guard let windows = value(app, kAXWindowsAttribute) as? [AXUIElement],
               let window = windows.first(where: { rect(of: $0).map { abs($0.minX - frame.minX) < 4 && abs($0.minY - frame.minY) < 4 && abs($0.width - frame.width) < 4 } ?? false }) else { return [] }
+        // Runs off the main thread, but still give up after a moment so a slow app doesn't keep the highlight waiting.
+        let deadline = Date().addingTimeInterval(1.5)
         var found: [CGRect] = [], queue: [(AXUIElement, Int)] = [(window, 0)], visited = 0
-        while !queue.isEmpty, visited < 400 {
+        while !queue.isEmpty, visited < 400, Date() < deadline {
             let (element, depth) = queue.removeFirst(); visited += 1
+            AXUIElementSetMessagingTimeout(element, 0.25)
             if depth > 0, let role = value(element, kAXRoleAttribute) as? String, roles.contains(role), let r = rect(of: element) { found.append(r) }
             if depth < 14, let children = value(element, kAXChildrenAttribute) as? [AXUIElement] { queue.append(contentsOf: children.map { ($0, depth + 1) }) }
         }
