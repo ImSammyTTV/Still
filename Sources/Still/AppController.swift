@@ -214,6 +214,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         for model in videoModels.values { model.close() }
         captureProcess?.interrupt()
         selection.close(); scrolling.cancel(); DesktopCover.shared.reset()
+        // History's index is written in the background; let the last write land before quitting.
+        library.finishWriting()
         return .terminateNow
     }
     private func setupMenu() {

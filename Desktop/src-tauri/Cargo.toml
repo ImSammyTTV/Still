@@ -1,6 +1,6 @@
 [package]
 name = "still"
-version = "1.2.56"
+version = "1.2.57"
 description = "Capture, annotate and record your screen"
 authors = ["ImSammyTTV"]
 edition = "2021"
@@ -63,6 +63,8 @@ opt-level = 3
 opt-level = 3
 
 [target.'cfg(windows)'.dependencies]
+# Copying a picture: the clipboard is held only while the prepared data is handed over (see copy_image).
+clipboard-win = "=5.4.3"
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_UI_Shell"] }
 # Still's own screen recorder (src/record.rs). The same version tao and wry already use, so no second copy is built.
 windows = { version = "=0.62.2", features = ["Foundation", "Graphics", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11",

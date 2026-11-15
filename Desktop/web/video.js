@@ -171,6 +171,16 @@ async function recordingLevels() {
   const context = new (window.AudioContext || window.webkitAudioContext)();
   let sound;
   try { sound = await context.decodeAudioData(data); } finally { context.close(); }
+  const channels = Array.from({ length: sound.numberOfChannels }, (_, c) => sound.getChannelData(c).slice());
+  const fromWorker = await new Promise((done) => {
+    let worker;
+    try { worker = new Worker('levels-worker.js'); } catch { return done(null); }
+    worker.onmessage = ({ data }) => { worker.terminate(); done(data); };
+    worker.onerror = () => { worker.terminate(); done(null); };
+    worker.postMessage({ channels, rate: sound.sampleRate }, channels.map((c) => c.buffer));
+  });
+  if (fromWorker) return (levelsCache = fromWorker);
+  // Without a worker, the same work on the page.
   const mono = new Float32Array(sound.length);
   for (let c = 0; c < sound.numberOfChannels; c++) { const channel = sound.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += channel[i] / sound.numberOfChannels; }
   return (levelsCache = StillTrim.levelsOf(mono, sound.sampleRate));
@@ -246,8 +256,10 @@ function dragHandle(handle, current, apply) {
     down.preventDefault(); down.stopPropagation(); handle.focus(); handle.setPointerCapture(down.pointerId);
     pause();
     const origin = current(), width = $('#bar').clientWidth;
-    const move = (e) => apply(origin + (e.clientX - down.clientX) / width * duration);
-    const up = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up); };
+    // Applied at most once a frame: each step re-lays out the timeline and seeks the video.
+    let latest = null, frame = 0;
+    const move = (e) => { latest = e; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(origin + (latest.clientX - down.clientX) / width * duration); }); };
+    const up = () => { if (frame) { cancelAnimationFrame(frame); frame = 0; if (latest) apply(origin + (latest.clientX - down.clientX) / width * duration); } handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up); };
     handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
   });
   handle.addEventListener('keydown', (e) => {
@@ -261,15 +273,19 @@ dragHandle($('#handleOut'), () => trim.end, setEnd);
 
 $('#bar').addEventListener('pointerdown', (down) => {
   if (!duration) return;
-  const bar = $('#bar'), scrub = (e) => jump(StillTrim.timeAt(e.clientX - bar.getBoundingClientRect().left, bar.clientWidth, duration));
-  bar.setPointerCapture(down.pointerId); scrub(down);
-  const up = () => { bar.removeEventListener('pointermove', scrub); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up); };
+  const bar = $('#bar'), seekTo = (e) => jump(StillTrim.timeAt(e.clientX - bar.getBoundingClientRect().left, bar.clientWidth, duration));
+  // One seek per frame while scrubbing, the last position always applied.
+  let latest = null, frame = 0;
+  const scrub = (e) => { latest = e; if (!frame) frame = requestAnimationFrame(() => { frame = 0; seekTo(latest); }); };
+  bar.setPointerCapture(down.pointerId); seekTo(down);
+  const up = () => { if (frame) { cancelAnimationFrame(frame); frame = 0; seekTo(latest); } bar.removeEventListener('pointermove', scrub); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up); };
   bar.addEventListener('pointermove', scrub); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
 });
 
 // ---- Background ---------------------------------------------------------------------------------
 
 // The preview is laid out by hand so it shows exactly the frame an export will have.
+let shownBackground = null;
 function layoutPreview() {
   const stage = $('#stage'), vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return;
@@ -277,7 +293,10 @@ function layoutPreview() {
   const frame = $('#frame');
   Object.assign(frame.style, { width: `${F.w * s}px`, height: `${F.h * s}px`, left: `${(stage.clientWidth - F.w * s) / 2}px`, top: `${(stage.clientHeight - F.h * s) / 2}px` });
   const [a, b] = StillBackdrop.GRADIENTS[bg.style] || [];
-  frame.style.background = !hasBg() ? 'none' : bg.style === 'custom' ? `center / cover no-repeat url("${bg.custom}")` : `linear-gradient(135deg, ${a}, ${b})`;
+  // Set only when it changes: a custom picture's address is the whole picture, and handing it to the page again on
+  // every step of the padding slider made the page read it all again each time.
+  const background = !hasBg() ? 'none' : bg.style === 'custom' ? `center / cover no-repeat url("${bg.custom}")` : `linear-gradient(135deg, ${a}, ${b})`;
+  if (background !== shownBackground) { frame.style.background = background; shownBackground = background; }
   Object.assign($('#clip').style, { left: `${F.x * s}px`, top: `${F.y * s}px`, width: `${vw * s}px`, height: `${vh * s}px`, borderRadius: `${F.radius * s}px`,
     boxShadow: hasBg() && bg.shadow ? `0 ${Math.max(6, vw / 120) * s}px ${Math.max(20, vw / 30) * s}px rgba(0,0,0,.35)` : 'none' });
   const fx = $('#fx'); fx.width = Math.round(vw * s * devicePixelRatio); fx.height = Math.round(vh * s * devicePixelRatio);

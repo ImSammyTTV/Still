@@ -7,6 +7,8 @@ import StillCore
 /// picture, which `VideoGeometry` finds inside the frame through padding and zoom.
 struct PreviewHandles: View {
     @ObservedObject var model: VideoEditorModel
+    /// The handles show what's on screen at the playhead, so they follow it; the rest of the editor doesn't have to.
+    @ObservedObject var clock: PlayheadClock
 
     var body: some View {
         GeometryReader { geo in
@@ -229,8 +231,9 @@ struct BlurLane: View {
                 if first == nil { first = blur }
                 let base = first ?? blur, edge = start ? base.start : base.end
                 let moved = base.retimed(start: start, to: edge+Double(v.translation.width/max(1, width))*total, clipStart: model.settings.start, clipEnd: model.settings.end)
-                DispatchQueue.main.async { model.liveEdit(); model.updateBlur(moved.id) { $0.start = moved.start; $0.end = moved.end }; model.seek(start ? moved.start : moved.end) }
-            })
+                // A quick seek follows the drag; the exact frame comes when it's let go.
+                DispatchQueue.main.async { model.liveEdit(); model.updateBlur(moved.id) { $0.start = moved.start; $0.end = moved.end }; model.seek(start ? moved.start : moved.end, exact: false) }
+            }.onEnded { _ in DispatchQueue.main.async { model.seek(model.playhead) } })
             .accessibilityLabel(start ? "Blur start" : "Blur end")
     }
 }

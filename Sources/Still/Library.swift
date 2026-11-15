@@ -81,9 +81,23 @@ final class Library: ObservableObject {
         items.filter { (page != "recordings" || $0.isVideo) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)) }
     }
     func url(_ item: CaptureItem) -> URL { root.appendingPathComponent(item.filename) }
+    /// History's index is written on its own queue, in order, so a capture, a rename or a star never waits for the
+    /// disk. The newest write always lands last.
+    private static let indexQueue = DispatchQueue(label: "Still history index", qos: .utility)
+    /// Copying, saving and trashing capture files, one at a time and off the main thread.
+    private static let fileQueue = DispatchQueue(label: "Still capture files", qos: .userInitiated)
     func persist() throws {
-        try JSONEncoder().encode(items).write(to: root.appendingPathComponent("index.json"), options: .atomic)
+        let data = try JSONEncoder().encode(items), file = root.appendingPathComponent("index.json")
+        Self.indexQueue.async { [weak self] in
+            do { try data.write(to: file, options: .atomic) }
+            catch {
+                let text = error.localizedDescription
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.toast("Couldn’t save capture history: \(text)") } }
+            }
+        }
     }
+    /// Waits for history's index to reach the disk, for quitting.
+    func finishWriting() { Self.indexQueue.sync {} }
     @discardableResult
     func add(file: URL, title: String, video: Bool = false) throws -> CaptureItem {
         pruneHistory()
@@ -151,10 +165,42 @@ final class Library: ObservableObject {
         guard let saved = items.first(where: { $0.id == item.id }), let name = saved.projectFilename, !name.contains("/") else { return nil }
         return try? ProjectDocument.read(root.appendingPathComponent(name))
     }
+    private var pruning = false
+    /// Moves captures older than Settings keeps to the Trash. It runs before each new capture is stored, so the files
+    /// go to the Trash off the main thread and the index is saved once for all of them, not once per capture.
     func pruneHistory() {
         let days = Preferences.shared.retentionDays
-        guard days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
-        for item in items where item.date < cutoff && !item.isStarred { delete(item) }
+        guard !pruning, days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
+        let expired = items.filter { $0.date < cutoff && !$0.isStarred }
+        guard !expired.isEmpty else { return }
+        pruning = true
+        let folder = root
+        let jobs = expired.map { item in
+            (id: item.id, file: url(item), metadata: recordingMetadataURL(item),
+             sidecars: [item.projectFilename, item.metadataFilename, item.sourceVideoFilename, "\(item.id).videoedit.json"].compactMap { $0 })
+        }
+        Self.fileQueue.async { [weak self] in
+            var trashed: [UUID] = []
+            for job in jobs {
+                // Only a capture whose own file went to the Trash leaves the history, as when deleting one by hand.
+                guard (try? FileManager.default.trashItem(at: job.file, resultingItemURL: nil)) != nil else { continue }
+                trashed.append(job.id)
+                let camera = job.metadata == nil ? nil : Library.readRecordingMetadata(job.metadata).cameraFilename
+                for name in Set(job.sidecars + [camera].compactMap { $0 }) where !name.contains("/") && name != "." && name != ".." {
+                    let file = folder.appendingPathComponent(name)
+                    if FileManager.default.fileExists(atPath: file.path) { try? FileManager.default.trashItem(at: file, resultingItemURL: nil) }
+                }
+            }
+            let gone = Set(trashed)
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                guard let self else { return }
+                self.pruning = false
+                guard !gone.isEmpty else { return }
+                self.items.removeAll { gone.contains($0.id) }
+                for id in gone { self.forgetThumbnail(id) }
+                do { try self.persist() } catch { self.toast("Couldn’t save capture history: \(error.localizedDescription)") }
+            } }
+        }
     }
     func delete(_ item: CaptureItem) {
         do {
@@ -232,7 +278,15 @@ final class Library: ObservableObject {
     }
     func copy(_ item: CaptureItem) {
         if item.isVideo { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([url(item) as NSURL]); toast("Copied recording file") }
-        else if let image = ImageRenderer.load(url(item)) { copy(image) }
+        else if let png = pngData(item) { copy(png: png) }
+    }
+    /// A screenshot's PNG as it is on disk. Captures are stored as PNG already, so the file's own bytes go to the
+    /// clipboard; decoding and encoding it again took a noticeable moment on a big screenshot.
+    func pngData(_ item: CaptureItem) -> Data? {
+        let file = url(item)
+        if file.pathExtension.lowercased() == "png", let data = try? Data(contentsOf: file), data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return data }
+        guard let image = ImageRenderer.load(file) else { return nil }
+        return try? ImageRenderer.data(image)
     }
     /// Fingerprints already worked out, with the file's modification date, so a second Find Similar is instant.
     private var fingerprints: [UUID: (Date, UInt64)] = [:]
@@ -306,7 +360,7 @@ final class Library: ObservableObject {
     /// Send to Claude: copies the screenshot and opens Claude (the desktop app when it's installed, otherwise
     /// claude.ai), ready to paste into a chat. Nothing is sent until it's pasted there.
     @MainActor func sendToClaude(_ item: CaptureItem) {
-        guard let image = ImageRenderer.load(url(item)), let data = try? ImageRenderer.data(image) else { toast("Couldn’t read this screenshot"); return }
+        guard let data = pngData(item) else { toast("Couldn’t read this screenshot"); return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setData(data, forType: .png)
         if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") {
             NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
@@ -319,7 +373,7 @@ final class Library: ObservableObject {
     /// Search the Web for This Image: copies the picture and opens an image search page, where pasting it starts the
     /// search. Nothing is uploaded until it's pasted there.
     func searchWeb(_ item: CaptureItem) {
-        guard let image = ImageRenderer.load(url(item)), let data = try? ImageRenderer.data(image) else { toast("Couldn’t read this screenshot"); return }
+        guard let data = pngData(item) else { toast("Couldn’t read this screenshot"); return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setData(data, forType: .png)
         if let page = URL(string: "https://images.google.com/") { NSWorkspace.shared.open(page) }
         toast("Image copied. Paste it on the search page (⌘V) to search.")
@@ -353,28 +407,56 @@ final class Library: ObservableObject {
     }
     /// Where saves go unless you choose a folder: Documents/Still, created when first needed.
     static var defaultExportFolder: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Still", isDirectory: true) }
+    /// Save (and Save after capture): runs off the main thread, one save at a time so two never pick the same name.
+    /// A PNG save copies the stored file, which is a PNG already; other formats are encoded there too.
     func quickSave(_ item: CaptureItem) {
         let folder = exportFolder.isEmpty ? Self.defaultExportFolder : URL(fileURLWithPath: exportFolder)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let format = item.isVideo ? URL(fileURLWithPath: item.filename).pathExtension : Preferences.shared.exportFormat
         let cleaned = item.title.components(separatedBy: CharacterSet(charactersIn: "/:\0\n\r")).joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines)
         let name = cleaned.isEmpty || cleaned == "." || cleaned == ".." ? "Capture" : String(cleaned.prefix(180))
-        var destination = folder.appendingPathComponent("\(name).\(format)")
-        var index = 2
-        while FileManager.default.fileExists(atPath: destination.path) { destination = folder.appendingPathComponent("\(name) (\(index)).\(format)"); index += 1 }
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            if item.isVideo { try FileManager.default.copyItem(at: url(item), to: destination) }
-            else if let image = ImageRenderer.load(url(item)) { try ImageRenderer.data(image, format: format).write(to: destination, options: .atomic) }
-            toast("Saved \(destination.lastPathComponent)")
-        } catch { toast("Couldn’t save: \(error.localizedDescription)") }
+        let source = url(item), copyAsIs = item.isVideo || (format.lowercased() == "png" && source.pathExtension.lowercased() == "png")
+        Self.fileQueue.async { [weak self] in
+            let result: Result<String, Error> = Result {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                var destination = folder.appendingPathComponent("\(name).\(format)")
+                var index = 2
+                while FileManager.default.fileExists(atPath: destination.path) { destination = folder.appendingPathComponent("\(name) (\(index)).\(format)"); index += 1 }
+                if copyAsIs { try FileManager.default.copyItem(at: source, to: destination) }
+                else {
+                    guard let image = ImageRenderer.load(source) else { throw RenderError.encoding }
+                    try ImageRenderer.data(image, format: format).write(to: destination, options: .atomic)
+                }
+                return destination.lastPathComponent
+            }
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                switch result {
+                case .success(let saved): self?.toast("Saved \(saved)")
+                case .failure(let error): self?.toast("Couldn’t save: \(error.localizedDescription)")
+                }
+            } }
+        }
     }
     func updateText(_ item: CaptureItem, text: String) {
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].recognizedText = text; do { try persist() } catch { toast(error.localizedDescription) } }
     }
-    func recordingMetadata(_ item: CaptureItem) -> RecordingMetadata {
-        guard let saved = items.first(where: { $0.id == item.id }), let name = saved.metadataFilename, !name.contains("/"), let data = try? Data(contentsOf: root.appendingPathComponent(name)), let metadata = try? JSONDecoder().decode(RecordingMetadata.self, from: data) else { return RecordingMetadata() }
+    func recordingMetadata(_ item: CaptureItem) -> RecordingMetadata { Self.readRecordingMetadata(recordingMetadataURL(item)) }
+    /// Where a recording's details are kept, if it has any.
+    func recordingMetadataURL(_ item: CaptureItem) -> URL? {
+        guard let saved = items.first(where: { $0.id == item.id }), let name = saved.metadataFilename, !name.contains("/") else { return nil }
+        return root.appendingPathComponent(name)
+    }
+    /// Reads a recording's details. A long recording's pointer track is megabytes of JSON, so the video editor calls
+    /// this off the main thread.
+    nonisolated static func readRecordingMetadata(_ url: URL?) -> RecordingMetadata {
+        guard let url, let data = try? Data(contentsOf: url), let metadata = try? JSONDecoder().decode(RecordingMetadata.self, from: data) else { return RecordingMetadata() }
         return metadata
+    }
+    /// Saves a recording's details (a new transcript, say), encoding and writing them off the main thread.
+    func saveRecordingMetadata(_ item: CaptureItem, metadata: RecordingMetadata) async throws {
+        guard items.contains(where: { $0.id == item.id }) else { return }
+        let name = "\(item.id).recording.json", file = root.appendingPathComponent(name)
+        try await Task.detached(priority: .userInitiated) { try JSONEncoder().encode(metadata).write(to: file, options: .atomic) }.value
+        if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].metadataFilename = name; try persist() }
     }
     func saveRecordingMetadata(_ item: CaptureItem, metadata: RecordingMetadata, camera: URL?) throws {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }

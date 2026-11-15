@@ -226,10 +226,11 @@ struct SaveForSizeSheet: View {
     @AppStorage("sizeLimitOn") private var limitOn = true
     @AppStorage("sizeLimitKB") private var limitKB = "500"
     @AppStorage("sizeJPEG") private var jpeg = true
-    /// The finished picture's size (with any background and padding), worked out once when the sheet opens.
-    @State private var picture: (Int, Int)?
     var body: some View {
-        let full = picture ?? (model.source.width, model.source.height)
+        // The finished picture's size, with any background and padding: the canvas the picture is drawn on, so it's
+        // known without drawing it at full size (the watermark never changes the size).
+        let canvas = model.canvasLayout.size
+        let full = (Int(canvas.width), Int(canvas.height))
         let plan = ExportSize.plan(width: full.0, height: full.1, square: square, width: Int(width) ?? 0)
         VStack(alignment: .leading, spacing: 16) {
             Text("Save for Size").font(.headline)
@@ -251,19 +252,36 @@ struct SaveForSizeSheet: View {
                     .keyboardShortcut(.defaultAction).disabled(model.makingSize || (limitOn && (Int(limitKB) ?? 0) < 1))
             }
         }.padding(25).frame(width: 440)
-        .onAppear { if let image = try? model.flattened(watermarked: false) { picture = (image.width, image.height) } }
     }
 }
 struct BackgroundEditor: View {
     @ObservedObject var model: EditorModel
     @State private var presetName = ""
     @State private var presets: [String: Data] = UserDefaults.standard.dictionary(forKey: "backgroundPresets") as? [String: Data] ?? [:]
+    /// The preview is drawn off the main thread and shown when it's ready, so dragging a slider stays smooth.
+    @State private var preview: CGImage?
+    /// Everything the preview is drawn from; a change draws it again.
+    private struct PreviewKey: Equatable {
+        var source: ObjectIdentifier; var marks: Int; var frame: FrameStyle; var padding: Double; var radius: Double; var shadow: Double
+        var aspect: Double?; var background: Int; var x: Double; var y: Double; var watermark: Bool
+    }
+    private var previewKey: PreviewKey {
+        PreviewKey(source: ObjectIdentifier(model.source), marks: model.marks.count, frame: model.frame, padding: model.padding, radius: model.cornerRadius, shadow: model.shadow, aspect: model.aspectRatio, background: model.backgroundVersion, x: model.alignmentX, y: model.alignmentY, watermark: model.watermarkOn)
+    }
     var body: some View {
         HStack(spacing: 0) {
             VStack {
-                if let image = try? model.flattenedPreview() { Image(decorative: image, scale: 1).resizable().scaledToFit().shadow(radius: 8).padding(28) }
+                if let preview { Image(decorative: preview, scale: 1).resizable().scaledToFit().shadow(radius: 8).padding(28) }
+                else { ProgressView().controlSize(.small).frame(maxHeight: .infinity) }
                 Text("Background").font(.headline).padding(.bottom, 20)
             }.frame(width: 390, height: 510).background(Studio.paper)
+            .task(id: previewKey) {
+                // A short wait gathers a slider's ticks into one drawing; the first drawing doesn't wait.
+                if preview != nil { try? await Task.sleep(nanoseconds: 40_000_000) }
+                guard !Task.isCancelled else { return }
+                let image = await model.backgroundPreview()
+                if !Task.isCancelled, let image { preview = image }
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack { Text("Background").font(.headline); Spacer(); Button("Done") { model.activeSheet = nil }.keyboardShortcut(.defaultAction) }
@@ -290,7 +308,8 @@ struct BackgroundEditor: View {
             }.frame(width: 310, height: 510)
         }
     }
-    private func setting(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View { VStack { HStack { Text(title); Spacer(); Text("\(Int(value.wrappedValue)) px").foregroundStyle(.secondary) }; Slider(value: value, in: range, step: 1) } }
+    /// A slider whose whole drag is one undo step.
+    private func setting(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View { VStack { HStack { Text(title); Spacer(); Text("\(Int(value.wrappedValue)) px").foregroundStyle(.secondary) }; Slider(value: value, in: range, step: 1, onEditingChanged: { model.sliderEditing($0) }) } }
 }
 struct BackgroundPreset: Codable { var frame: String; var padding: Double; var radius: Double; var shadow: Double; var aspect: Double?; var image: Data?; var x: Double?; var y: Double? }
 

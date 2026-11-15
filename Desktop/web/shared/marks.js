@@ -159,6 +159,7 @@
   const usedAssets = (doc) => {
     const used = new Set(doc.source ? [doc.source] : []);
     for (const m of doc.marks || []) if (m.type === 'image') used.add(m.asset);
+    if (doc.bg && doc.bg.custom && !String(doc.bg.custom).startsWith('data:')) used.add(doc.bg.custom);
     return used;
   };
 
@@ -174,7 +175,10 @@
 
   const openProject = (project, defaults) => {
     const { version, assets, ...saved } = project || {};
-    return { doc: { ...defaults, ...saved, bg: { ...defaults.bg, ...(saved.bg || {}) } }, assets: { ...(assets || {}) } };
+    const doc = { ...defaults, ...saved, bg: { ...defaults.bg, ...(saved.bg || {}) } }, kept = { ...(assets || {}) };
+    // Older projects kept a custom background picture inside the document; it becomes an asset like any other.
+    if (doc.bg.custom && String(doc.bg.custom).startsWith('data:')) doc.bg.custom = addAsset(kept, doc.bg.custom);
+    return { doc, assets: kept };
   };
 
   // A Measure mark's label: the distance between its ends in the picture's pixels, with the width and height

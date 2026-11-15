@@ -4,6 +4,22 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.57 — 2026-11-15
+
+More smoothness: the rest of the places where Still could freeze or stutter.
+
+- **Smoother video editor** (Mac, Windows, Linux). Playing, scrubbing and dragging the trim handles no longer make the
+  whole editor stutter, and a trim drag is one step to undo. Long recordings open without a pause.
+- **Tighten Pauses, Speed Up Waits and music** (Mac, Windows, Linux) listen to the recording without freezing the
+  editor or using a lot of memory.
+- **Smoother image editor** (Mac, Windows, Linux). Moving the Background sliders and drawing over large screenshots no
+  longer lags, and one slider drag is one step to undo. A custom background picture no longer slows down saving and
+  undo.
+- **Copying and saving are quicker** (Mac, Windows, Linux). On Windows, copying a picture no longer keeps other apps
+  waiting for the clipboard.
+- **Finishing a recording is quicker** (Windows, Linux), even for long ones.
+- **History cleanup happens in the background** (Mac) when you keep captures for a set number of days.
+
 ## v1.2.56 — 2026-11-14
 
 - **The timer now waits for you to choose** (Mac, Windows, Linux). Click Timer on the Capture Bar (or press T): it

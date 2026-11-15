@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editor-save-raw"
+description = "Enables the editor_save_raw command without any pre-configured scope."
+commands.allow = ["editor_save_raw"]
+
+[[permission]]
+identifier = "deny-editor-save-raw"
+description = "Denies the editor_save_raw command without any pre-configured scope."
+commands.deny = ["editor_save_raw"]

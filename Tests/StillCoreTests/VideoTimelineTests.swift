@@ -170,6 +170,27 @@ final class VideoTimelineTests: XCTestCase {
         XCTAssertEqual(AudioPauses.levels([1, -1, 1, -1, 0, 0, 0, 0], rate: 40, step: 0.1).map { $0.rounded() }, [0, -120])
     }
 
+    /// Reading the sound in pieces of any size gives the same levels as reading it all at once, last short window included.
+    func testLoudnessLevelsReadInPiecesMatchReadingAllAtOnce() {
+        let samples: [Float] = (0..<2_503).map { i in Float(sin(Double(i) * 0.37)) * Float(i % 700) / 700 }
+        // Worked out the plain way: every window's samples together, then its RMS in decibels.
+        let size = 800
+        let expected: [Double] = stride(from: 0, to: samples.count, by: size).map { at in
+            let window = samples[at..<min(samples.count, at + size)]
+            let rms = (window.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(window.count)).squareRoot()
+            return rms > 0 ? 20 * log10(rms) : -120
+        }
+        XCTAssertEqual(AudioPauses.levels(samples, rate: 16000), expected)
+        for piece in [1, 7, 333, 800, 1024, 5000] {
+            var meter = AudioLevelMeter(rate: 16000)
+            var at = 0
+            while at < samples.count { meter.add(Array(samples[at..<min(samples.count, at + piece)])); at += piece }
+            XCTAssertEqual(meter.finish(), expected, "pieces of \(piece)")
+        }
+        var empty = AudioLevelMeter(rate: 16000)
+        XCTAssertEqual(empty.finish(), [])
+    }
+
     /// The same cases as Desktop/test/blurs.test.js.
     func testBlursStartInTheMiddleAndStayInsideThePicture() {
         let b = VideoBlur.new(at: 2, start: 0, end: 4)

@@ -173,6 +173,29 @@ pub fn jpeg(image: &RgbaImage, quality: u8) -> Vec<u8> {
     out
 }
 
+/// The picture as a Windows clipboard bitmap (CF_DIBV5): a 124-byte BITMAPV5HEADER, then BGRA rows from the bottom
+/// up (some apps can't paste a top-down bitmap), with an alpha mask so transparency survives.
+pub fn dibv5(image: &RgbaImage) -> Vec<u8> {
+    let (w, h) = image.dimensions();
+    let mut out = Vec::with_capacity(124 + (w as usize) * (h as usize) * 4);
+    let u32le = |out: &mut Vec<u8>, v: u32| out.extend_from_slice(&v.to_le_bytes());
+    u32le(&mut out, 124); u32le(&mut out, w); u32le(&mut out, h);
+    out.extend_from_slice(&1u16.to_le_bytes()); out.extend_from_slice(&32u16.to_le_bytes());
+    u32le(&mut out, 3); // BI_BITFIELDS
+    u32le(&mut out, w * h * 4); u32le(&mut out, 0); u32le(&mut out, 0); u32le(&mut out, 0); u32le(&mut out, 0);
+    for mask in [0x00ff_0000u32, 0x0000_ff00, 0x0000_00ff, 0xff00_0000] { u32le(&mut out, mask); }
+    u32le(&mut out, 0x7352_4742); // LCS_sRGB
+    out.extend_from_slice(&[0u8; 36]); // endpoints, unused for sRGB
+    for _ in 0..3 { u32le(&mut out, 0); } // gamma
+    u32le(&mut out, 4); // LCS_GM_IMAGES
+    for _ in 0..3 { u32le(&mut out, 0); } // profile data, profile size, reserved
+    let row = w as usize * 4;
+    for y in (0..h as usize).rev() {
+        for px in image.as_raw()[y * row..(y + 1) * row].chunks_exact(4) { out.extend_from_slice(&[px[2], px[1], px[0], px[3]]); }
+    }
+    out
+}
+
 /// The width and height a PNG declares, read without decoding it. None if the bytes aren't a PNG.
 pub fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     if bytes.len() < 24 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") { return None; }
@@ -321,5 +344,25 @@ mod part_tests {
     fn clips_parts_to_the_window() {
         let parts = useful_parts(WIN, &[PartRect { x: -50.0, y: 100.0, w: 600.0, h: 400.0 }]);
         assert_eq!(parts, vec![PartRect { x: 0.0, y: 100.0, w: 550.0, h: 400.0 }]);
+    }
+}
+
+#[cfg(test)]
+mod dib_tests {
+    use super::*;
+    #[test]
+    fn clipboard_bitmap_has_a_v5_header_and_bottom_up_bgra_rows() {
+        let mut image = RgbaImage::new(2, 2);
+        image.put_pixel(0, 0, image::Rgba([10, 20, 30, 255])); // top left
+        image.put_pixel(1, 1, image::Rgba([1, 2, 3, 128])); // bottom right
+        let dib = dibv5(&image);
+        assert_eq!(dib.len(), 124 + 16);
+        assert_eq!(u32::from_le_bytes(dib[0..4].try_into().unwrap()), 124);
+        assert_eq!(u32::from_le_bytes(dib[4..8].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(dib[8..12].try_into().unwrap()), 2);
+        // Bottom row first: its right pixel is the bottom right one, as BGRA.
+        assert_eq!(&dib[124 + 4..124 + 8], &[3, 2, 1, 128]);
+        // The top row comes last.
+        assert_eq!(&dib[124 + 8..124 + 12], &[30, 20, 10, 255]);
     }
 }

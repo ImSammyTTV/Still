@@ -51,7 +51,13 @@ const displayScale = () => stage.getBoundingClientRect().width / stage.width || 
 
 // ---- Rendering ------------------------------------------------------------------------------
 
+// One small canvas reused by every pixelate mark, rather than a new one per mark per redraw.
+const pixelCanvas = document.createElement('canvas');
+// Mouse moves and slider steps redraw at most once per frame.
+let renderFrame = 0;
+function scheduleRender() { if (!renderFrame) renderFrame = requestAnimationFrame(() => { renderFrame = 0; render(); }); }
 function render(target = ctx, { handles = true } = {}) {
+  if (target === ctx && renderFrame) { cancelAnimationFrame(renderFrame); renderFrame = 0; }
   const L = layout();
   const c = target.canvas;
   if (c.width !== L.w || c.height !== L.h) { c.width = L.w; c.height = L.h; if (target === ctx) fitZoom(); }
@@ -171,12 +177,17 @@ function drawMark(t, m) {
     }
     case 'blur': {
       t.beginPath(); t.rect(r.x, r.y, r.w, r.h); t.clip();
-      t.filter = `blur(${Math.max(8, Math.min(r.w, r.h) / 10)}px)`; t.drawImage(image, 0, 0); break;
+      // Only the part around the box goes through the blur; blurring the whole picture for every blur mark on every
+      // redraw made dragging slow on large screenshots.
+      const amount = Math.max(8, Math.min(r.w, r.h) / 10), pad = amount * 3;
+      const sx = Math.max(0, Math.floor(r.x - pad)), sy = Math.max(0, Math.floor(r.y - pad));
+      const sw = Math.min(image.naturalWidth, Math.ceil(r.x + r.w + pad)) - sx, sh = Math.min(image.naturalHeight, Math.ceil(r.y + r.h + pad)) - sy;
+      t.filter = `blur(${amount}px)`; if (sw > 0 && sh > 0) t.drawImage(image, sx, sy, sw, sh, sx, sy, sw, sh); break;
     }
     case 'pixelate': {
       if (r.w < 2 || r.h < 2) break;
       const block = Math.max(8, Math.round(Math.min(r.w, r.h) / 12));
-      const small = document.createElement('canvas'); small.width = Math.max(1, Math.round(r.w / block)); small.height = Math.max(1, Math.round(r.h / block));
+      const small = pixelCanvas; small.width = Math.max(1, Math.round(r.w / block)); small.height = Math.max(1, Math.round(r.h / block));
       small.getContext('2d').drawImage(image, r.x, r.y, r.w, r.h, 0, 0, small.width, small.height);
       t.imageSmoothingEnabled = false; t.drawImage(small, r.x, r.y, r.w, r.h); break;
     }
@@ -345,7 +356,7 @@ addEventListener('mousemove', (e) => {
     }
     $('#cropBar').classList.add('show'); showCropNote();
   }
-  render();
+  scheduleRender();
 });
 
 addEventListener('mouseup', () => {
@@ -618,12 +629,14 @@ function listenForDrops() {
 $('#gradients').append(el('button', { title: 'None', 'data-bg': 'none', html: icon('ban', 14), style: 'background:var(--bg-elevated)' }),
   ...Object.entries(GRADIENTS).map(([name, [a, b]]) => el('button', { title: name[0].toUpperCase() + name.slice(1), 'data-bg': name, style: `background:linear-gradient(135deg, ${a}, ${b})` })));
 $('#gradients').addEventListener('click', (e) => { const b = e.target.closest('[data-bg]'); if (!b) return; doc.bg.style = b.dataset.bg; commit(); syncPanel(); render(); });
-for (const key of ['padding', 'radius']) $(`#${key}`).addEventListener('input', (e) => { doc.bg[key] = Number(e.target.value); syncPanel(); render(); });
+for (const key of ['padding', 'radius']) $(`#${key}`).addEventListener('input', (e) => { doc.bg[key] = Number(e.target.value); syncPanel(); scheduleRender(); });
 for (const key of ['padding', 'radius']) $(`#${key}`).addEventListener('change', commit);
 $('#shadow').onchange = (e) => { doc.bg.shadow = e.target.checked; commit(); render(); };
 $('#aspect').onchange = (e) => { doc.bg.aspect = Number(e.target.value); commit(); render(); };
 $('#balance').onchange = (e) => { doc.bg.balance = e.target.checked; if (e.target.checked) autoBalance(); commit(); syncPanel(); render(); };
-$('#customBg').onclick = async () => { const data = await still.invoke('editor:openImage'); if (!data) return; doc.bg.custom = data; doc.bg.style = 'custom'; await loadBgImage(); commit(); syncPanel(); render(); };
+// The picture is kept as an asset and the document only names it: a whole photo inside the document was copied into
+// every undo step, which ate memory and stalled the editor.
+$('#customBg').onclick = async () => { const data = await still.invoke('editor:openImage'); if (!data) return; doc.bg.custom = M.addAsset(assets, data); doc.bg.style = 'custom'; await loadBgImage(); commit(); syncPanel(); render(); };
 function syncPanel() {
   $$('#gradients button').forEach((b) => b.classList.toggle('active', b.dataset.bg === doc.bg.style));
   $('#padding').value = doc.bg.padding; $('#paddingValue').textContent = doc.bg.padding;
@@ -634,8 +647,9 @@ function syncPanel() {
 function autoBalance() { const b = base(); doc.bg.padding = Math.round(Math.min(160, Math.max(32, Math.min(b.w, b.h) * 0.08))); }
 async function loadBgImage() {
   if (!doc.bg.custom) { bgImage = null; return; }
-  if (bgImage && bgImage.src === doc.bg.custom) return;
-  bgImage = new Image(); bgImage.crossOrigin = 'anonymous'; bgImage.src = doc.bg.custom; await bgImage.decode().catch(() => {});
+  const src = assets[doc.bg.custom] || doc.bg.custom;
+  if (bgImage && bgImage.src === src) return;
+  bgImage = new Image(); bgImage.crossOrigin = 'anonymous'; bgImage.src = src; await bgImage.decode().catch(() => {});
 }
 
 // ---- Zoom ---------------------------------------------------------------------------------------
@@ -667,10 +681,16 @@ function flattened() {
 }
 const flatten = () => flattened().toDataURL('image/png');
 // The same picture, encoded in pieces rather than all at once: autosave happens while someone is still drawing.
-const flattenInBackground = () => new Promise((done, failed) => flattened().toBlob((blob) => {
-  if (!blob) return failed(new Error('The image is too large'));
+const flattenToBlob = () => new Promise((done, failed) => flattened().toBlob((blob) => blob ? done(blob) : failed(new Error('The image is too large')), 'image/png'));
+const flattenInBackground = () => flattenToBlob().then((blob) => new Promise((done, failed) => {
   const reader = new FileReader(); reader.onload = () => done(reader.result); reader.onerror = () => failed(reader.error); reader.readAsDataURL(blob);
-}, 'image/png'));
+}));
+// Autosave sends bytes: the project's JSON, then the PNG (see editor_save_raw).
+async function saveBytes(id, edits) {
+  const json = new TextEncoder().encode(edits), png = new Uint8Array(await (await flattenToBlob()).arrayBuffer());
+  const body = new Uint8Array(json.length + png.length); body.set(json); body.set(png, json.length);
+  return still.raw('editor_save_raw', body, { 'x-id': id, 'x-project-length': String(json.length) });
+}
 const project = () => M.projectFile(doc, assets);
 let captureGone = false, saving = Promise.resolve();
 // One save at a time, so a slower older save can never land on top of a newer one.
@@ -680,7 +700,7 @@ async function saveEdits() {
   dirty = false;
   // If saving fails, keep the edits marked unsaved and say so.
   // Encoding takes a moment and more edits can land meanwhile, so the project is copied now to match the picture.
-  try { const edits = JSON.parse(JSON.stringify(project())); await still.invoke('editor:save', itemId, await flattenInBackground(), edits); }
+  try { const edits = JSON.stringify(project()); await (still.raw ? saveBytes(itemId, edits) : still.invoke('editor:save', itemId, await flattenInBackground(), JSON.parse(edits))); }
   catch (e) {
     dirty = true;
     // The capture was deleted from History: stop autosaving rather than bring it back.
