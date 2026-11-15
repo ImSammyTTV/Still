@@ -164,3 +164,13 @@ test('a Measure mark is labelled with its length, and its sides when slanted', (
   assert.equal(M.measureLabel({ x1: 0, y1: 0, x2: 300, y2: 400 }), '500 px  (300 × 400)');
   assert.equal(M.measureLabel({ x1: 5, y1: 5, x2: 5, y2: 5 }), '0 px');
 });
+
+test('a custom background picture is an asset, and older projects that held it inline are converted', () => {
+  const M = require('../web/shared/marks.js');
+  const defaults = { marks: [], bg: { style: 'none', custom: null } };
+  const old = M.openProject({ version: 2, marks: [], bg: { style: 'custom', custom: 'data:image/png;base64,AAA' }, assets: {} }, defaults);
+  assert.equal(old.doc.bg.custom, 'a1');
+  assert.equal(old.assets.a1, 'data:image/png;base64,AAA');
+  assert.deepEqual(M.projectFile(old.doc, old.assets).assets, { a1: 'data:image/png;base64,AAA' });
+  assert.deepEqual(M.unusedAssets(old.assets, [JSON.stringify(old.doc)]), []);
+});

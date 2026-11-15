@@ -4454,6 +4454,7 @@ version = "1.2.56"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "clipboard-win",
  "drag",
  "image",
  "reqwest",

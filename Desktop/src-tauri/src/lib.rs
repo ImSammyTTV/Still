@@ -544,9 +544,22 @@ fn encode(app: &AppHandle, image: &RgbaImage) -> (Vec<u8>, &'static str) {
     if setting(app, "imageFormat").as_str() == Some("jpg") { (capture::jpeg(image, setting(app, "jpegQuality").as_u64().unwrap_or(90) as u8), "jpg") } else { (capture::png(image), "png") }
 }
 
+#[cfg(not(windows))]
 fn copy_image(app: &AppHandle, image: &RgbaImage) -> Result<(), String> {
     let (w, h) = image.dimensions();
     app.clipboard().write_image(&tauri::image::Image::new_owned(image.as_raw().clone(), w, h)).map_err(|e| e.to_string())
+}
+/// Windows: both forms of the picture (a PNG for apps that keep transparency, a bitmap for the rest) are made first,
+/// and the clipboard is only held open while they're handed over. Encoding with the clipboard open kept every other
+/// app (and Windows' own clipboard history) waiting.
+#[cfg(windows)]
+fn copy_image(_app: &AppHandle, image: &RgbaImage) -> Result<(), String> {
+    let png = capture::png(image);
+    let dib = capture::dibv5(image);
+    let _open = clipboard_win::Clipboard::new_attempts(10).map_err(|e| format!("The clipboard is busy: {e}"))?;
+    clipboard_win::raw::empty().map_err(|e| e.to_string())?;
+    if let Some(format) = clipboard_win::register_format("PNG") { let _ = clipboard_win::raw::set_without_clear(format.get(), &png); }
+    clipboard_win::raw::set_without_clear(17 /* CF_DIBV5 */, &dib).map_err(|e| e.to_string())
 }
 
 fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
@@ -1602,6 +1615,21 @@ fn start_drag(app: &AppHandle, window: tauri::Window, file: PathBuf) {
 async fn editor_save(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> { blocking(move || editor_save_now(app, id, data_url, project)).await }
 fn editor_save_now(app: AppHandle, id: String, data_url: String, project: Value) -> Result<String, String> {
     let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+    editor_save_bytes(app, id, bytes, project)
+}
+/// The editor's autosave, sent as bytes: the project's JSON (its length in `x-project-length`) followed by the PNG.
+/// As text, the picture was a third bigger and had to be read and unpicked on the thread every window shares.
+#[tauri::command]
+async fn editor_save_raw(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else { return Err("Expected the picture".into()) };
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let id = header("x-id").unwrap_or_default();
+    let split = header("x-project-length").and_then(|v| v.parse::<usize>().ok()).filter(|n| *n <= body.len()).ok_or("Bad save")?;
+    let project: Value = serde_json::from_slice(&body[..split]).map_err(|e| e.to_string())?;
+    let bytes = body[split..].to_vec();
+    blocking(move || editor_save_bytes(app, id, bytes, project)).await
+}
+fn editor_save_bytes(app: AppHandle, id: String, bytes: Vec<u8>, project: Value) -> Result<String, String> {
     // The page's PNG is already lossless, so unless JPEG is wanted it can go straight to disk.
     let (encoded, ext, (w, h)) = match capture::png_size(&bytes).filter(|_| setting(&app, "imageFormat").as_str() != Some("jpg")) {
         Some(size) => (bytes, "png", size),
@@ -1678,7 +1706,13 @@ fn editor_open_image_now(app: AppHandle) -> Option<String> {
     use base64::Engine;
     let path = app.dialog().file().add_filter("Images", &["png", "jpg", "jpeg"]).blocking_pick_file()?.into_path().ok()?;
     let image = capture::decode(&std::fs::read(path).ok()?)?;
-    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(capture::png(&image))))
+    // A background is drawn to cover the frame, so it never needs to be bigger than a 4K picture, and a photo is far
+    // smaller as JPEG. Kept small, it doesn't weigh down saving and undo in the editor.
+    let image = if image.width().max(image.height()) > 3840 {
+        let k = 3840.0 / image.width().max(image.height()) as f64;
+        image::imageops::resize(&image, ((image.width() as f64 * k).round() as u32).max(1), ((image.height() as f64 * k).round() as u32).max(1), image::imageops::FilterType::Triangle)
+    } else { image };
+    Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(capture::jpeg(&image, 90))))
 }
 
 fn pin_image(app: &AppHandle, image: &RgbaImage) {
@@ -1830,10 +1864,9 @@ fn finish_native(app: &AppHandle) -> Result<(), String> {
     let Some(recorder) = st(app).session.lock().unwrap().recorder.take() else { return Ok(()) }; // Already finished.
     let finished = recorder.stop();
     let saved = finished.and_then(|f| {
-        let bytes = std::fs::read(&f.path).map_err(|e| format!("The recording’s file couldn’t be read: {e}"))?;
-        let _ = std::fs::remove_file(&f.path);
+        if std::fs::metadata(&f.path).map(|m| m.len()).unwrap_or(0) == 0 { let _ = std::fs::remove_file(&f.path); return Err("The recording’s file couldn’t be read.".into()); }
         eprintln!("[recording] {} frames, {} dropped, hardware encoder: {}", f.frames, f.dropped, f.hardware);
-        store_recording(app, &bytes, "mp4", f.duration)
+        store_recording(app, &f.path, "mp4", f.duration)
     });
     if let Err(e) = &saved { stop_recording_state(app); notify(app, "Recording couldn’t be saved", e); }
     saved
@@ -1877,36 +1910,34 @@ fn recording_save_now(app: AppHandle, ext: String, duration: f64) -> Result<(), 
     let part = recording_part(&app);
     // Still may already have ended and saved this recording itself (see request_stop); then there is nothing left to do.
     if st(&app).session.lock().unwrap().recording.is_none() { let _ = std::fs::remove_file(&part); return Ok(()); }
-    let bytes = std::fs::read(&part).map_err(|e| format!("The recording’s file couldn’t be read: {e}"))?;
-    let _ = std::fs::remove_file(&part);
-    if bytes.is_empty() { stop_recording_state(&app); return Err("No video was captured.".into()); }
-    store_recording(&app, &bytes, if ext == "mp4" { "mp4" } else { "webm" }, duration)
+    let size = std::fs::metadata(&part).map(|m| m.len()).map_err(|e| format!("The recording’s file couldn’t be read: {e}"))?;
+    if size == 0 { let _ = std::fs::remove_file(&part); stop_recording_state(&app); return Err("No video was captured.".into()); }
+    store_recording(&app, &part, if ext == "mp4" { "mp4" } else { "webm" }, duration)
 }
 /// Ends a recording whose controls can't finish it themselves, keeping whatever was already written.
 /// Returns true when a video was saved.
 fn salvage_recording(app: &AppHandle) -> bool {
     let (ext, began) = { let s = st(app).session.lock().unwrap(); (s.recording_ext.clone(), s.recording_began) };
     let part = recording_part(app);
-    let bytes = std::fs::read(&part).unwrap_or_default();
-    let _ = std::fs::remove_file(&part);
-    if bytes.is_empty() { stop_recording_state(app); return false; }
+    if std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0) == 0 { let _ = std::fs::remove_file(&part); stop_recording_state(app); return false; }
     let duration = began.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-    match store_recording(app, &bytes, if ext == "mp4" { "mp4" } else { "webm" }, duration) {
+    match store_recording(app, &part, if ext == "mp4" { "mp4" } else { "webm" }, duration) {
         Ok(()) => true,
         Err(e) => { notify(app, "Recording couldn’t be saved", &e); false }
     }
 }
 /// Puts a finished recording in the library and does what the After Recording settings ask.
-fn store_recording(app: &AppHandle, bytes: &[u8], ext: &str, duration: f64) -> Result<(), String> {
+/// The file is moved into the library (see Library::add_file); if that fails it's moved to the Desktop instead.
+fn store_recording(app: &AppHandle, file: &std::path::Path, ext: &str, duration: f64) -> Result<(), String> {
     let (trail, separate) = { let mut s = st(app).session.lock().unwrap(); (s.trail.take().map(marks::Trail::finish), std::mem::take(&mut s.cursor_separate)) };
     stop_recording_state(app);
-    let added = st(app).library.lock().unwrap().add(bytes, "recording", ext, None, 0, 0);
+    let added = st(app).library.lock().unwrap().add_file(file, "recording", ext, None, 0, 0);
     let item = match added {
         Ok(item) => item,
         Err(e) => {
             // Never lose a recording: if the library can't take it, put it where the user can find it.
             let rescue = unique_path(&app.path().desktop_dir().unwrap_or_else(|_| export_folder(app)), &library::capture_name("Still Recording"), ext);
-            return match std::fs::write(&rescue, bytes) {
+            return match std::fs::rename(file, &rescue).or_else(|_| std::fs::copy(file, &rescue).map(|_| { let _ = std::fs::remove_file(file); })) {
                 Ok(_) => { notify(app, "Recording saved to your Desktop", &format!("Still’s library couldn’t store it ({e}), so it was saved as {}.", rescue.display())); Ok(()) }
                 Err(e2) => { notify(app, "Your recording couldn’t be saved", &format!("{e}; {e2}")); Err(e2.to_string()) }
             };
@@ -2278,7 +2309,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, watermark_choose_image, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, video_export_copy, video_project_save, video_music_choose, video_image_save,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, editor_save_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
             scroll::scroll_stop, scroll::scroll_auto
         ])

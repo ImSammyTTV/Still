@@ -10,6 +10,7 @@
     "allow-library-get",
     "allow-settings-set",
     "allow-editor-save",
+    "allow-editor-save-raw",
     "allow-editor-copy",
     "allow-editor-export",
     "allow-editor-drag",

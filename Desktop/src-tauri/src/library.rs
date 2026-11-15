@@ -119,6 +119,26 @@ impl Library {
         self.prune(item.created);
         Ok(item)
     }
+    /// Like `add`, for a file already on disk (a recording): it's moved into the library rather than read into memory
+    /// and written again, which for a long recording meant gigabytes held at once.
+    pub fn add_file(&mut self, source: &Path, kind: &str, ext: &str, title: Option<String>, width: u32, height: u32) -> Result<Item, String> {
+        let item = Item {
+            id: uuid::Uuid::new_v4().to_string(), kind: kind.into(),
+            title: title.unwrap_or_else(|| self.default_title(kind, width, height)),
+            file_name: format!("capture.{ext}"), original_name: format!("original.{ext}"),
+            created: now_ms(), modified: None, width, height, text: String::new(), duration: 0.0, starred: false, description: String::new(),
+        };
+        let target = self.file(&item);
+        // A move is instant on the same drive; across drives it falls back to a copy, and the source stays until that worked.
+        let written = fs::create_dir_all(self.folder(&item))
+            .and_then(|_| fs::rename(source, &target).or_else(|_| fs::copy(source, &target).map(|_| ())));
+        if let Err(e) = written { let _ = fs::remove_dir_all(self.folder(&item)); return Err(e.to_string()); }
+        let _ = fs::remove_file(source);
+        self.items.insert(0, item.clone());
+        if let Err(e) = self.save() { self.items.remove(0); let _ = fs::rename(&target, source); let _ = fs::remove_dir_all(self.folder(&item)); return Err(e); }
+        self.prune(item.created);
+        Ok(item)
+    }
     /// Removes captures older than `keep_days` that aren't starred, and answers which went. Runs after every new
     /// capture, so History never holds more than the setting asks for.
     pub fn prune(&mut self, now: i64) -> Vec<String> {
@@ -189,6 +209,19 @@ fn rebuild(dir: &Path) -> Vec<Item> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_recording_file_is_moved_into_the_library() {
+        let dir = std::env::temp_dir().join(format!("still-lib-test-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("recording.part");
+        std::fs::write(&source, b"video bytes").unwrap();
+        let mut lib = super::Library::open(dir.join("library"));
+        let item = lib.add_file(&source, "recording", "mp4", None, 0, 0).unwrap();
+        assert!(!source.exists(), "the temporary file is gone");
+        assert_eq!(std::fs::read(lib.file(&item)).unwrap(), b"video bytes");
+        assert_eq!(lib.items[0].id, item.id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test]
     fn names_follow_the_file_name_pattern() {
         use chrono::TimeZone;
