@@ -251,13 +251,36 @@ public enum AudioPauses {
 
     /// Loudness in decibels for each `step` seconds of mono samples.
     public static func levels(_ samples: [Float], rate: Double, step: Double = 0.05) -> [Double] {
-        let size = max(1, Int((rate * step).rounded()))
-        return stride(from: 0, to: samples.count, by: size).map { at in
-            let end = min(samples.count, at + size)
-            let sum = samples[at..<end].reduce(0.0) { $0 + Double($1) * Double($1) }
-            let rms = (sum / Double(max(1, end - at))).squareRoot()
-            return rms > 0 ? 20 * log10(rms) : -120
+        var meter = AudioLevelMeter(rate: rate, step: step)
+        meter.add(samples)
+        return meter.finish()
+    }
+}
+
+/// Loudness worked out while the sound is read, one window at a time, so listening to an hour-long recording never
+/// holds all of its samples in memory. It gives exactly what `AudioPauses.levels` gives for the same samples, however
+/// they arrive in pieces.
+public struct AudioLevelMeter {
+    private let size: Int
+    private var sum = 0.0, count = 0
+    private var levels: [Double] = []
+    public init(rate: Double, step: Double = 0.05) { size = max(1, Int((rate * step).rounded())) }
+    public mutating func add(_ samples: UnsafeBufferPointer<Float>) {
+        for sample in samples {
+            sum += Double(sample) * Double(sample); count += 1
+            if count == size { close() }
         }
+    }
+    public mutating func add(_ samples: [Float]) { samples.withUnsafeBufferPointer { add($0) } }
+    /// The levels so far, with a last, shorter window for any samples left over.
+    public mutating func finish() -> [Double] {
+        if count > 0 { close() }
+        return levels
+    }
+    private mutating func close() {
+        let rms = (sum / Double(max(1, count))).squareRoot()
+        levels.append(rms > 0 ? 20 * log10(rms) : -120)
+        sum = 0; count = 0
     }
 }
 

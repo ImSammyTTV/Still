@@ -27,7 +27,8 @@ import StillCore
 struct AISettingsView: View {
     @ObservedObject private var prefs = Preferences.shared
     @State private var geminiKey = ""
-    @State private var geminiSaved = GeminiKey.value != nil
+    /// Read from Keychain when the page opens: as a starting value it was read again on every redraw of Settings.
+    @State private var geminiSaved = false
     @State private var geminiStatus = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -47,6 +48,7 @@ struct AISettingsView: View {
                     : "Gemini uses your own key, free from Google AI Studio. On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.")).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }.toggleStyle(PreferenceToggleStyle()).controlSize(.small)
+        .onAppear { geminiSaved = GeminiKey.value != nil }
     }
     private func saveGemini() {
         let key = geminiKey.trimmingCharacters(in: .whitespaces); geminiStatus = "Checking…"

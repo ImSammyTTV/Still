@@ -4,6 +4,21 @@ import AVKit
 import UniformTypeIdentifiers
 import StillCore
 
+/// The playhead, kept apart from the rest of the editor: it moves ten times a second while the video plays, and only
+/// the time, the scrubber, the line on the trim bar and the handles on the picture need to follow it. Kept on the
+/// editor itself, every tick redrew the whole inspector and trim bar and playback stuttered.
+@MainActor final class PlayheadClock: ObservableObject {
+    @Published var time: Double = 0
+}
+
+/// Shows something that depends on the playhead, so only it redraws as the playhead moves.
+struct AtPlayhead<Content: View>: View {
+    @ObservedObject var clock: PlayheadClock
+    let content: (Double) -> Content
+    init(_ clock: PlayheadClock, @ViewBuilder content: @escaping (Double) -> Content) { self.clock = clock; self.content = content }
+    var body: some View { content(clock.time) }
+}
+
 @MainActor final class VideoEditorModel: ObservableObject {
     let item: CaptureItem
     let library: Library
@@ -13,8 +28,8 @@ import StillCore
     private var transcriptionTask: Task<Void, Never>?
     @Published var settings = VideoSettings() { didSet { if !restoring {
         redoStack.removeAll()
-        // A drag on the preview saves as it goes; all of one drag is a single undo step.
-        let live = Date() < liveEditUntil
+        // A drag on the preview or a trim handle saves as it goes; all of one drag is a single undo step.
+        let live = Date() < liveEditUntil || trimming
         if !(live && liveEditRecorded) { undoStack.append(oldValue); if undoStack.count > 60 { undoStack.removeFirst() } }
         liveEditRecorded = live; dirty = true
     } } }
@@ -23,8 +38,15 @@ import StillCore
     func liveEdit() { if Date() >= liveEditUntil { liveEditRecorded = false }; liveEditUntil = Date().addingTimeInterval(0.6) }
     @Published var metadata = RecordingMetadata()
     @Published var duration: Double = 0
-    @Published var playhead: Double = 0
+    let clock = PlayheadClock()
+    var playhead: Double {
+        get { clock.time }
+        set { if clock.time != newValue { clock.time = newValue } }
+    }
     @Published var playing = false
+    /// False until the recording's details and saved edits are read, which happens off the main thread because a long
+    /// recording's pointer track is large; until then the controls wait, so nothing is edited and then overwritten.
+    @Published var ready = false
     @Published var thumbnails: [NSImage] = []
     @Published var loading = true
     @Published var exporting = false
@@ -55,19 +77,49 @@ import StillCore
     private var restoring = false
     init(item: CaptureItem, library: Library) {
         self.item = item; self.library = library
-        metadata = library.recordingMetadata(item)
-        if let data = try? Data(contentsOf: library.root.appendingPathComponent("\(item.id).videoedit.json")), let saved = try? JSONDecoder().decode(VideoSettings.self, from: data) { settings = saved }
-        else { settings = metadata.presentation ?? Preferences.shared.recordingPresentation; settings.cursorScale = metadata.defaultShowCursor ? 1 : 0; settings.showClicks = metadata.defaultShowClicks; settings.showKeystrokes = metadata.defaultShowKeystrokes; settings.fps = Preferences.shared.recordingFPS; settings.quality = Preferences.shared.recordingQuality }
-        dirty = false; undoStack = []; redoStack = []
-        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in Task { @MainActor in guard let self else { return }; if time.seconds.isFinite { self.playhead = VideoTimeline.sourceTime(at: time.seconds, kept: self.settings.kept) }; self.playing = self.player.rate > 0 } }
+        observer = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in Task { @MainActor in
+            guard let self else { return }
+            // While a seek is on its way the player still reports where it was, and a quick seek while scrubbing lands
+            // near the spot rather than on it, so the paused playhead stays where it was put.
+            if time.seconds.isFinite, !self.seeking, !self.scrubbing || self.player.rate > 0 { self.playhead = VideoTimeline.sourceTime(at: time.seconds, kept: self.shownKept) }
+            // Only a real change is announced; this runs ten times a second.
+            let now = self.player.rate > 0
+            if self.playing != now { self.playing = now }
+        } }
         loadTask = Task { await load() }
     }
+    /// Reads the recording's details and any saved edits off the main thread (a long recording's pointer track is
+    /// megabytes of JSON), then sets the editor up with them.
+    private func readSaved() async {
+        let metadataURL = library.recordingMetadataURL(item), editsURL = library.root.appendingPathComponent("\(item.id).videoedit.json")
+        let (metadata, saved) = await Task.detached(priority: .userInitiated) { () -> (RecordingMetadata, VideoSettings?) in
+            let metadata = Library.readRecordingMetadata(metadataURL)
+            let saved = (try? Data(contentsOf: editsURL)).flatMap { try? JSONDecoder().decode(VideoSettings.self, from: $0) }
+            return (metadata, saved)
+        }.value
+        restoring = true
+        self.metadata = metadata
+        if let saved { settings = saved }
+        else {
+            var fresh = metadata.presentation ?? Preferences.shared.recordingPresentation
+            fresh.cursorScale = metadata.defaultShowCursor ? 1 : 0; fresh.showClicks = metadata.defaultShowClicks; fresh.showKeystrokes = metadata.defaultShowKeystrokes
+            fresh.fps = Preferences.shared.recordingFPS; fresh.quality = Preferences.shared.recordingQuality
+            settings = fresh
+        }
+        restoring = false
+        dirty = false; undoStack = []; redoStack = []
+        ready = true
+    }
     private func load() async {
+        await readSaved()
+        guard !Task.isCancelled else { return }
         do {
             let asset = AVURLAsset(url: library.videoSource(item))
             duration = try await asset.load(.duration).seconds
             restoring = true; if settings.end <= 0 { settings.end = duration }; restoring = false; dirty = false
             await rebuild()
+            // A change of shape made while the first build ran isn't in it: build again with it.
+            if let shown = shownShape, !shown.sameShape(as: settings) { schedulePreview() }
             let generator = AVAssetImageGenerator(asset: asset); generator.maximumSize = CGSize(width: 220, height: 130); generator.appliesPreferredTrackTransform = true
             for index in 0..<9 { guard !Task.isCancelled else { return }; if let result = try? await generator.image(at: CMTime(seconds: max(0, min(duration-0.01, duration*Double(index)/9)), preferredTimescale: 600)) { thumbnails.append(NSImage(cgImage: result.image, size: .zero)) } }
         } catch { self.error = error.localizedDescription; loading = false }
@@ -77,11 +129,16 @@ import StillCore
     private var shownShape: VideoSettings?
     func schedulePreview() {
         live.set(settings)
-        // Only the look changed (cursor, clicks, blurs, callouts, text, zooms, corners…): redraw the frame now.
-        if let shown = shownShape, shown.sameShape(as: settings) { previewTask?.cancel(); refreshFrame(); return }
+        // Only the look changed (cursor, clicks, blurs, callouts, text, zooms, corners…): redraw the frame soon.
+        if let shown = shownShape, shown.sameShape(as: settings) { previewTask?.cancel(); queueRefresh(); return }
         previewTask?.cancel()
+        // The first build is the load's own, and a trim handle being dragged builds once, when it's let go.
+        if (shownShape == nil && loading) || trimming { return }
         previewTask = Task { try? await Task.sleep(nanoseconds: 180_000_000); guard !Task.isCancelled else { return }; await rebuild() }
     }
+    /// The stretches the video in the player was built with, which is what its times count through until the next
+    /// build is in (a trim handle being dragged has already moved the settings' own).
+    private var shownKept: [VideoCut] { shownShape?.kept ?? settings.kept }
     private func rebuild() async {
         do {
             let wasPlaying = player.rate > 0, position = playhead
@@ -93,19 +150,74 @@ import StillCore
             shownShape = building; live.set(settings)
             prepared = result; outputSize = result.size; sourceSize = result.sourceSize
             let playerItem = AVPlayerItem(asset: result.asset); playerItem.videoComposition = result.composition; playerItem.audioMix = result.audioMix
+            // Seeks waiting for the old video don't carry over; the new one starts where the playhead is.
+            seekGeneration &+= 1; seeking = false; pendingSeek = nil
             player.replaceCurrentItem(with: playerItem)
-            await player.seek(to: CMTime(seconds: max(0, min(result.duration, VideoTimeline.outputTime(at: position, kept: settings.kept))), preferredTimescale: 600))
+            await player.seek(to: CMTime(seconds: max(0, min(result.duration, VideoTimeline.outputTime(at: position, kept: building.kept))), preferredTimescale: 600))
             if wasPlaying { player.play() }
             loading = false
         } catch { self.error = error.localizedDescription; loading = false }
+    }
+    /// Redraws of the paused frame, at most one each 50 ms: a slider or a drag on the picture changes the look on every
+    /// event, and a fresh video composition each time made the player fall behind and the drag stutter. The last
+    /// change always gets drawn, because the redraw reads the settings when it runs.
+    private var refreshQueued = false, lastRefresh = Date.distantPast
+    private func queueRefresh() {
+        guard !refreshQueued else { return }
+        refreshQueued = true
+        let wait = max(0, 0.05 - Date().timeIntervalSince(lastRefresh))
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in MainActor.assumeIsolated {
+            guard let self else { return }
+            self.refreshQueued = false; self.lastRefresh = Date(); self.refreshFrame()
+        } }
     }
     /// Draws the paused frame again with the current settings (a playing video picks them up on its next frame).
     private func refreshFrame() {
         guard player.rate == 0, let item = player.currentItem, let composition = item.videoComposition?.mutableCopy() as? AVVideoComposition else { return }
         item.videoComposition = composition
     }
-    func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; player.play(); playing = true } }
-    func seek(_ value: Double) { playhead = value; player.seek(to: CMTime(seconds: max(0, VideoTimeline.outputTime(at: value, kept: settings.kept)), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+    func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; scrubbing = false; player.play(); playing = true } }
+    /// Moves the playhead. While scrubbing or dragging, `exact: false` lets the player show the nearest frame it can
+    /// find quickly, and only one seek is on its way at a time (the latest wins), so the drag keeps up; the exact frame
+    /// follows when the drag ends.
+    func seek(_ value: Double, exact: Bool = true) {
+        playhead = value; scrubbing = !exact
+        if seeking { pendingSeek = (value, exact); return }
+        startSeek(value, exact: exact)
+    }
+    private var seeking = false, scrubbing = false, seekGeneration = 0
+    private var pendingSeek: (time: Double, exact: Bool)?
+    private func startSeek(_ value: Double, exact: Bool) {
+        seeking = true
+        let generation = seekGeneration, tolerance = exact ? CMTime.zero : CMTime(seconds: 0.15, preferredTimescale: 600)
+        player.seek(to: CMTime(seconds: max(0, VideoTimeline.outputTime(at: value, kept: shownKept)), preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                guard let self, self.seekGeneration == generation else { return }
+                self.seeking = false
+                if let next = self.pendingSeek { self.pendingSeek = nil; self.startSeek(next.time, exact: next.exact) }
+            } }
+        }
+    }
+    /// Dragging a trim handle: the whole drag is one undo step, the preview follows with quick seeks, and the video is
+    /// built again only when the handle is let go, not on every step of the drag.
+    private var trimming = false
+    private var trimWatchdog: Task<Void, Never>?
+    func trimMoved() {
+        if !trimming { trimming = true; liveEditRecorded = false }
+        // If the end of the drag never arrives, finish it once the handle has been still for a second.
+        trimWatchdog?.cancel()
+        trimWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.endTrim()
+        }
+    }
+    func endTrim() {
+        guard trimming else { return }
+        trimming = false; trimWatchdog?.cancel(); trimWatchdog = nil
+        seek(playhead)
+        schedulePreview()
+    }
     /// Where a cut being marked began; Cut again at a later moment takes that stretch out.
     @Published var cutStart: Double?
     func cut() {
@@ -125,14 +237,18 @@ import StillCore
             let reader = try AVAssetReader(asset: asset)
             let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
             reader.add(output); reader.startReading()
-            var samples: [Float] = []
+            // Each buffer is measured as it arrives and then reused: holding the whole track (230 MB an hour) made
+            // long recordings slow to listen to and heavy on memory.
+            var meter = AudioLevelMeter(rate: 16000)
+            var chunk: [Float] = []
             while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
-                let length = CMBlockBufferGetDataLength(block)
-                var chunk = [Float](repeating: 0, count: length / 4)
-                _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
-                samples.append(contentsOf: chunk)
+                let count = CMBlockBufferGetDataLength(block) / 4
+                guard count > 0 else { continue }
+                if chunk.count < count { chunk = [Float](repeating: 0, count: count) }
+                _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 4, destination: $0.baseAddress!) }
+                chunk.withUnsafeBufferPointer { meter.add(UnsafeBufferPointer(rebasing: $0[0..<count])) }
             }
-            return AudioPauses.levels(samples, rate: 16000)
+            return meter.finish()
         }.value
     }
     /// The music file, copied in beside the recording.
@@ -284,7 +400,9 @@ import StillCore
             do {
                 guard let image = try await pictures(at: [time]).first else { return }
                 let stamp = VideoChapters.stamp(VideoTimeline.outputTime(at: time, kept: settings.kept))
-                _ = try library.add(image: image, title: "\(item.title) at \(stamp)"); library.copy(image)
+                // Encoding a full-size frame takes a moment; it happens off the main thread so the editor doesn't pause.
+                let png = try await Task.detached(priority: .userInitiated) { try ImageRenderer.libraryData(image) }.value
+                _ = try library.add(png: png, width: image.width, height: image.height, title: "\(item.title) at \(stamp)"); library.copy(png: png)
                 library.toast("Frame saved to History and copied")
             } catch { self.error = "Couldn’t save the frame: \(error.localizedDescription)" }
         }
@@ -297,21 +415,28 @@ import StillCore
         Task {
             do {
                 let images = try await pictures(at: shots.map(\.time), width: 960)
-                guard let first = images.first else { return }
-                let l = VideoStoryboard.layout(images.count, width: Double(first.width), height: Double(first.height))
-                guard let ctx = CGContext(data: nil, width: Int(l.width), height: Int(l.height), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
-                ctx.setFillColor(CGColor(srgbRed: 0.086, green: 0.086, blue: 0.102, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: l.width, height: l.height))
-                let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, 15, nil)!
-                for (index, (image, shot)) in zip(images, shots).enumerated() {
-                    let x = l.gap + Double(index % l.cols) * (l.tileWidth + l.gap), top = l.gap + Double(index / l.cols) * (l.tileHeight + l.strip + l.gap)
-                    // Core Graphics counts from the bottom.
-                    let tile = CGRect(x: x, y: l.height - top - l.tileHeight, width: l.tileWidth, height: l.tileHeight)
-                    ctx.saveGState(); ctx.addPath(CGPath(roundedRect: tile, cornerWidth: 8, cornerHeight: 8, transform: nil)); ctx.clip(); ctx.interpolationQuality = .high; ctx.draw(image, in: tile); ctx.restoreGState()
-                    let line = CTLineCreateWithAttributedString(NSAttributedString(string: shot.label, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1)]))
-                    ctx.textPosition = CGPoint(x: x + 4, y: tile.minY - l.strip/2 - 5); CTLineDraw(line, ctx)
-                }
-                guard let sheet = ctx.makeImage() else { return }
-                let saved = try library.add(image: sheet, title: "\(item.title) storyboard"); library.copy(sheet)
+                guard !images.isEmpty else { return }
+                // Drawing the grid and encoding it happen off the main thread, so the editor doesn't pause.
+                let made = try await Task.detached(priority: .userInitiated) { () throws -> (png: Data, width: Int, height: Int)? in
+                    guard let first = images.first else { return nil }
+                    let l = VideoStoryboard.layout(images.count, width: Double(first.width), height: Double(first.height))
+                    guard let ctx = CGContext(data: nil, width: Int(l.width), height: Int(l.height), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+                    ctx.setFillColor(CGColor(srgbRed: 0.086, green: 0.086, blue: 0.102, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: l.width, height: l.height))
+                    let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, 15, nil)!
+                    for (index, (image, shot)) in zip(images, shots).enumerated() {
+                        let x = l.gap + Double(index % l.cols) * (l.tileWidth + l.gap), top = l.gap + Double(index / l.cols) * (l.tileHeight + l.strip + l.gap)
+                        // Core Graphics counts from the bottom.
+                        let tile = CGRect(x: x, y: l.height - top - l.tileHeight, width: l.tileWidth, height: l.tileHeight)
+                        ctx.saveGState(); ctx.addPath(CGPath(roundedRect: tile, cornerWidth: 8, cornerHeight: 8, transform: nil)); ctx.clip(); ctx.interpolationQuality = .high; ctx.draw(image, in: tile); ctx.restoreGState()
+                        let line = CTLineCreateWithAttributedString(NSAttributedString(string: shot.label, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1)]))
+                        ctx.textPosition = CGPoint(x: x + 4, y: tile.minY - l.strip/2 - 5); CTLineDraw(line, ctx)
+                    }
+                    guard let sheet = ctx.makeImage() else { return nil }
+                    let png = try ImageRenderer.libraryData(sheet)
+                    return (png, sheet.width, sheet.height)
+                }.value
+                guard let made else { return }
+                let saved = try library.add(png: made.png, width: made.width, height: made.height, title: "\(item.title) storyboard"); library.copy(png: made.png)
                 AppController.shared.openItem(saved); library.toast("Storyboard saved to History and opened")
             } catch { self.error = "Couldn’t make the storyboard: \(error.localizedDescription)" }
         }
@@ -334,24 +459,27 @@ import StillCore
     }
     func removeCut(_ cut: VideoCut) { settings.cuts = (settings.cuts ?? []).filter { $0 != cut }; if settings.cuts?.isEmpty == true { settings.cuts = nil } }
     func save() {
+        // Before the saved edits are read in there is nothing new to save, and saving would overwrite them.
+        guard ready else { return }
         do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
         catch { self.error = error.localizedDescription }
     }
     func transcribe() {
-        guard !transcribing else { return }; transcribing = true
+        // The recording's details have to be read in first, or saving the transcript would write over them.
+        guard ready, !transcribing else { return }; transcribing = true
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
             defer { transcribing = false }
             do {
                 let result = try await transcription.transcribe(library.videoSource(item))
                 metadata.transcript = result.0; metadata.captions = result.1
-                try library.saveRecordingMetadata(item, metadata: metadata, camera: nil)
+                try await library.saveRecordingMetadata(item, metadata: metadata)
                 library.toast("Transcript saved")
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
     }
     func cancelTranscription() { transcriptionTask?.cancel(); transcription.cancel() }
-    func close() { loadTask?.cancel(); player.pause(); previewTask?.cancel(); cancelTranscription(); if let observer { player.removeTimeObserver(observer); self.observer = nil } }
+    func close() { loadTask?.cancel(); player.pause(); previewTask?.cancel(); trimWatchdog?.cancel(); cancelTranscription(); if let observer { player.removeTimeObserver(observer); self.observer = nil } }
     func undo() { guard let state = undoStack.popLast() else { return }; redoStack.append(settings); restoring = true; settings = state; restoring = false; dirty = true; schedulePreview() }
     func redo() { guard let state = redoStack.popLast() else { return }; undoStack.append(settings); restoring = true; settings = state; restoring = false; dirty = true; schedulePreview() }
     /// Zooms picked on the trim bar: a click picks one, ⌘- or ⇧-click adds or drops one, so several can be removed together.
@@ -395,6 +523,7 @@ import StillCore
         return "\(Int(size.width)) × \(Int(size.height))  ·  \(String(format: "%.1f", Double(bitrate)/1e6)) Mbps  ·  \(String(format: "%d:%04.1f", Int(seconds)/60, seconds.truncatingRemainder(dividingBy: 60))) long  ·  about \(label)"
     }
     func export(gif: Bool) {
+        guard ready else { return }
         let panel = NSSavePanel(); panel.allowedContentTypes = gif ? [.gif] : [.mpeg4Movie]; panel.nameFieldStringValue = "\(item.title)-edited.\(gif ? "gif" : "mp4")"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         player.pause(); exporting = true; exportProgress = 0
@@ -428,17 +557,24 @@ struct VideoEditorView: View {
     init(model: VideoEditorModel) { _model = StateObject(wrappedValue: model) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export Video…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) }; Divider(); Button("Save Frame to History") { model.saveFrame() }.keyboardShortcut("f", modifiers: []); Button("Make Storyboard") { model.storyboard() } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
+            HStack { Text("Still / Motion").font(.system(size: 23, weight: .semibold)); Spacer(); Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo").disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command); Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo").disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]); Menu("Export") { Button("Export Video…") { model.showExportOptions = true }; Button("Export GIF…") { model.export(gif: true) }; Divider(); Button("Save Frame to History") { model.saveFrame() }.keyboardShortcut("f", modifiers: []); Button("Make Storyboard") { model.storyboard() } }.menuStyle(.borderlessButton).fixedSize().tint(Studio.onAccent).foregroundStyle(Studio.onAccent).padding(.horizontal, 13).padding(.vertical, 6).background(Studio.accent, in: Capsule()).disabled(!model.ready); Button("Done") { model.save(); if !model.dirty { NSApp.keyWindow?.performClose(nil) } } }.padding(13).background(Studio.surface)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if !model.loading { PreviewHandles(model: model) }; if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    HStack { Button { model.togglePlay() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 25) }.buttonStyle(.plain).keyboardShortcut(.space, modifiers: []); Text(time(model.playhead)).monospacedDigit(); Slider(value: Binding(get: { model.playhead }, set: { model.seek($0) }), in: model.settings.start...max(model.settings.start+0.01, model.settings.end)); Text(time(model.settings.end)).monospacedDigit(); Button { model.settings.muted.toggle() } label: { Image(systemName: model.settings.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.buttonStyle(.plain) }.font(.system(size: 11)).padding(13)
+                    ZStack { Color.black.opacity(0.08); NativeVideoPlayer(player: model.player); if !model.loading { PreviewHandles(model: model, clock: model.clock) }; if model.loading { ProgressView("Loading video…") } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    HStack {
+                        Button { model.togglePlay() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 25) }.buttonStyle(.plain).keyboardShortcut(.space, modifiers: [])
+                        // Scrubbing seeks loosely as it goes and exactly once let go, so the slider keeps up with the pointer.
+                        AtPlayhead(model.clock) { now in
+                            HStack { Text(time(now)).monospacedDigit(); Slider(value: Binding(get: { model.playhead }, set: { model.seek($0, exact: false) }), in: model.settings.start...max(model.settings.start+0.01, model.settings.end), onEditingChanged: { editing in if !editing { model.seek(model.playhead) } }) }
+                        }
+                        Text(time(model.settings.end)).monospacedDigit(); Button { model.settings.muted.toggle() } label: { Image(systemName: model.settings.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.buttonStyle(.plain)
+                    }.font(.system(size: 11)).padding(13).disabled(!model.ready)
                 }
-                inspector.frame(width: 265).background(Studio.paper).overlay(alignment: .leading) { Divider() }
+                inspector.frame(width: 265).background(Studio.paper).overlay(alignment: .leading) { Divider() }.disabled(!model.ready)
             }
-            timeline
+            timeline.disabled(!model.ready)
         }.font(.system(size: 12)).background(Studio.paper)
-        .background { shortcuts }
+        .background { shortcuts.disabled(!model.ready) }
         .onChange(of: model.settings) { _, _ in model.schedulePreview() }
         .sheet(isPresented: $model.showExportOptions) {
             VStack(alignment: .leading, spacing: 14) {
@@ -523,18 +659,21 @@ struct VideoEditorView: View {
                     HStack { Text("Blur").fontWeight(.medium); Spacer(); Button { model.settings.blurs?.removeAll { $0.id == blur.id }; if model.settings.blurs?.isEmpty == true { model.settings.blurs = nil } } label: { Image(systemName: "trash") }.buttonStyle(.plain).accessibilityLabel("Remove blur") }
                     HStack { TextField("Start", value: $blur.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $blur.end, format: .number.precision(.fractionLength(2))) }
                     // Drag it on the video; these are for fine adjustment, at the playhead when it has keyframes.
-                    let at = model.playhead
-                    let part = { (get: @escaping (CGRect) -> Double, set: @escaping (inout CGRect, Double) -> Void) in Binding<Double>(get: { get(blur.box(at: at)) }, set: { v in var r = blur.box(at: at); set(&r, v); blur = blur.placing(at: at, r) }) }
-                    HStack { Text("X"); Slider(value: part({ $0.minX }, { $0.origin.x = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.minY }, { $0.origin.y = $1 }), in: 0...1) }
-                    HStack { Text("W"); Slider(value: part({ $0.width }, { $0.size.width = $1 }), in: 0.01...1); Text("H"); Slider(value: part({ $0.height }, { $0.size.height = $1 }), in: 0.01...1) }
-                    HStack {
-                        Text("Strength"); Slider(value: Binding(get: { blur.opacity ?? 1 }, set: { blur.opacity = $0 >= 0.995 ? nil : $0 }), in: 0.1...1); Text("\(Int(((blur.opacity ?? 1)*100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
-                    }.help("How much of the picture shows through")
-                    HStack {
-                        Picker("Fade", selection: Binding(get: { blur.fade ?? 0 }, set: { blur.fade = $0 > 0 ? $0 : nil })) { Text("None").tag(0.0); Text("0.25 s").tag(0.25); Text("0.5 s").tag(0.5); Text("1 s").tag(1.0) }.fixedSize()
-                        Spacer()
-                        Button(blur.hasKey(near: at) ? "Remove Keyframe" : "Add Keyframe") { blur = blur.hasKey(near: at) ? blur.removingKey(near: at) : blur.addingKey(at: at) }
-                            .help("Make the blur follow something moving: add a keyframe, then drag the blur to where it should be at this moment")
+                    AtPlayhead(model.clock) { at in
+                        VStack(alignment: .leading, spacing: 9) {
+                            let part = { (get: @escaping (CGRect) -> Double, set: @escaping (inout CGRect, Double) -> Void) in Binding<Double>(get: { get(blur.box(at: at)) }, set: { v in var r = blur.box(at: at); set(&r, v); blur = blur.placing(at: at, r) }) }
+                            HStack { Text("X"); Slider(value: part({ $0.minX }, { $0.origin.x = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.minY }, { $0.origin.y = $1 }), in: 0...1) }
+                            HStack { Text("W"); Slider(value: part({ $0.width }, { $0.size.width = $1 }), in: 0.01...1); Text("H"); Slider(value: part({ $0.height }, { $0.size.height = $1 }), in: 0.01...1) }
+                            HStack {
+                                Text("Strength"); Slider(value: Binding(get: { blur.opacity ?? 1 }, set: { blur.opacity = $0 >= 0.995 ? nil : $0 }), in: 0.1...1); Text("\(Int(((blur.opacity ?? 1)*100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
+                            }.help("How much of the picture shows through")
+                            HStack {
+                                Picker("Fade", selection: Binding(get: { blur.fade ?? 0 }, set: { blur.fade = $0 > 0 ? $0 : nil })) { Text("None").tag(0.0); Text("0.25 s").tag(0.25); Text("0.5 s").tag(0.5); Text("1 s").tag(1.0) }.fixedSize()
+                                Spacer()
+                                Button(blur.hasKey(near: at) ? "Remove Keyframe" : "Add Keyframe") { blur = blur.hasKey(near: at) ? blur.removingKey(near: at) : blur.addingKey(at: at) }
+                                    .help("Make the blur follow something moving: add a keyframe, then drag the blur to where it should be at this moment")
+                            }
+                        }
                     }
                     if let keys = blur.keys { Text("\(keys.count) keyframes: it glides between them").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
@@ -582,19 +721,23 @@ struct VideoEditorView: View {
                     }
                     HStack { TextField("Start", value: $callout.start, format: .number.precision(.fractionLength(2))); Text("→"); TextField("End", value: $callout.end, format: .number.precision(.fractionLength(2))) }
                     // Drag it on the video; these are for fine adjustment, at the playhead when it has keyframes.
-                    let at = model.playhead, here = callout.shape(at: at)
-                    let part = { (get: @escaping (VideoCallout) -> Double, set: @escaping (inout VideoCallout, Double) -> Void) in Binding<Double>(get: { get(here) }, set: { v in callout = callout.placing(at: at) { set(&$0, v) } }) }
-                    HStack { Text(callout.kind == "arrow" ? "Tip X" : "X"); Slider(value: part({ $0.x }, { $0.x = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.y }, { $0.y = $1 }), in: 0...1) }
-                    if callout.kind == "arrow" { HStack { Text("Tail X"); Slider(value: part({ $0.x2 ?? 0.38 }, { $0.x2 = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.y2 ?? 0.36 }, { $0.y2 = $1 }), in: 0...1) } }
-                    else { HStack { Text("W"); Slider(value: part({ $0.w ?? 0.3 }, { $0.w = $1 }), in: 0.02...1); Text("H"); Slider(value: part({ $0.h ?? 0.3 }, { $0.h = $1 }), in: 0.02...1) } }
-                    HStack {
-                        Text("Strength"); Slider(value: Binding(get: { callout.opacity ?? 1 }, set: { callout.opacity = $0 >= 0.995 ? nil : $0 }), in: 0.1...1); Text("\(Int(((callout.opacity ?? 1)*100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
-                    }.help("How solid it is")
-                    HStack {
-                        Picker("Fade", selection: Binding(get: { callout.fade ?? -1 }, set: { callout.fade = $0 < 0 ? nil : $0 })) { Text("Quick").tag(-1.0); Text("None").tag(0.0); Text("0.25 s").tag(0.25); Text("0.5 s").tag(0.5); Text("1 s").tag(1.0) }.fixedSize()
-                        Spacer()
-                        Button(callout.hasKey(near: at) ? "Remove Keyframe" : "Add Keyframe") { callout = callout.hasKey(near: at) ? callout.removingKey(near: at) : callout.addingKey(at: at) }
-                            .help("Make it follow something moving: add a keyframe, then drag it to where it should be at this moment")
+                    AtPlayhead(model.clock) { at in
+                        VStack(alignment: .leading, spacing: 9) {
+                            let here = callout.shape(at: at)
+                            let part = { (get: @escaping (VideoCallout) -> Double, set: @escaping (inout VideoCallout, Double) -> Void) in Binding<Double>(get: { get(here) }, set: { v in callout = callout.placing(at: at) { set(&$0, v) } }) }
+                            HStack { Text(callout.kind == "arrow" ? "Tip X" : "X"); Slider(value: part({ $0.x }, { $0.x = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.y }, { $0.y = $1 }), in: 0...1) }
+                            if callout.kind == "arrow" { HStack { Text("Tail X"); Slider(value: part({ $0.x2 ?? 0.38 }, { $0.x2 = $1 }), in: 0...1); Text("Y"); Slider(value: part({ $0.y2 ?? 0.36 }, { $0.y2 = $1 }), in: 0...1) } }
+                            else { HStack { Text("W"); Slider(value: part({ $0.w ?? 0.3 }, { $0.w = $1 }), in: 0.02...1); Text("H"); Slider(value: part({ $0.h ?? 0.3 }, { $0.h = $1 }), in: 0.02...1) } }
+                            HStack {
+                                Text("Strength"); Slider(value: Binding(get: { callout.opacity ?? 1 }, set: { callout.opacity = $0 >= 0.995 ? nil : $0 }), in: 0.1...1); Text("\(Int(((callout.opacity ?? 1)*100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
+                            }.help("How solid it is")
+                            HStack {
+                                Picker("Fade", selection: Binding(get: { callout.fade ?? -1 }, set: { callout.fade = $0 < 0 ? nil : $0 })) { Text("Quick").tag(-1.0); Text("None").tag(0.0); Text("0.25 s").tag(0.25); Text("0.5 s").tag(0.5); Text("1 s").tag(1.0) }.fixedSize()
+                                Spacer()
+                                Button(callout.hasKey(near: at) ? "Remove Keyframe" : "Add Keyframe") { callout = callout.hasKey(near: at) ? callout.removingKey(near: at) : callout.addingKey(at: at) }
+                                    .help("Make it follow something moving: add a keyframe, then drag it to where it should be at this moment")
+                            }
+                        }
                     }
                     if let keys = callout.keys { Text("\(keys.count) keyframes: it glides between them").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }.padding(11).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
@@ -661,7 +804,7 @@ struct VideoEditorView: View {
                 ZStack(alignment: .leading) {
                     HStack(spacing: 1) { ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, image in Image(nsImage: image).resizable().scaledToFill().frame(width: width/9, height: 52).clipped() } }
                         .frame(width: width, height: 52, alignment: .leading).clipShape(RoundedRectangle(cornerRadius: 6))
-                        .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { model.seek(max(model.settings.start, min(model.settings.end, Double($0.location.x/width)*total))) })
+                        .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { model.seek(max(model.settings.start, min(model.settings.end, Double($0.location.x/width)*total)), exact: false) }.onEnded { _ in model.seek(model.playhead) })
                     // Zooms: click to pick one, ⌘- or ⇧-click to pick several.
                     ForEach(model.settings.zooms) { zoom in
                         let picked = model.pickedZooms.contains(zoom.id)
@@ -702,18 +845,21 @@ struct VideoEditorView: View {
                     // Chapter markers along the top.
                     ForEach(model.settings.chapters ?? []) { chapter in Circle().fill(.yellow).overlay(Circle().strokeBorder(.black.opacity(0.5), lineWidth: 1)).frame(width: 12, height: 12).offset(x: x(chapter.time)-6, y: -26).help(chapter.title).onTapGesture { model.seek(chapter.time) } }
                     if let from = model.cutStart { Rectangle().fill(.red).frame(width: 2, height: 64).offset(x: x(from)-1).allowsHitTesting(false) }
-                    Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(model.playhead)-1).allowsHitTesting(false)
-                    // Handles move by how far you drag from where you grabbed them.
+                    AtPlayhead(model.clock) { now in Rectangle().fill(.white).frame(width: 2, height: 64).shadow(radius: 2).offset(x: x(now)-1) }.allowsHitTesting(false)
+                    // Handles move by how far you drag from where you grabbed them. A drag is one undo step, and the
+                    // video is built again when the handle is let go.
                     handle(edge: .leading).offset(x: startX-7)
                         .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                             let origin = trimDragOrigin ?? model.settings.start; trimDragOrigin = origin
-                            model.settings.start = max(0, min(origin+Double(value.translation.width/width)*total, model.settings.end-0.2)); model.seek(model.settings.start)
-                        }.onEnded { _ in trimDragOrigin = nil })
+                            model.trimMoved()
+                            model.settings.start = max(0, min(origin+Double(value.translation.width/width)*total, model.settings.end-0.2)); model.seek(model.settings.start, exact: false)
+                        }.onEnded { _ in trimDragOrigin = nil; model.endTrim() })
                     handle(edge: .trailing).offset(x: endX-7)
                         .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                             let origin = trimDragOrigin ?? model.settings.end; trimDragOrigin = origin
-                            model.settings.end = min(total, max(origin+Double(value.translation.width/width)*total, model.settings.start+0.2)); model.seek(model.settings.end)
-                        }.onEnded { _ in trimDragOrigin = nil })
+                            model.trimMoved()
+                            model.settings.end = min(total, max(origin+Double(value.translation.width/width)*total, model.settings.start+0.2)); model.seek(model.settings.end, exact: false)
+                        }.onEnded { _ in trimDragOrigin = nil; model.endTrim() })
                 }
             }.frame(height: 64)
         }.padding(16).background(Color.primary.opacity(0.035)).overlay(alignment: .top) { Divider() }

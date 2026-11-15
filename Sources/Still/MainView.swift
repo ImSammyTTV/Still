@@ -9,8 +9,11 @@ struct MainView: View {
     @ObservedObject var recorder: Recorder
     @ObservedObject private var prefs = Preferences.shared
     @State private var shortcutSearch = ""
-    @State private var cameraDevices: [AVCaptureDevice] = []
-    @State private var audioDevices: [AVCaptureDevice] = []
+    @State private var cameraDevices: [CaptureDeviceChoice] = []
+    @State private var audioDevices: [CaptureDeviceChoice] = []
+    /// Asking the system whether Still opens at login is a call to another process; it's asked when the page opens,
+    /// not on every redraw.
+    @State private var launchAtLogin = false
     @AppStorage("autoUpdate") private var autoUpdate = true
     @State private var shortcuts = Shortcut.load()
     @State private var loginError: String?
@@ -102,7 +105,8 @@ struct MainView: View {
         Group {
             section("App") {
                 Button("Open Setup Assistant…") { UserDefaults.standard.set(false, forKey: "studioSetupComplete") }
-                Toggle("Launch at login", isOn: Binding(get: { SMAppService.mainApp.status == .enabled }, set: { do { try prefs.setLaunchAtLogin($0) } catch { loginError = error.localizedDescription } }))
+                Toggle("Launch at login", isOn: Binding(get: { launchAtLogin }, set: { do { try prefs.setLaunchAtLogin($0) } catch { loginError = error.localizedDescription }; launchAtLogin = SMAppService.mainApp.status == .enabled }))
+                    .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
                 Toggle("Check for updates automatically", isOn: $autoUpdate)
                 Toggle("Show menu bar icon", isOn: $prefs.showMenuBar).onChange(of: prefs.showMenuBar) { _, value in AppController.shared.setMenuBarVisible(value) }
                 choice("Appearance", selection: $prefs.appearance) { Text("System Default").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.onChange(of: prefs.appearance) { _, _ in AppController.shared.applyAppearance() }
@@ -212,7 +216,7 @@ struct MainView: View {
                 choice("Max resolution", selection: $prefs.recordingResolution) { Text("Original").tag(0); Text("1080p").tag(1920); Text("1440p").tag(2560); Text("4K").tag(3840) }
                 Toggle("Show cursor", isOn: $prefs.recordingCursor)
             }
-            section("Audio") { Toggle("Record system audio", isOn: $library.systemAudio); Toggle("Record microphone", isOn: $library.microphoneAudio); choice("Microphone", selection: $prefs.recordingMicrophoneID) { Text("System Default").tag(""); ForEach(audioDevices, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) } } }.onAppear { audioDevices = AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified).devices }
+            section("Audio") { Toggle("Record system audio", isOn: $library.systemAudio); Toggle("Record microphone", isOn: $library.microphoneAudio); choice("Microphone", selection: $prefs.recordingMicrophoneID) { Text("System Default").tag(""); ForEach(audioDevices) { Text($0.name).tag($0.id) } } }.task { audioDevices = await CaptureDeviceChoice.find([.microphone, .external], media: .audio) }
             section("Focus & Recording Automation") {
                 Toggle("Run Shortcuts when recording starts and stops", isOn: $prefs.recordingAutomation)
                 TextField("Start shortcut name", text: $prefs.recordingStartShortcut).textFieldStyle(.roundedBorder)
@@ -237,7 +241,7 @@ struct MainView: View {
                 HStack { Text("Size"); Slider(value: $prefs.keysSize, in: 0.5...2) }
                 choice("Position", selection: $prefs.keysPosition) { ForEach(["topLeft", "topCenter", "topRight", "bottomLeft", "bottomCenter", "bottomRight"], id: \.self) { Text($0.replacingOccurrences(of: "top", with: "Top ").replacingOccurrences(of: "bottom", with: "Bottom ")).tag($0) } }
             }
-            section("Camera") { Toggle("Record camera", isOn: $prefs.recordingCamera); choice("Camera", selection: $prefs.recordingCameraID) { Text("System Default").tag(""); ForEach(cameraDevices, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) } }; Toggle("Full screen camera", isOn: $prefs.cameraFullscreen); Toggle("Mirror camera", isOn: $prefs.cameraMirror); choice("Position", selection: $prefs.cameraPosition) { ForEach(["topLeft", "topRight", "bottomLeft", "bottomRight"], id: \.self) { Text($0.replacingOccurrences(of: "top", with: "Top ").replacingOccurrences(of: "bottom", with: "Bottom ")).tag($0) } }; choice("Shape", selection: $prefs.recordingCameraShape) { Text("Circle").tag("circle"); Text("Rounded rectangle").tag("rounded") }; HStack { Text("Size"); Slider(value: $prefs.recordingCameraSize, in: 100...360, step: 10) } }.onAppear { cameraDevices = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera], mediaType: .video, position: .unspecified).devices }
+            section("Camera") { Toggle("Record camera", isOn: $prefs.recordingCamera); choice("Camera", selection: $prefs.recordingCameraID) { Text("System Default").tag(""); ForEach(cameraDevices) { Text($0.name).tag($0.id) } }; Toggle("Full screen camera", isOn: $prefs.cameraFullscreen); Toggle("Mirror camera", isOn: $prefs.cameraMirror); choice("Position", selection: $prefs.cameraPosition) { ForEach(["topLeft", "topRight", "bottomLeft", "bottomRight"], id: \.self) { Text($0.replacingOccurrences(of: "top", with: "Top ").replacingOccurrences(of: "bottom", with: "Bottom ")).tag($0) } }; choice("Shape", selection: $prefs.recordingCameraShape) { Text("Circle").tag("circle"); Text("Rounded rectangle").tag("rounded") }; HStack { Text("Size"); Slider(value: $prefs.recordingCameraSize, in: 100...360, step: 10) } }.task { cameraDevices = await CaptureDeviceChoice.find([.builtInWideAngleCamera, .external, .continuityCamera], media: .video) }
         }
     }
     private var annotate: some View {
@@ -339,6 +343,18 @@ struct ClipboardSettings: View {
                 }.padding(6)
             } label: { Text("Privacy").fontWeight(.semibold) }
         }
+    }
+}
+
+/// A camera or microphone to choose in Settings. Finding them asks the system for every device, which can take a
+/// moment, so it happens off the main thread and the list fills in when it's ready.
+struct CaptureDeviceChoice: Identifiable, Hashable {
+    let id: String
+    let name: String
+    static func find(_ types: [AVCaptureDevice.DeviceType], media: AVMediaType) async -> [CaptureDeviceChoice] {
+        await Task.detached(priority: .userInitiated) { () -> [CaptureDeviceChoice] in
+            AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: media, position: .unspecified).devices.map { CaptureDeviceChoice(id: $0.uniqueID, name: $0.localizedName) }
+        }.value
     }
 }
 

@@ -28,10 +28,12 @@ final class EditorModel: ObservableObject {
     @Published var cropAspect: Double?
     /// A social media size the next crop is scaled to; it also locks the crop to that shape.
     @Published var cropSize: SocialSizes.Size?
-    @Published var cornerRadius: Double = 12 { willSet { if !suppressChanges, newValue != cornerRadius { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
-    @Published var shadow: Double = 24 { willSet { if !suppressChanges, newValue != shadow { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
-    @Published var aspectRatio: Double? { willSet { if !suppressChanges, newValue != aspectRatio { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
-    @Published var customBackground: Data? { willSet { if !suppressChanges, newValue != customBackground { snapshot() } } didSet { if !suppressChanges { dirty = true }; backdrop = nil } }
+    @Published var cornerRadius: Double = 12 { willSet { if !suppressChanges, newValue != cornerRadius { willChange() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var shadow: Double = 24 { willSet { if !suppressChanges, newValue != shadow { willChange() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var aspectRatio: Double? { willSet { if !suppressChanges, newValue != aspectRatio { willChange() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var customBackground: Data? { willSet { if !suppressChanges, newValue != customBackground { willChange() } } didSet { if !suppressChanges { dirty = true }; backdrop = nil; backgroundVersion &+= 1 } }
+    /// Changes whenever the custom background does, so a view can tell without comparing the image's bytes.
+    private(set) var backgroundVersion = 0
     private var backdrop: NSImage?
     /// The custom background as one image, so redraws don't decode it again.
     var backdropImage: NSImage? {
@@ -39,10 +41,10 @@ final class EditorModel: ObservableObject {
         return backdrop
     }
     private let previewCache = PreviewCache()
-    @Published var frame = FrameStyle.none { willSet { if !suppressChanges, newValue != frame { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
-    @Published var padding: Double = 64 { willSet { if !suppressChanges, newValue != padding { snapshot() } } didSet { if !suppressChanges, frame != .none { dirty = true } } }
-    @Published var alignmentX: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentX { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
-    @Published var alignmentY: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentY { snapshot() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var frame = FrameStyle.none { willSet { if !suppressChanges, newValue != frame { willChange() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var padding: Double = 64 { willSet { if !suppressChanges, newValue != padding { willChange() } } didSet { if !suppressChanges, frame != .none { dirty = true } } }
+    @Published var alignmentX: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentX { willChange() } } didSet { if !suppressChanges { dirty = true } } }
+    @Published var alignmentY: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentY { willChange() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var zoom: Double = 0
     @Published var isRecognizing = false
     @Published var dirty = false { didSet { if dirty { edits &+= 1 } } }
@@ -83,6 +85,31 @@ final class EditorModel: ObservableObject {
         undoStack.append(currentSnapshot)
         if undoStack.count > 30 { undoStack.removeFirst() }
         redoStack.removeAll()
+    }
+    /// While a Background slider is held, the whole drag is one undo step: the picture before it is kept once, at the
+    /// first change, instead of on every tick (which also pushed the earlier steps off the undo list).
+    private var holdingSlider = false, sliderSnapshotTaken = false
+    private func willChange() {
+        if holdingSlider { if sliderSnapshotTaken { return }; sliderSnapshotTaken = true }
+        snapshot()
+    }
+    /// Pass to a slider's onEditingChanged: true when it's grabbed, false when it's let go.
+    func sliderEditing(_ editing: Bool) { holdingSlider = editing; sliderSnapshotTaken = false }
+    private var previewRender: Task<CGImage?, Never>?
+    /// The Background sheet's preview, drawn off the main thread so a slider never waits for it. One drawing runs at
+    /// a time, as they share a cache.
+    func backgroundPreview() async -> CGImage? {
+        let previous = previewRender
+        let source = source, marks = marks, frame = frame, padding = padding, cornerRadius = cornerRadius, shadow = shadow
+        let aspectRatio = aspectRatio, customBackground = customBackground, alignmentX = alignmentX, alignmentY = alignmentY
+        let watermark = watermarkOn ? Preferences.shared.watermark : nil, cache = previewCache
+        let render = Task.detached(priority: .userInitiated) { () -> CGImage? in
+            _ = await previous?.value
+            guard let image = try? ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: cache) else { return nil }
+            return watermark?.apply(to: image) ?? image
+        }
+        previewRender = render
+        return await render.value
     }
     private func loadHighlightLines() {
         guard highlightLines.isEmpty else { return }
@@ -160,12 +187,6 @@ final class EditorModel: ObservableObject {
     }
     /// Whether this picture gets the watermark; the stamp button in the toolbar turns it off for just this one.
     @Published var watermarkOn = true
-    /// The flattened picture at the size the Background sheet shows it, quick enough to follow a slider.
-    func flattenedPreview() throws -> CGImage {
-        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, maxDimension: 800, cache: previewCache)
-        guard watermarkOn, let watermark = Preferences.shared.watermark else { return image }
-        return watermark.apply(to: image)
-    }
     func document() throws -> ProjectDocument { try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
     var canvasLayout: (size: CGSize, origin: CGPoint) { ImageRenderer.canvasLayout(source: CGSize(width: source.width, height: source.height), framed: frame != .none || customBackground != nil, padding: Int(padding), aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY) }
     func autoBalance() {
