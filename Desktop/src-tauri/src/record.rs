@@ -261,7 +261,12 @@ mod imp {
         pool: Direct3D11CaptureFramePool,
         session: GraphicsCaptureSession,
         size: windows::Graphics::SizeInt32,
-        staging: ID3D11Texture2D,
+        /// Two frame copies in turn: each frame is read back one call after its copy was started, by when the graphics
+        /// card has finished it. Reading it straight away made the recorder wait on the graphics card every frame,
+        /// which on a large area at 60 fps stuttered the whole screen.
+        staging: [ID3D11Texture2D; 2],
+        slot: usize,
+        pending: Option<usize>,
         crop: (u32, u32, u32, u32),
     }
 
@@ -295,22 +300,45 @@ mod imp {
             let _ = session.SetIsBorderRequired(false);
             let (x, y, w, h) = options.crop;
             let crop = (x.min(size.Width as u32 - 2), y.min(size.Height as u32 - 2), w.min(size.Width as u32 - x.min(size.Width as u32 - 2)) / 2 * 2, h.min(size.Height as u32 - y.min(size.Height as u32 - 2)) / 2 * 2);
-            let staging = staging_texture(&device, crop.2, crop.3)?;
+            let staging = [staging_texture(&device, crop.2, crop.3)?, staging_texture(&device, crop.2, crop.3)?];
             session.StartCapture().map_err(|e| err("Screen capture didn’t start", e))?;
-            Ok(Capture { context, device, winrt_device, pool, session, size, staging, crop })
+            Ok(Capture { context, device, winrt_device, pool, session, size, staging, slot: 0, pending: None, crop })
         }
 
-        /// The newest frame since the last call, cropped and copied into `buffer`; false when the screen hasn't changed.
+        /// The newest frame, cropped and copied into `buffer`; false when there's nothing new. A frame comes out one
+        /// call after it arrives (see `staging`), a single frame's delay.
         fn next(&mut self, buffer: &mut Vec<u8>) -> Result<bool, String> {
+            let started = self.copy_newest()?;
+            let ready = std::mem::replace(&mut self.pending, started);
+            let Some(slot) = ready else { return Ok(false) };
+            let (_, _, w, h) = self.crop;
+            let staging = &self.staging[slot];
+            unsafe {
+                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                self.context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).map_err(|e| err("Reading the frame", e))?;
+                let row = w as usize * 4;
+                buffer.resize(row * h as usize, 0);
+                for line in 0..h as usize {
+                    let source = (mapped.pData as *const u8).add(line * mapped.RowPitch as usize);
+                    std::ptr::copy_nonoverlapping(source, buffer.as_mut_ptr().add(line * row), row);
+                }
+                self.context.Unmap(staging, 0);
+            }
+            Ok(true)
+        }
+
+        /// Starts copying the newest frame into the next frame copy, and answers which one, or None when the screen
+        /// hasn't changed.
+        fn copy_newest(&mut self) -> Result<Option<usize>, String> {
             let mut newest = None;
             while let Ok(frame) = self.pool.TryGetNextFrame() { newest = Some(frame); }
-            let Some(frame) = newest else { return Ok(false) };
+            let Some(frame) = newest else { return Ok(None) };
             let content = frame.ContentSize().map_err(|e| err("Capture frame", e))?;
             if content.Width != self.size.Width || content.Height != self.size.Height {
                 // The display changed resolution: carry on at the new size, keeping the area inside it.
                 self.size = content;
                 let _ = self.pool.Recreate(&self.winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, content);
-                return Ok(false);
+                return Ok(None);
             }
             let texture: ID3D11Texture2D = unsafe {
                 let surface = frame.Surface().map_err(|e| err("Capture surface", e))?;
@@ -319,19 +347,10 @@ mod imp {
             };
             let (x, y, w, h) = self.crop;
             let region = D3D11_BOX { left: x, top: y, front: 0, right: x + w, bottom: y + h, back: 1 };
-            unsafe {
-                self.context.CopySubresourceRegion(&self.staging, 0, 0, 0, 0, &texture, 0, Some(&region));
-                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                self.context.Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).map_err(|e| err("Reading the frame", e))?;
-                let row = w as usize * 4;
-                buffer.resize(row * h as usize, 0);
-                for line in 0..h as usize {
-                    let source = (mapped.pData as *const u8).add(line * mapped.RowPitch as usize);
-                    std::ptr::copy_nonoverlapping(source, buffer.as_mut_ptr().add(line * row), row);
-                }
-                self.context.Unmap(&self.staging, 0);
-            }
-            Ok(true)
+            let slot = self.slot;
+            self.slot = 1 - slot;
+            unsafe { self.context.CopySubresourceRegion(&self.staging[slot], 0, 0, 0, 0, &texture, 0, Some(&region)); }
+            Ok(Some(slot))
         }
     }
 

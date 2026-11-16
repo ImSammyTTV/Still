@@ -781,7 +781,8 @@ async function hidePrivate() {
     toast(`Hid ${fresh.length} private detail${fresh.length === 1 ? '' : 's'}. Undo brings them back.`);
   } catch (error) { toast(`Couldn’t look for private details: ${explain(error)}`); }
 }
-dragOut($('#dragMe'), () => { finishTextEdit(); still.send('editor:drag', flatten()); });
+// Encoded without holding up the page; the drag starts the moment the picture is ready, while the button is still down.
+dragOut($('#dragMe'), async () => { finishTextEdit(); still.send('editor:drag', await flattenInBackground()); });
 
 // ---- Save for Size --------------------------------------------------------------------------------
 // Square or as it is, a width, and a file size to stay under (a profile picture under 500 KB, say). The choices are
