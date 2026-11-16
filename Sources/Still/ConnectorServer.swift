@@ -60,11 +60,10 @@ import StillCore
     // ---- The tools ------------------------------------------------------------------------------------
 
     private static var library: Library { AppController.shared.library }
-    /// A picture for Claude: at most 1568 pixels on its longest side, as JPEG.
-    private static func picture(_ image: CGImage) -> [String: Any]? {
-        guard let data = try? ImageRenderer.data(Library.scaledDown(image, maxSide: 1568), jpeg: true) else { return nil }
-        return ["type": "image", "data": data.base64EncodedString(), "mimeType": "image/jpeg"]
-    }
+    /// A picture for Claude: at most 1568 pixels on its longest side, as JPEG. Scaling and encoding a full screen takes a
+    /// moment, so this runs off the main thread.
+    nonisolated private static func jpeg(_ image: CGImage) -> Data? { try? ImageRenderer.data(Library.scaledDown(image, maxSide: 1568), jpeg: true) }
+    private static func picture(_ jpeg: Data) -> [String: Any] { ["type": "image", "data": jpeg.base64EncodedString(), "mimeType": "image/jpeg"] }
     private static func summary(_ item: CaptureItem, full: Bool) -> [String: Any] {
         func cut(_ t: String, _ n: Int) -> String { t.count > n ? String(t.prefix(n)) + "…" : t }
         var v: [String: Any] = ["id": item.id.uuidString, "title": item.title, "kind": item.isVideo ? "recording" : "screenshot",
@@ -86,9 +85,13 @@ import StillCore
             do {
                 let image = try await ScreenCaptureAPI.image(screen: screens[n-1])
                 let title = "Screenshot \(Date().formatted(date: .abbreviated, time: .standard))".replacingOccurrences(of: ":", with: ".")
-                let saved = try library.add(image: image, title: title)
+                // Encoding the capture for history and for Claude happens off the main thread.
+                let encoded = try await Task.detached(priority: .userInitiated) { () throws -> (png: Data, jpeg: Data?) in
+                    (try ImageRenderer.libraryData(image), ConnectorServer.jpeg(image))
+                }.value
+                let saved = try library.add(png: encoded.png, width: image.width, height: image.height, title: title)
                 var content: [[String: Any]] = [["type": "text", "text": "Screenshot saved in Still as “\(saved.title)” (id \(saved.id.uuidString)), \(image.width) × \(image.height), display \(n) of \(screens.count)."]]
-                if let p = picture(image) { content.append(p) }
+                if let jpeg = encoded.jpeg { content.append(picture(jpeg)) }
                 return ["content": content, "isError": false]
             } catch { return StillConnector.textResult("Still couldn’t capture the screen: \(error.localizedDescription). Check Still has Screen Recording permission.", error: true) }
         case "still_list_captures":
@@ -102,7 +105,11 @@ import StillCore
         case "still_get_capture":
             guard let item else { return StillConnector.textResult("No capture with that id. Use still_list_captures to find one.", error: true) }
             var content: [[String: Any]] = [["type": "text", "text": json(summary(item, full: true))]]
-            if !item.isVideo, let image = ImageRenderer.load(library.url(item)), let p = picture(image) { content.append(p) }
+            if !item.isVideo {
+                let file = library.url(item)
+                let jpeg = await Task.detached(priority: .userInitiated) { ImageRenderer.load(file).flatMap { ConnectorServer.jpeg($0) } }.value
+                if let jpeg { content.append(picture(jpeg)) }
+            }
             return ["content": content, "isError": false]
         case "still_describe_capture":
             guard let item else { return StillConnector.textResult("No capture with that id.", error: true) }

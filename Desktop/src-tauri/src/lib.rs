@@ -464,7 +464,11 @@ fn end_selection(app: &AppHandle) {
     let _ = app.global_shortcut().unregister("Escape");
     let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.generation += 1; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
-    for i in 0..16 { for k in 0..16 { let _ = std::fs::remove_file(private_temp().join(format!("still-overlay-{}-{}-{}.jpg", std::process::id(), i, k))); } }
+    // Only the files that are there: trying every possible name was 256 file calls each time.
+    let prefix = format!("still-overlay-{}-", std::process::id());
+    for entry in std::fs::read_dir(private_temp()).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&prefix) { let _ = std::fs::remove_file(entry.path()); }
+    }
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
     hide_floating(app, false);
     warm_overlays(app);
@@ -863,13 +867,16 @@ fn tray_icon() -> tauri::image::Image<'static> {
 }
 /// Windows stores the taskbar's theme in SystemUsesLightTheme (1 = light).
 fn windows_light_taskbar() -> bool {
+    // Read straight from the registry: starting a separate program for it held up Still's start.
     #[cfg(windows)] {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        if let Ok(out) = std::process::Command::new("reg").args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "/v", "SystemUsesLightTheme"]).creation_flags(CREATE_NO_WINDOW).output() {
-            return String::from_utf8_lossy(&out.stdout).contains("0x1");
-        }
+        use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (key, value) = (wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"), wide("SystemUsesLightTheme"));
+        let (mut data, mut size) = (0u32, std::mem::size_of::<u32>() as u32);
+        let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), (&mut data as *mut u32).cast(), &mut size) };
+        return status == 0 && data == 1;
     }
+    #[allow(unreachable_code)]
     false
 }
 /// Small grey icons for the tray menu, drawn from the same Lucide set the windows use.
@@ -2282,7 +2289,13 @@ pub fn run() {
                 .build(app)?;
             register_shortcuts(&handle);
             apply_login_item(&handle);
-            std::thread::spawn({ let h = handle.clone(); move || { std::thread::sleep(Duration::from_secs(3)); warm_overlays(&h); backfill_thumbs(&h); } });
+            std::thread::spawn({ let h = handle.clone(); move || {
+                // Captures whose files were moved or deleted while Still was closed leave History now, off the start.
+                let (items, paths) = { let lib = st(&h).library.lock().unwrap(); (lib.items.clone(), lib.paths()) };
+                let gone = Library::missing(&paths, &items);
+                if !gone.is_empty() && st(&h).library.lock().unwrap().forget(&gone) { broadcast(&h, "library:changed", Value::Null); }
+                std::thread::sleep(Duration::from_secs(3)); warm_overlays(&h); backfill_thumbs(&h);
+            } });
             let args: Vec<String> = std::env::args().collect();
             if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--self-test=")) {
                 let dir = PathBuf::from(dir);

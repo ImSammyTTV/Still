@@ -4,6 +4,20 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.58 — 2026-11-16
+
+The last of the smoothness work: places where Still could still pause.
+
+- **Copy, Pin, Share and Save As no longer freeze the image editor** (Mac). They finish a moment later instead of
+  locking the window, and dragging the picture out of the editor starts straight away.
+- **Recording a large area no longer makes the computer stutter** (Windows), even at 60 frames a second.
+- **Opening, importing and combining captures happen in the background** (Mac), as do window captures with a
+  background and the right-click Services actions.
+- **Long scrolling captures stay smooth** (Mac) however long they get.
+- **Installing an update no longer freezes Still** while it's checked and unpacked (Mac).
+- **Still starts faster** (Windows, Linux). Captures whose files were moved or deleted leave History just after start.
+- **Undo after many crops or resizes** (Mac) goes back through the last 8 different pictures, so memory stays in check.
+
 ## v1.2.57 — 2026-11-15
 
 More smoothness: the rest of the places where Still could freeze or stutter.

@@ -10,6 +10,35 @@ struct EditSnapshot {
     var presentation: PresentationState
 }
 struct PresentationState { var frame: FrameStyle; var padding: Double; var radius: Double; var shadow: Double; var aspect: Double?; var image: Data?; var x: Double; var y: Double }
+/// Everything needed to draw the edited picture, copied from the editor in one go. Drawing and encoding a full-size
+/// picture can take a second on a big display, so Save, Copy, Pin, Share and Save As hand this to a background task
+/// and the editor stays responsive meanwhile; later edits don't change a drawing already under way.
+struct EditRender {
+    let source: CGImage
+    let marks: [Mark]
+    let frame: FrameStyle
+    let padding: Double, cornerRadius: Double, shadow: Double
+    let aspectRatio: Double?
+    let customBackground: Data?
+    let alignmentX: Double, alignmentY: Double
+    let watermark: Watermark?
+    func image() throws -> CGImage {
+        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
+        return watermark?.apply(to: image) ?? image
+    }
+    func document() throws -> ProjectDocument {
+        try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
+    }
+    /// Writes the picture as "<name>.png" in a new temporary folder, for dragging into other apps, with a small copy
+    /// for the picture that follows the pointer.
+    func dragFile(named name: String) throws -> (url: URL, preview: CGImage?) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-drag-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(name + ".png"), picture = try image()
+        try ImageRenderer.data(picture).write(to: url)
+        return (url, ImageRenderer.thumbnail(picture, maxPixelSize: 440))
+    }
+}
 enum EditorSheet: String, Identifiable { case text, ocr, background, resize, palette, saveForSize; var id: String { rawValue } }
 
 @MainActor
@@ -47,7 +76,7 @@ final class EditorModel: ObservableObject {
     @Published var alignmentY: Double = 0.5 { willSet { if !suppressChanges, newValue != alignmentY { willChange() } } didSet { if !suppressChanges { dirty = true } } }
     @Published var zoom: Double = 0
     @Published var isRecognizing = false
-    @Published var dirty = false { didSet { if dirty { edits &+= 1 } } }
+    @Published var dirty = false { didSet { if dirty { edits &+= 1; prepareDragFile() } } }
     /// Counts edits, so a save running in the background knows whether more were made while it ran.
     private var edits = 0
     @Published private(set) var saving = false
@@ -73,6 +102,7 @@ final class EditorModel: ObservableObject {
         source = image; self.item = item; self.library = library; self.isSample = isSample
         lineWidth = Preferences.shared.annotateDefaultWidth; color = Preferences.shared.annotateDefaultColor
         tool = MarkTool(rawValue: Preferences.shared.annotateDefaultTool) ?? .arrow
+        prepareDragFile()
     }
     private var currentSnapshot: EditSnapshot { EditSnapshot(image: source, marks: marks, presentation: PresentationState(frame: frame, padding: padding, radius: cornerRadius, shadow: shadow, aspect: aspectRatio, image: customBackground, x: alignmentX, y: alignmentY)) }
     private func apply(_ state: EditSnapshot) {
@@ -85,6 +115,17 @@ final class EditorModel: ObservableObject {
         undoStack.append(currentSnapshot)
         if undoStack.count > 30 { undoStack.removeFirst() }
         redoStack.removeAll()
+        limitUndoPictures()
+    }
+    /// Steps that only add, move or restyle marks hold the very same picture as the step before (a CGImage is shared,
+    /// never copied), so they cost next to nothing. A crop, turn or resize makes a new full-size picture, though, and
+    /// thirty of those from a big display could hold gigabytes. So at most this many different pictures are kept for
+    /// undo: past that the oldest steps are let go. The trade-off is that after many crops or resizes in a row, undo
+    /// can't go all the way back to the first one, but the editor's memory stays bounded however long you edit.
+    private static let undoPictureLimit = 8
+    private func limitUndoPictures() {
+        func pictures() -> Int { Set((undoStack+redoStack).map { ObjectIdentifier($0.image) }).count }
+        while !undoStack.isEmpty, pictures() > Self.undoPictureLimit { undoStack.removeFirst() }
     }
     /// While a Background slider is held, the whole drag is one undo step: the picture before it is kept once, at the
     /// first change, instead of on every tick (which also pushed the earlier steps off the undo list).
@@ -179,14 +220,22 @@ final class EditorModel: ObservableObject {
         cropSize = size; cropAspect = size?.aspect; tool = .crop
         if let size { library.toast("Drag over the part to keep for \(size.title)") }
     }
-    /// The picture as it leaves the editor, with the watermark from Settings unless it's left off this one.
-    func flattened(watermarked: Bool = true) throws -> CGImage {
-        let image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
-        guard watermarked, watermarkOn, let watermark = Preferences.shared.watermark else { return image }
-        return watermark.apply(to: image)
+    /// What the picture looks like right now, to draw in the background, with the watermark from Settings unless it's
+    /// left off this one.
+    func renderSnapshot(watermarked: Bool = true) -> EditRender {
+        EditRender(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio,
+                   customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY, watermark: watermarked && watermarkOn ? Preferences.shared.watermark : nil)
+    }
+    /// The picture as it leaves the editor, drawn right here. Only for when the answer is needed before returning
+    /// (saving as the window closes); everything else draws a `renderSnapshot()` in the background.
+    func flattened(watermarked: Bool = true) throws -> CGImage { try renderSnapshot(watermarked: watermarked).image() }
+    /// Draws the picture off the main thread and hands it back here.
+    private func renderedInBackground() async throws -> CGImage {
+        let job = renderSnapshot()
+        return try await Task.detached(priority: .userInitiated) { try job.image() }.value
     }
     /// Whether this picture gets the watermark; the stamp button in the toolbar turns it off for just this one.
-    @Published var watermarkOn = true
+    @Published var watermarkOn = true { didSet { prepareDragFile() } }
     func document() throws -> ProjectDocument { try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
     var canvasLayout: (size: CGSize, origin: CGPoint) { ImageRenderer.canvasLayout(source: CGSize(width: source.width, height: source.height), framed: frame != .none || customBackground != nil, padding: Int(padding), aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY) }
     func autoBalance() {
@@ -201,6 +250,8 @@ final class EditorModel: ObservableObject {
         aspectRatio = document.aspectRatio; customBackground = document.customBackground; dirty = false
         alignmentX = document.alignmentX ?? 0.5; alignmentY = document.alignmentY ?? 0.5
         suppressChanges = false
+        // A different picture without marking it edited: count it anyway, so the file kept ready for dragging is redrawn.
+        edits &+= 1; prepareDragFile()
     }
     /// Saves to Capture History. Rendering and encoding a full-size picture takes a second or more on a big display,
     /// so it runs in the background and the editor stays responsive; `done` runs once it's saved.
@@ -208,16 +259,12 @@ final class EditorModel: ObservableObject {
         if !dirty, let current = item, library.items.contains(where: { $0.id == current.id }) { done?(); return }
         guard !saving else { return }
         saving = true
-        let source = source, marks = marks, frame = frame, padding = padding, cornerRadius = cornerRadius, shadow = shadow
-        let aspectRatio = aspectRatio, customBackground = customBackground, alignmentX = alignmentX, alignmentY = alignmentY
-        let watermark = watermarkOn ? Preferences.shared.watermark : nil, started = edits
+        let job = renderSnapshot(), started = edits
         Task {
             do {
                 let (png, project, width, height) = try await Task.detached(priority: .userInitiated) { () throws -> (Data, ProjectDocument, Int, Int) in
-                    var image = try ImageRenderer.render(source, marks: marks, frame: frame, padding: Int(padding), cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
-                    if let watermark { image = watermark.apply(to: image) }
-                    let document = try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY)
-                    return (try ImageRenderer.libraryData(image), document, image.width, image.height)
+                    let image = try job.image()
+                    return (try ImageRenderer.libraryData(image), try job.document(), image.width, image.height)
                 }.value
                 // The capture was deleted from history while this editor was open: save it as a new one.
                 if let current = item, !library.items.contains(where: { $0.id == current.id }) { item = nil }
@@ -245,8 +292,22 @@ final class EditorModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
     func copy() {
-        do { library.copy(try flattened()) }
-        catch { self.error = error.localizedDescription }
+        let job = renderSnapshot()
+        Task {
+            do {
+                let png = try await Task.detached(priority: .userInitiated) { try ImageRenderer.data(job.image()) }.value
+                library.copy(png: png)
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+    /// Pin to Screen: the edited picture floats above other windows once it's drawn.
+    func pin() {
+        Task {
+            do {
+                let image = try await renderedInBackground()
+                AppController.shared.pin(image)
+            } catch { self.error = error.localizedDescription }
+        }
     }
     func saveProject() {
         let panel = NSSavePanel(); panel.allowedContentTypes = [UTType(exportedAs: "local.sam.still.project", conformingTo: .json)]
@@ -275,48 +336,93 @@ final class EditorModel: ObservableObject {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]
         if panel.runModal() == .OK, let url = panel.url { addImage(url) }
     }
-    /// Writes the current edit to a temporary PNG named after the capture, for dragging into other apps.
-    func dragFile() -> URL? {
+    // "Drag to share" has to hand over a finished file the moment the drag starts, and drawing and encoding a big
+    // picture right then froze the editor mid-gesture. So a PNG of the current edit is kept ready instead: it's redrawn
+    // in the background half a second after the last change, and a drag just uses it.
+    private struct DragKey: Equatable { var edits: Int; var watermark: Watermark?; var name: String }
+    private struct DragFile { var key: DragKey; var url: URL; var preview: CGImage?; var handedOut: Bool }
+    private var dragReady: DragFile?
+    private var dragRefresh: Task<Void, Never>?
+    private var dragName: String { (item?.title ?? "Screenshot").replacingOccurrences(of: "/", with: "-") }
+    /// What the ready file must have been drawn from to still be the picture on screen.
+    private var dragKey: DragKey { DragKey(edits: edits, watermark: watermarkOn ? Preferences.shared.watermark : nil, name: dragName) }
+    /// Redraws the file kept ready for dragging once edits pause for half a second.
+    private func prepareDragFile() {
+        dragRefresh?.cancel()
+        dragRefresh = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled, let self else { return }
+            let key = self.dragKey
+            if self.dragReady?.key == key { return }
+            let job = self.renderSnapshot(), name = key.name
+            let drawn = try? await Task.detached(priority: .utility) { try job.dragFile(named: name) }.value
+            guard let made = drawn else { return }
+            // Edited again while it was drawn: this one is already out of date, and the next round replaces it.
+            guard !Task.isCancelled, self.dragKey == key else { EditorModel.discardDragFolder(made.url); return }
+            self.keepDragFile(DragFile(key: key, url: made.url, preview: made.preview, handedOut: false))
+        }
+    }
+    private func keepDragFile(_ file: DragFile) {
+        // A file already given to a drag stays: the app it was dropped on may still be reading it.
+        if let old = dragReady, !old.handedOut, old.url != file.url { EditorModel.discardDragFolder(old.url) }
+        dragReady = file
+    }
+    /// When the editor closes: the file kept ready goes, unless a drag took it.
+    func discardDragFile() {
+        dragRefresh?.cancel(); dragRefresh = nil
+        if let ready = dragReady, !ready.handedOut { EditorModel.discardDragFolder(ready.url) }
+        dragReady = nil
+    }
+    private static func discardDragFolder(_ file: URL) {
+        let folder = file.deletingLastPathComponent()
+        DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: folder) }
+    }
+    /// The current edit as a PNG file named after the capture, for dragging into other apps, with a small preview to
+    /// show under the pointer. Normally the file kept ready; only a drag within half a second of a change draws it here.
+    func dragFile() -> (url: URL, preview: CGImage?)? {
+        let key = dragKey
+        if var ready = dragReady, ready.key == key {
+            ready.handedOut = true; dragReady = ready
+            return (ready.url, ready.preview)
+        }
         do {
-            let name = (item?.title ?? "Screenshot").replacingOccurrences(of: "/", with: "-")
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-drag-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent(name + ".png")
-            try ImageRenderer.data(flattened()).write(to: url)
-            return url
+            let made = try renderSnapshot().dragFile(named: key.name)
+            keepDragFile(DragFile(key: key, url: made.url, preview: made.preview, handedOut: true))
+            return made
         } catch { self.error = error.localizedDescription; return nil }
     }
-    func dragProvider() -> NSItemProvider {
-        do {
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("Still-\(UUID()).png")
-            try ImageRenderer.data(flattened()).write(to: url)
-            return NSItemProvider(contentsOf: url) ?? NSItemProvider()
-        } catch { self.error = error.localizedDescription; return NSItemProvider() }
-    }
     func share() {
-        do {
-            let image = NSImage(cgImage: try flattened(), size: .zero)
-            let picker = NSSharingServicePicker(items: [image])
-            if let view = NSApp.keyWindow?.contentView { picker.show(relativeTo: NSRect(x: view.bounds.maxX-200, y: 20, width: 1, height: 1), of: view, preferredEdge: .minY) }
-        } catch { self.error = error.localizedDescription }
+        // The picker opens on the window Share was clicked in, even if another is in front by the time it's drawn.
+        let window = NSApp.keyWindow
+        Task {
+            do {
+                let drawn = try await renderedInBackground()
+                let image = NSImage(cgImage: drawn, size: .zero)
+                let picker = NSSharingServicePicker(items: [image])
+                if let view = (window ?? NSApp.keyWindow)?.contentView { picker.show(relativeTo: NSRect(x: view.bounds.maxX-200, y: 20, width: 1, height: 1), of: view, preferredEdge: .minY) }
+            } catch { self.error = error.localizedDescription }
+        }
     }
+    /// Save As: the Save panel opens straight away; the picture is drawn and encoded in the background once a place is
+    /// chosen.
     func export() {
-        do { library.export(try flattened(), title: item?.title ?? "Still capture") }
-        catch { self.error = error.localizedDescription }
+        let job = renderSnapshot()
+        library.export(title: item?.title ?? "Still capture") { try job.image() }
     }
     @Published var makingSize = false
     /// Save for Size: the edited picture as a square or as it is, at a width, under a file size, then a Save panel.
     func saveForSize(square: Bool, width: Int, limitKB: Int, jpeg: Bool) {
         guard !makingSize else { return }
-        let image: CGImage
-        do { image = try flattened() } catch { self.error = error.localizedDescription; return }
         makingSize = true
-        let plan = ExportSize.plan(width: image.width, height: image.height, square: square, width: width)
-        let title = item?.title ?? "Still capture"
+        let job = renderSnapshot(), title = item?.title ?? "Still capture"
         Task {
             defer { makingSize = false }
             do {
-                let out = try await Task.detached(priority: .userInitiated) { try ExportSize.make(image, plan: plan, limit: limitKB*1024, jpeg: jpeg) }.value
+                let out = try await Task.detached(priority: .userInitiated) { () throws -> (data: Data, width: Int, height: Int, fits: Bool) in
+                    let image = try job.image()
+                    let plan = ExportSize.plan(width: image.width, height: image.height, square: square, width: width)
+                    return try ExportSize.make(image, plan: plan, limit: limitKB*1024, jpeg: jpeg)
+                }.value
                 activeSheet = nil
                 let panel = NSSavePanel(); panel.allowedContentTypes = [jpeg ? .jpeg : .png]
                 panel.nameFieldStringValue = "\(title) \(out.width)×\(out.height).\(jpeg ? "jpg" : "png")"
@@ -377,12 +483,11 @@ final class EditorModel: ObservableObject {
     func recognize() {
         guard !isRecognizing else { return }
         isRecognizing = true
-        let image: CGImage
-        do { image = try flattened(watermarked: false) } catch { self.error = error.localizedDescription; isRecognizing = false; return }
+        let job = renderSnapshot(watermarked: false)
         Task {
             do {
                 let text = try await Task.detached(priority: .userInitiated) {
-                    try TextRecognition.recognize(image)
+                    try TextRecognition.recognize(job.image())
                 }.value
                 recognizedText = text.isEmpty ? "No readable text found. Try a larger, clearer capture." : text
             } catch { self.error = "Text recognition failed: \(error.localizedDescription)" }

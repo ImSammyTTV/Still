@@ -47,7 +47,8 @@ import StillCore
         do {
             let image = try await ScreenCaptureAPI.image(screen: display, rect: rect, filter: filter)
             let added = try await Task.detached(priority: .userInitiated) { try stitcher.append(image) }.value
-            if added { let result = try stitcher.result(); frames = stitcher.frameCount; dimensions = "\(result.width) × \(result.height)"; message = "Capturing… scroll slowly, then click Done." }
+            // Only the size is shown while capturing; the finished picture is drawn once, at Done.
+            if added { let size = stitcher.resultSize; frames = stitcher.frameCount; dimensions = "\(size.width) × \(size.height)"; message = "Capturing… scroll slowly, then click Done." }
             if autoScroll {
                 let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: axis == .vertical ? -220 : 0, wheel2: axis == .horizontal ? -220 : 0, wheel3: 0)
                 wheel?.post(tap: .cghidEventTap)
@@ -68,8 +69,16 @@ import StillCore
     func finish() { running = false; autoScroll = false; timer?.invalidate(); finishing = true; if !processing { complete() } }
     private func complete() {
         guard finishing else { return }; finishing = false
-        do { let image = try stitcher?.result(); close(); if let image { onComplete?(image) } }
-        catch { message = error.localizedDescription }
+        guard let stitcher else { close(); return }
+        // Turning a long horizontal capture the right way round redraws all of it, so it happens off the main thread.
+        Task {
+            do {
+                let image = try await Task.detached(priority: .userInitiated) { try stitcher.result() }.value
+                // Cancelled while it was drawn: nothing to hand over.
+                guard self.stitcher === stitcher else { return }
+                close(); onComplete?(image)
+            } catch { message = error.localizedDescription }
+        }
     }
     func cancel() { running = false; autoScroll = false; finishing = false; timer?.invalidate(); if processing { DispatchQueue.main.asyncAfter(deadline: .now()+0.8) { self.close(); self.onCancel?() } } else { close(); onCancel?() } }
     private func close() { timer?.invalidate(); timer = nil; panel?.close(); border?.close(); panel = nil; border = nil; stitcher = nil; filter = nil }

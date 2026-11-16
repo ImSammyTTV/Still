@@ -23,6 +23,13 @@ public final class ScrollingStitcher: @unchecked Sendable {
         previous = image; combined = image
     }
     public func result() throws -> CGImage { axis == .horizontal ? try ImageRenderer.orient(combined, orientation: 8) : combined }
+    /// The finished picture's size without drawing it. `result()` turns a horizontal capture the right way round, which
+    /// redraws the whole stitched picture; the live frame count only needs the numbers, so it asks for these.
+    public var resultSize: (width: Int, height: Int) { Self.finishedSize(stitchedWidth: combined.width, stitchedHeight: combined.height, axis: axis) }
+    /// A horizontal capture is stitched turned on its side, so its width and height swap back at the end.
+    public static func finishedSize(stitchedWidth: Int, stitchedHeight: Int, axis: StitchAxis) -> (width: Int, height: Int) {
+        axis == .horizontal ? (stitchedHeight, stitchedWidth) : (stitchedWidth, stitchedHeight)
+    }
     @discardableResult public func append(_ next: CGImage) throws -> Bool {
         let image = axis == .horizontal ? try ImageRenderer.orient(next, orientation: 6) : next
         guard image.width == previous.width, image.height == previous.height else { throw StitchError.differentSize }

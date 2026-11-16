@@ -83,6 +83,17 @@ final class PreviewAndEncodingTests: XCTestCase {
         let a = pixels(memory), b = pixels(file)
         XCTAssertLessThan(Double(zip(a, b).reduce(0) { $0+abs(Int($1.0)-Int($1.1)) })/Double(a.count), 6)
     }
+    /// Decoding up front (off the main thread) gives the same picture as decoding at first draw.
+    func testLoadingDecodedNowGivesTheSamePicture() throws {
+        let png = try ImageRenderer.data(image())
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("still-load-\(UUID().uuidString).png")
+        try png.write(to: file); defer { try? FileManager.default.removeItem(at: file) }
+        let lazy = try XCTUnwrap(ImageRenderer.load(file)), now = try XCTUnwrap(ImageRenderer.load(file, decodeNow: true))
+        let fromData = try XCTUnwrap(ImageRenderer.load(data: png, decodeNow: true))
+        XCTAssertEqual(try ImageRenderer.data(lazy), try ImageRenderer.data(now))
+        XCTAssertEqual(try ImageRenderer.data(lazy), try ImageRenderer.data(fromData))
+        XCTAssertNil(ImageRenderer.load(data: Data("not a picture".utf8)))
+    }
     func testBitratePresetTagsAndDefaults() {
         let preset = BitratePreset(name: "Tutorials", megabits: 12.5)
         XCTAssertEqual(preset.bitrate, 12_500_000); XCTAssertEqual(preset.tag, "bitrate:12500000")

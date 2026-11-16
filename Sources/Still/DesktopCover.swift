@@ -18,13 +18,15 @@ import ImageIO
     /// The wallpaper file's bytes, kept while the file stays the same: a window capture with a background asks on
     /// every capture, and a wallpaper can be tens of megabytes.
     private var backgroundFile: (key: String, data: Data)?
-    func backgroundData(for screen: NSScreen?) -> Data? {
+    /// The file is read off the main thread the first time, so a window capture never waits on the disk.
+    func loadBackgroundData(for screen: NSScreen?) async -> Data? {
         let prefs = Preferences.shared
         if prefs.wallpaperMode == "color" { return nil }
         guard let url = prefs.wallpaperMode == "image" ? URL(fileURLWithPath: prefs.wallpaperImage) : screen.flatMap({ NSWorkspace.shared.desktopImageURL(for: $0) }) else { return nil }
         let key = Self.fileKey(url)
         if let saved = backgroundFile, saved.key == key { return saved.data }
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        let read = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
+        guard let data = read else { return nil }
         backgroundFile = (key, data)
         return data
     }

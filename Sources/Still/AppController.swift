@@ -98,13 +98,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     let prepared = try await VideoEngine.prepare(url: url, settings: settings, metadata: metadata, cameraURL: camera)
                     if gif { try await VideoEngine.gif(prepared, to: exported, fps: Preferences.shared.gifFPS, width: Preferences.shared.gifWidth) }
                     else { try await VideoEngine.export(prepared, to: exported) }
-                    let item = try self.library.add(file: exported, title: self.captureTitle("Recording"), video: true)
+                    let item = try await self.library.add(file: exported, title: self.captureTitle("Recording"), video: true)
                     try self.library.attachVideoSource(item, source: url); try self.library.saveRecordingMetadata(item, metadata: metadata, camera: camera)
                     if Preferences.shared.copyRecording { self.library.copy(item) }
                     if Preferences.shared.recordingPreview { self.showPreview(item) }
                     if showEditor { self.openVideoEditor(item) }
                 } catch {
-                    if let item = try? self.library.add(file: url, title: self.captureTitle("Original recording"), video: true) {
+                    if let item = try? await self.library.add(file: url, title: self.captureTitle("Original recording"), video: true) {
                         try? self.library.saveRecordingMetadata(item, metadata: metadata, camera: camera)
                         self.showError("The original recording was kept", "The effects export failed: \(error.localizedDescription). You can open the original in Capture History.")
                     } else {
@@ -421,14 +421,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 library.permissionGranted = true; library.permissionError = nil
                 _ = try await runCapture(args)
-                guard let image = ImageRenderer.load(file) else {
+                // Decoding the capture, and drawing a window onto the wallpaper, happen off the main thread.
+                let loaded = await Task.detached(priority: .userInitiated) { ImageRenderer.load(file, decodeNow: true) }.value
+                guard let image = loaded else {
                     if restoreOnCancel { showMain() }
                     return
                 }
                 var finalImage = image
                 if mode == .window, Preferences.shared.windowBackground {
-                    let background = DesktopCover.shared.backgroundData(for: NSScreen.main)
-                    finalImage = try ImageRenderer.render(image, frame: .midnight, padding: Int(Preferences.shared.windowPadding), customBackground: background)
+                    let background = await DesktopCover.shared.loadBackgroundData(for: NSScreen.main)
+                    let padding = Int(Preferences.shared.windowPadding)
+                    finalImage = try await Task.detached(priority: .userInitiated) { try ImageRenderer.render(image, frame: .midnight, padding: padding, customBackground: background) }.value
                 }
                 await completeScreenshot(finalImage)
             } catch { showError("Capture failed", error.localizedDescription) }
@@ -452,34 +455,50 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// History's Combine: the chosen screenshots joined into one new capture, in the order they were picked, which
     /// opens in the editor.
     func combine(_ items: [CaptureItem], vertical: Bool) {
-        let images = items.filter { !$0.isVideo }.compactMap { ImageRenderer.load(library.url($0)) }
-        guard images.count >= 2, images.count == items.count else { library.toast("Choose two or more screenshots to combine"); return }
+        let files = items.filter { !$0.isVideo }.map { library.url($0) }
+        guard files.count >= 2, files.count == items.count else { library.toast("Choose two or more screenshots to combine"); return }
         Task {
             do {
-                let (joined, png) = try await Task.detached(priority: .userInitiated) { () -> (CGImage, Data) in
+                // Reading the screenshots, joining them and encoding the result all happen off the main thread.
+                let made = try await Task.detached(priority: .userInitiated) { () throws -> (CGImage, Data)? in
+                    let images = files.compactMap { ImageRenderer.load($0) }
+                    guard images.count == files.count else { return nil }
                     guard let joined = CaptureCombine.combine(images, vertical: vertical) else { throw CocoaError(.fileWriteUnknown) }
                     return (joined, try ImageRenderer.libraryData(joined))
                 }.value
-                let item = try library.add(png: png, width: joined.width, height: joined.height, title: "Combined \(images.count) screenshots")
+                guard let made else { library.toast("Choose two or more screenshots to combine"); return }
+                let joined = made.0
+                let item = try library.add(png: made.1, width: joined.width, height: joined.height, title: "Combined \(files.count) screenshots")
                 openEditor(image: joined, item: item)
             } catch { showError("Couldn’t combine the screenshots", error.localizedDescription) }
         }
     }
-    func openItem(_ item: CaptureItem) {
-        if item.isVideo { openVideoEditor(item) }
-        else if let image = ImageRenderer.load(library.url(item)) { openEditor(image: image, item: item) }
+    /// Opens a capture in its editor. A screenshot (and its editable project, if it has one) is read and decoded off the
+    /// main thread first, so a big one never stalls Still; `then` gets the editor once it's open.
+    func openItem(_ item: CaptureItem, then: ((EditorModel) -> Void)? = nil) {
+        if item.isVideo { openVideoEditor(item); return }
+        if editors[item.id] != nil, let model = editorModels[item.id] { openEditor(image: model.source, item: item); then?(model); return }
+        let file = library.url(item), projectFile = library.projectURL(item)
+        Task {
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (image: CGImage, project: ProjectDocument?)? in
+                guard let image = ImageRenderer.load(file, decodeNow: true) else { return nil }
+                return (image, projectFile.flatMap { try? ProjectDocument.read($0) })
+            }.value
+            guard let loaded else { return }
+            openEditor(image: loaded.image, item: item, project: loaded.project)
+            if let model = editorModels[item.id] { then?(model) }
+        }
     }
     /// Straight to Save for Size from the Floating Preview or History: the editor opens with the sheet up.
     func saveForSize(_ item: CaptureItem) {
         guard !item.isVideo else { return }
-        openItem(item)
-        editorModels[item.id]?.activeSheet = .saveForSize
+        openItem(item) { $0.activeSheet = .saveForSize }
     }
-    func openEditor(image: CGImage, item: CaptureItem? = nil, recognize: Bool = false, isSample: Bool = false) {
+    func openEditor(image: CGImage, item: CaptureItem? = nil, project: ProjectDocument? = nil, recognize: Bool = false, isSample: Bool = false) {
         if let item, let window = editors[item.id] { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let id = item?.id ?? UUID()
         let model = EditorModel(image: image, item: item, library: library, isSample: isSample)
-        if let item, let project = library.project(item) { model.restore(project) }
+        if let item, let project = project ?? library.project(item) { model.restore(project) }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = item?.title ?? "Still — Annotate"; window.minSize = NSSize(width: 1080, height: 560)
         window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
@@ -520,6 +539,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, let raw = window.identifier?.rawValue, let id = UUID(uuidString: raw) else { return }
+        editorModels[id]?.discardDragFile()
         DispatchQueue.main.async { self.editors[id] = nil; self.editorModels[id] = nil; self.videoModels[id] = nil; self.pins[id] = nil }
     }
     @objc func importImage() {
@@ -531,13 +551,31 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
     }
+    /// Opens an image or a project file in the editor. Reading, drawing and encoding it happen off the main thread.
     func importURL(_ url: URL) {
+        let title = url.deletingPathExtension().lastPathComponent
         if url.pathExtension.lowercased() == "stillshot" {
-            do { let document = try ProjectDocument.read(url); if let source = document.sourceImage() { let item = try library.add(image: source, title: url.deletingPathExtension().lastPathComponent); try library.update(item, image: ImageRenderer.render(source, marks: document.marks), document: document); openItem(item) } }
-            catch { showError("Couldn’t open project", error.localizedDescription) }; return
+            Task {
+                do {
+                    let made = try await Task.detached(priority: .userInitiated) { () throws -> (document: ProjectDocument, png: Data, width: Int, height: Int)? in
+                        let document = try ProjectDocument.read(url)
+                        guard let source = document.sourceImage() else { return nil }
+                        let flat = try ImageRenderer.render(source, marks: document.marks)
+                        return (document, try ImageRenderer.data(flat), flat.width, flat.height)
+                    }.value
+                    guard let made else { return }
+                    // History keeps the picture with its marks drawn in, and the project beside it for editing.
+                    let item = try library.add(png: made.png, width: made.width, height: made.height, title: title)
+                    try await library.update(item, png: made.png, width: made.width, height: made.height, document: made.document)
+                    openItem(item)
+                } catch { showError("Couldn’t open project", error.localizedDescription) }
+            }
+            return
         }
-        do { let item = try library.add(file: url, title: url.deletingPathExtension().lastPathComponent); openItem(item) }
-        catch { showError("Couldn’t open image", error.localizedDescription) }
+        Task {
+            do { let item = try await library.add(file: url, title: title); openItem(item) }
+            catch { showError("Couldn’t open image", error.localizedDescription) }
+        }
     }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {

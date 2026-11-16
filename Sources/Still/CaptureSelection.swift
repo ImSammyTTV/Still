@@ -175,6 +175,14 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         keptBar = panel
         return panel
     }
+    /// The bar's W × H fields follow the box being drawn. Every change to them redraws the Capture Bar, and a drag
+    /// sends dozens of events a second, so each is only set when its whole-pixel value actually changed: moving the box
+    /// without resizing it, or a sub-pixel move, no longer redraws the bar at all.
+    func showSize(_ size: CGSize) {
+        let w = String(Int(size.width)), h = String(Int(size.height))
+        if width != w { width = w }
+        if height != h { height = h }
+    }
     func setDimensions() {
         guard let width = Double(width), let height = Double(height), width > 1, height > 1 else { return }
         for view in views { view.fixedSize = CGSize(width: min(width, view.bounds.width), height: min(height, view.bounds.height)); view.refresh() }
@@ -386,7 +394,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         captureLabel.foregroundColor = NSColor.white.cgColor; captureLabel.contentsScale = scale; captureLabel.alignmentMode = .center; captureLabel.isHidden = true
         if Preferences.shared.rememberSelection, let saved = UserDefaults.standard.dictionary(forKey: "lastSelection"), let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue, (saved["screen"] as? Double) == id, let x = saved["x"] as? Double, let y = saved["y"] as? Double, let w = saved["w"] as? Double, let h = saved["h"] as? Double {
             region = CGRect(x: x, y: y, width: w, height: h).intersection(CGRect(origin: .zero, size: screen.frame.size))
-            coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height))
+            coordinator.showSize(region.size)
         }
         if let location = window?.mouseLocationOutsideOfEventStream { pointer = convert(location, from: nil) }
         else { let p = NSEvent.mouseLocation; pointer = CGPoint(x: p.x-screen.frame.minX, y: screen.frame.maxY-p.y) }
@@ -624,7 +632,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             } else {
                 region = SelectionGeometry.resize(grab.start, handle: grab.handle, dx: dx, dy: dy, within: bounds, aspect: coordinator.aspect > 0 ? coordinator.aspect : event.modifierFlags.contains(.shift) ? 1 : 0)
             }
-            coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height)); refresh(); return
+            coordinator.showSize(region.size); refresh(); return
         }
         if moving, let anchor, region.width > 0, region.height > 0 {
             let dx = min(max(next.x-pointer.x, -region.minX), bounds.width-region.maxX)
@@ -648,7 +656,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
         guard anchor != nil else { return }
         if region.width <= 2 || region.height <= 2, let fixedSize { region = CGRect(origin: anchor ?? .zero, size: fixedSize).intersection(bounds) }
         if region.width > 2, region.height > 2 {
-            coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height))
+            coordinator.showSize(region.size)
             if Preferences.shared.adjustBeforeCapture { adjusting = true; anchor = nil; moving = false; adjustCursor().set(); refresh(); return }
             coordinator.finish(on: display, rect: region)
         }
@@ -667,7 +675,7 @@ final class SelectionPanel: NSPanel { override var canBecomeKey: Bool { true }; 
             if region.isEmpty { let size = fixedSize ?? CGSize(width: min(640, bounds.width*0.6), height: min(360, bounds.height*0.6)); region = CGRect(x: bounds.midX-size.width/2, y: bounds.midY-size.height/2, width: size.width, height: size.height) }
             let step: Double = event.modifierFlags.contains(.shift) ? 10 : 1
             region = SelectionGeometry.move(region, within: bounds, dx: event.keyCode == 123 ? -step : event.keyCode == 124 ? step : 0, dy: event.keyCode == 126 ? -step : event.keyCode == 125 ? step : 0, resize: event.modifierFlags.contains(.option), aspect: coordinator.aspect)
-            coordinator.width = String(Int(region.width)); coordinator.height = String(Int(region.height)); refresh(); return
+            coordinator.showSize(region.size); refresh(); return
         }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "a": coordinator.purpose = .screenshot; coordinator.setWindowMode(false)

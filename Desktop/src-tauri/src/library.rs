@@ -69,13 +69,27 @@ impl Library {
                 Ok(items) => items,
                 // A damaged index is kept aside, never overwritten, and the list is rebuilt from the
                 // capture folders so nothing is orphaned.
-                Err(_) => { let _ = fs::rename(&index, dir.join(format!("library-damaged-{}.json", now_ms()))); rebuild(&dir) }
+                Err(_) => {
+                    let _ = fs::rename(&index, dir.join(format!("library-damaged-{}.json", now_ms())));
+                    let lib = Library { items: rebuild(&dir), dir, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0 };
+                    let _ = lib.save();
+                    return lib;
+                }
             },
         };
-        let mut lib = Library { dir, items, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0 };
-        lib.items.retain(|i| lib_file(&lib.dir, i).exists());
-        let _ = lib.save();
-        lib
+        // Captures whose files have gone are dropped later, off the start (see `missing` and `forget`): checking every
+        // file here held up Still's start with a long history.
+        Library { dir, items, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0 }
+    }
+    /// The ids of captures whose file is no longer on disk. Takes a copy of the list so it can run without the lock.
+    pub fn missing(paths: &Library, items: &[Item]) -> Vec<String> { items.iter().filter(|i| !lib_file(&paths.dir, i).exists()).map(|i| i.id.clone()).collect() }
+    /// Drops these captures from the list, saving it only if anything went.
+    pub fn forget(&mut self, ids: &[String]) -> bool {
+        let before = self.items.len();
+        self.items.retain(|i| !ids.contains(&i.id));
+        let changed = self.items.len() != before;
+        if changed { let _ = self.save(); }
+        changed
     }
     /// Writes the index to a temporary file and renames it over the old one, so a crash or a full disk
     /// never leaves a half-written library.json.
@@ -350,5 +364,24 @@ mod tests {
         assert_eq!(again.items.len(), 1);
         assert_eq!(again.items[0].id, item.id);
         assert!(fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("library-damaged-")));
+        // The rebuilt list is saved, so it's still there next time.
+        assert_eq!(Library::open(dir.clone()).items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn captures_whose_files_went_are_forgotten() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let kept = lib.add(b"a", "screenshot", "png", None, 1, 1).unwrap();
+        let gone = lib.add(b"b", "screenshot", "png", None, 1, 1).unwrap();
+        fs::remove_file(lib.file(&gone)).unwrap();
+        let mut again = Library::open(dir.clone());
+        let missing = Library::missing(&again.paths(), &again.items);
+        assert_eq!(missing, vec![gone.id.clone()]);
+        assert!(again.forget(&missing));
+        assert_eq!(again.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(), vec![kept.id]);
+        assert_eq!(Library::open(dir.clone()).items.len(), 1, "saved");
+        let _ = fs::remove_dir_all(dir);
     }
 }
