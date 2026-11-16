@@ -81,17 +81,14 @@ import CryptoKit
             do {
                 let (zip, _) = try await URLSession.shared.download(from: release.zip)
                 let (sumData, _) = try await URLSession.shared.data(from: release.sums)
-                let expected = String(decoding: sumData, as: UTF8.self).split(separator: "\n").first(where: { $0.hasSuffix(release.zip.lastPathComponent) })?.split(separator: " ").first.map(String.init)
-                let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-                guard let expected, expected == actual else { throw NSError(domain: "Still", code: 10, userInfo: [NSLocalizedDescriptionKey: "The download didn’t match its checksum, so nothing was installed."]) }
-                let work = FileManager.default.temporaryDirectory.appendingPathComponent("Still-update-\(UUID().uuidString)")
-                try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-                try run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
-                let app = work.appendingPathComponent("Still.app")
-                guard FileManager.default.fileExists(atPath: app.path) else { throw NSError(domain: "Still", code: 11, userInfo: [NSLocalizedDescriptionKey: "The update didn’t contain Still.app."]) }
-                do { try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "-R=\(Self.releaseRequirement)", app.path]) }
-                catch { throw NSError(domain: "Still", code: 13, userInfo: [NSLocalizedDescriptionKey: "The update isn’t signed by the Still project, so nothing was installed."]) }
-                try run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
+                // Checking, unpacking and verifying the download take several seconds; they run on a background queue
+                // so Still keeps responding meanwhile, and only the relaunch (or the error) comes back here.
+                let name = release.zip.lastPathComponent, requirement = Self.releaseRequirement
+                let (app, work) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(URL, URL), Error>) in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        continuation.resume(with: Result { try Updater.verifyAndUnpack(zip: zip, sums: sumData, name: name, requirement: requirement) })
+                    }
+                }
                 // Once this process has quit: copy the new app next to the old one, swap them, and only then
                 // remove the old copy, so a failure part-way never leaves you without Still. Paths are passed as
                 // arguments, not pasted into the script.
@@ -109,9 +106,29 @@ import CryptoKit
         }
     }
 
-    private func run(_ tool: String, _ arguments: [String]) throws {
+    /// Checks the download against its published checksum, unpacks it and checks its signature. Returns the new app and
+    /// the folder it was unpacked in. Runs off the main thread.
+    nonisolated private static func verifyAndUnpack(zip: URL, sums: Data, name: String, requirement: String) throws -> (URL, URL) {
+        let expected = String(decoding: sums, as: UTF8.self).split(separator: "\n").first(where: { $0.hasSuffix(name) })?.split(separator: " ").first.map(String.init)
+        let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
+        guard let expected, expected == actual else { throw NSError(domain: "Still", code: 10, userInfo: [NSLocalizedDescriptionKey: "The download didn’t match its checksum, so nothing was installed."]) }
+        let work = FileManager.default.temporaryDirectory.appendingPathComponent("Still-update-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
+        let app = work.appendingPathComponent("Still.app")
+        guard FileManager.default.fileExists(atPath: app.path) else { throw NSError(domain: "Still", code: 11, userInfo: [NSLocalizedDescriptionKey: "The update didn’t contain Still.app."]) }
+        do { try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "-R=\(requirement)", app.path]) }
+        catch { throw NSError(domain: "Still", code: 13, userInfo: [NSLocalizedDescriptionKey: "The update isn’t signed by the Still project, so nothing was installed."]) }
+        try run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
+        return (app, work)
+    }
+
+    nonisolated private static func run(_ tool: String, _ arguments: [String]) throws {
         let process = Process(); process.executableURL = URL(fileURLWithPath: tool); process.arguments = arguments
-        try process.run(); process.waitUntilExit()
+        // Waits for the tool to finish without needing a run loop on this background thread.
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        try process.run(); finished.wait()
         guard process.terminationStatus == 0 else { throw NSError(domain: "Still", code: 12, userInfo: [NSLocalizedDescriptionKey: "\(URL(fileURLWithPath: tool).lastPathComponent) failed while installing the update."]) }
     }
 

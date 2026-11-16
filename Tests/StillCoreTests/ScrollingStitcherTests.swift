@@ -53,4 +53,23 @@ final class ScrollingStitcherTests: XCTestCase {
         XCTAssertTrue(try stitcher.append(b)); XCTAssertEqual(try stitcher.result().width, 380, accuracy: 2)
         XCTAssertThrowsError(try stitcher.append(full))
     }
+    /// The live frame count shows the size without drawing the picture; it must match what Done produces.
+    func testResultSizeMatchesTheFinishedPictureWithoutDrawingIt() throws {
+        func check(_ size: (width: Int, height: Int), _ width: Int, _ height: Int, line: UInt = #line) {
+            XCTAssertEqual(size.width, width, line: line); XCTAssertEqual(size.height, height, line: line)
+        }
+        check(ScrollingStitcher.finishedSize(stitchedWidth: 120, stitchedHeight: 380, axis: .horizontal), 380, 120)
+        check(ScrollingStitcher.finishedSize(stitchedWidth: 160, stitchedHeight: 520, axis: .vertical), 160, 520)
+        let ctx = CGContext(data: nil, width: 600, height: 120, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        for x in 0..<600 { let level: Int = (x * 37 + x * x * 7) % 251; ctx.setFillColor(NSColor(white: CGFloat(level) / 255, alpha: 1).cgColor); ctx.fill(CGRect(x: x, y: 0, width: 1, height: 120)) }
+        let full = ctx.makeImage()!
+        let a = try ImageRenderer.crop(full, to: CGRect(x: 0, y: 0, width: 280, height: 120)), b = try ImageRenderer.crop(full, to: CGRect(x: 100, y: 0, width: 280, height: 120))
+        let horizontal = try ScrollingStitcher(a, axis: .horizontal)
+        check(horizontal.resultSize, 280, 120)
+        XCTAssertTrue(try horizontal.append(b))
+        let result = try horizontal.result()
+        check(horizontal.resultSize, result.width, result.height)
+        let vertical = try ScrollingStitcher(a)
+        check(vertical.resultSize, a.width, a.height)
+    }
 }

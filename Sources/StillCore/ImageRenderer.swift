@@ -310,16 +310,25 @@ public enum ImageRenderer {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
-    public static func load(_ url: URL) -> CGImage? {
+    /// Reads a picture file. Normally the pixels are only decoded when the picture is first drawn; `decodeNow` decodes
+    /// them here instead, so a caller off the main thread can spare the main thread that work at first draw.
+    public static func load(_ url: URL, decodeNow: Bool = false) -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let now: CFDictionary? = decodeNow ? ([kCGImageSourceShouldCacheImmediately: true] as CFDictionary) : nil
         // Apply the EXIF orientation (phone photos are often stored sideways) at full size.
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let orientation = properties?[kCGImagePropertyOrientation] as? UInt32 ?? 1
         guard orientation != 1, let width = properties?[kCGImagePropertyPixelWidth] as? Int, let height = properties?[kCGImagePropertyPixelHeight] as? Int else {
-            return CGImageSourceCreateImageAtIndex(source, 0, nil)
+            return CGImageSourceCreateImageAtIndex(source, 0, now)
         }
-        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: max(width, height)]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) ?? CGImageSourceCreateImageAtIndex(source, 0, nil)
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: max(width, height), kCGImageSourceShouldCacheImmediately: decodeNow]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) ?? CGImageSourceCreateImageAtIndex(source, 0, now)
+    }
+    /// The same for picture bytes already in memory (an image another app handed over, say).
+    public static func load(data: Data, decodeNow: Bool = false) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let now: CFDictionary? = decodeNow ? ([kCGImageSourceShouldCacheImmediately: true] as CFDictionary) : nil
+        return CGImageSourceCreateImageAtIndex(source, 0, now)
     }
 }
 

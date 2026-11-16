@@ -98,21 +98,35 @@ final class Library: ObservableObject {
     }
     /// Waits for history's index to reach the disk, for quitting.
     func finishWriting() { Self.indexQueue.sync {} }
+    /// Adds a picture or recording file to history. Copying, decoding and encoding happen off the main thread, so
+    /// opening a big image or finishing a long recording never stalls Still.
     @discardableResult
-    func add(file: URL, title: String, video: Bool = false) throws -> CaptureItem {
+    func add(file: URL, title: String, video: Bool = false) async throws -> CaptureItem {
         pruneHistory()
         let name = "\(UUID().uuidString).\(video ? (file.pathExtension.lowercased() == "gif" ? "gif" : "mp4") : "png")"
         let destination = root.appendingPathComponent(name)
-        if video { try FileManager.default.copyItem(at: file, to: destination) }
-        else {
-            guard let image = ImageRenderer.load(file) else { throw RenderError.encoding }
-            try ImageRenderer.data(image).write(to: destination, options: .atomic)
-        }
-        let image = video ? nil : ImageRenderer.load(destination)
-        let item = CaptureItem(filename: name, title: title, isVideo: video, width: image?.width ?? 0, height: image?.height ?? 0)
+        let size = try await Task.detached(priority: .userInitiated) { () throws -> (width: Int, height: Int) in
+            try Library.store(file, at: destination, video: video)
+        }.value
+        let item = CaptureItem(filename: name, title: title, isVideo: video, width: size.width, height: size.height)
         items.insert(item, at: 0)
         do { try persist() } catch { items.removeAll { $0.id == item.id }; try? FileManager.default.removeItem(at: destination); throw error }
         return item
+    }
+    /// Copies a file into history's folder and returns the picture's size (zero for a recording). A PNG is copied as it
+    /// is: decoding it and encoding it again only cost time. Other formats are stored as PNG.
+    nonisolated private static func store(_ file: URL, at destination: URL, video: Bool) throws -> (width: Int, height: Int) {
+        if video { try FileManager.default.copyItem(at: file, to: destination); return (0, 0) }
+        let data = try Data(contentsOf: file)
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { try data.write(to: destination, options: .atomic) }
+        else {
+            // Read from the file, which turns a sideways phone photo the right way up.
+            guard let image = ImageRenderer.load(file) else { throw RenderError.encoding }
+            try ImageRenderer.data(image).write(to: destination, options: .atomic)
+        }
+        // Reading the size only looks at the file's header; the pixels aren't decoded.
+        guard let stored = ImageRenderer.load(destination) else { try? FileManager.default.removeItem(at: destination); throw RenderError.encoding }
+        return (stored.width, stored.height)
     }
     @discardableResult
     func add(image: CGImage, title: String) throws -> CaptureItem {
@@ -162,8 +176,13 @@ final class Library: ObservableObject {
         do { try persist() } catch { toast(error.localizedDescription) }
     }
     func project(_ item: CaptureItem) -> ProjectDocument? {
+        guard let file = projectURL(item) else { return nil }
+        return try? ProjectDocument.read(file)
+    }
+    /// Where a capture's editable project is kept, if it has one.
+    func projectURL(_ item: CaptureItem) -> URL? {
         guard let saved = items.first(where: { $0.id == item.id }), let name = saved.projectFilename, !name.contains("/") else { return nil }
-        return try? ProjectDocument.read(root.appendingPathComponent(name))
+        return root.appendingPathComponent(name)
     }
     private var pruning = false
     /// Moves captures older than Settings keeps to the Trash. It runs before each new capture is stored, so the files
@@ -262,13 +281,14 @@ final class Library: ObservableObject {
             if self?.toastID == id { self?.message = nil }
         }
     }
+    /// Encodes the picture off the main thread, then puts it on the clipboard.
     func copy(_ image: CGImage) {
-        do {
-            let data = try ImageRenderer.data(image)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setData(data, forType: .png)
-            toast("Copied image")
-        } catch { toast(error.localizedDescription) }
+        Task {
+            do {
+                let png = try await Task.detached(priority: .userInitiated) { try ImageRenderer.data(image) }.value
+                copy(png: png)
+            } catch { toast(error.localizedDescription) }
+        }
     }
     /// Puts PNG bytes that are already encoded on the clipboard.
     func copy(png: Data) {
@@ -340,16 +360,23 @@ final class Library: ObservableObject {
     /// Describes a screenshot with the service Settings picked and keeps the description with it.
     @MainActor func describedText(_ item: CaptureItem) async throws -> String {
         guard let key = GeminiKey.value else { throw ImageDescriber.Failure(message: "Add a key in Still’s Settings → AI first.") }
-        guard !item.isVideo, let image = ImageRenderer.load(url(item)) else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
-        // A big screenshot is scaled down first: smaller to send, and plenty for a description.
-        guard let data = try? ImageRenderer.data(Self.scaledDown(image, maxSide: 1600)) else { throw ImageDescriber.Failure(message: "Couldn’t read this screenshot.") }
+        guard !item.isVideo else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
+        // A big screenshot is scaled down first: smaller to send, and plenty for a description. Reading, scaling and
+        // encoding it happen off the main thread.
+        let file = url(item)
+        let prepared = await Task.detached(priority: .userInitiated) { () -> (loaded: Bool, data: Data?) in
+            guard let image = ImageRenderer.load(file) else { return (false, nil) }
+            return (true, try? ImageRenderer.data(Library.scaledDown(image, maxSide: 1600)))
+        }.value
+        guard prepared.loaded else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
+        guard let data = prepared.data else { throw ImageDescriber.Failure(message: "Couldn’t read this screenshot.") }
         let text = Preferences.shared.describeProvider == "claude"
             ? try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
             : try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].imageDescription = text; try? persist() }
         return text
     }
-    static func scaledDown(_ image: CGImage, maxSide: Int) -> CGImage {
+    nonisolated static func scaledDown(_ image: CGImage, maxSide: Int) -> CGImage {
         let side = max(image.width, image.height)
         guard side > maxSide else { return image }
         let k = Double(maxSide)/Double(side), w = max(1, Int(Double(image.width)*k)), h = max(1, Int(Double(image.height)*k))
@@ -383,12 +410,30 @@ final class Library: ObservableObject {
             let panel = NSSavePanel(); panel.allowedContentTypes = item.filename.lowercased().hasSuffix(".gif") ? [.gif] : [.mpeg4Movie]; panel.nameFieldStringValue = "\(item.title).\(item.filename.lowercased().hasSuffix(".gif") ? "gif" : "mp4")"
             NSApp.activate(ignoringOtherApps: true)
             if panel.runModal() == .OK, let destination = panel.url {
-                do { try Data(contentsOf: url(item)).write(to: destination, options: .atomic); toast("Recording saved") }
-                catch { toast(error.localizedDescription) }
+                // A long recording is hundreds of megabytes: it's copied off the main thread.
+                let source = url(item)
+                Self.fileQueue.async { [weak self] in
+                    let result: Result<Void, Error> = Result { try Data(contentsOf: source).write(to: destination, options: .atomic) }
+                    DispatchQueue.main.async { MainActor.assumeIsolated {
+                        switch result {
+                        case .success: self?.toast("Recording saved")
+                        case .failure(let error): self?.toast(error.localizedDescription)
+                        }
+                    } }
+                }
             }
-        } else if let image = ImageRenderer.load(url(item)) { export(image, title: item.title) }
+        } else {
+            let file = url(item)
+            export(title: item.title) {
+                guard let image = ImageRenderer.load(file) else { throw RenderError.encoding }
+                return image
+            }
+        }
     }
-    func export(_ image: CGImage, title: String = "Still capture") {
+    func export(_ image: CGImage, title: String = "Still capture") { export(title: title) { image } }
+    /// Save As for a picture: the Save panel, set up with the format and folder from Settings, then `make` draws the
+    /// picture and it's encoded and written off the main thread, so a big one never stalls Still after the panel closes.
+    func export(title: String, image make: @escaping @Sendable () throws -> CGImage) {
         let format = Preferences.shared.exportFormat
         let type: UTType = format == "jpg" ? .jpeg : format == "heic" ? .heic : format == "tiff" ? .tiff : .png
         let panel = NSSavePanel(); panel.allowedContentTypes = [type]
@@ -396,9 +441,15 @@ final class Library: ObservableObject {
         if !exportFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: exportFolder) }
         else { try? FileManager.default.createDirectory(at: Self.defaultExportFolder, withIntermediateDirectories: true); panel.directoryURL = Self.defaultExportFolder }
         NSApp.activate(ignoringOtherApps: true)
-        if panel.runModal() == .OK, let destination = panel.url {
-            do { try ImageRenderer.data(image, format: format).write(to: destination, options: .atomic); toast("Saved to \(destination.lastPathComponent)") }
-            catch { toast("Couldn’t save: \(error.localizedDescription)") }
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        Self.fileQueue.async { [weak self] in
+            let result: Result<Void, Error> = Result { try ImageRenderer.data(make(), format: format).write(to: destination, options: .atomic) }
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                switch result {
+                case .success: self?.toast("Saved to \(destination.lastPathComponent)")
+                case .failure(let error): self?.toast("Couldn’t save: \(error.localizedDescription)")
+                }
+            } }
         }
     }
     func captureName(width: Int, height: Int, isVideo: Bool = false) -> String {

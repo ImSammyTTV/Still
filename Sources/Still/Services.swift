@@ -10,17 +10,27 @@ extension AppController {
     @objc func openInStill(_ pasteboard: NSPasteboard, userData: String?, error failure: AutoreleasingUnsafeMutablePointer<NSString?>) {
         let urls = serviceFileURLs(pasteboard)
         if !urls.isEmpty { for url in urls { importURL(url) } }
-        else if let image = serviceImages(pasteboard).first {
-            do { openItem(try library.add(image: image, title: library.captureName(width: image.width, height: image.height))) }
-            catch { let text = error.localizedDescription; DispatchQueue.main.async { self.showError("Couldn’t open image", text) }; return }
+        else if let data = servicePictureData(pasteboard) {
+            Task {
+                do {
+                    // Decoding and encoding a big picture happen off the main thread.
+                    let made = try await Task.detached(priority: .userInitiated) { () throws -> (png: Data, width: Int, height: Int) in
+                        guard let image = ImageRenderer.load(data: data, decodeNow: true) else { throw RenderError.encoding }
+                        return (try ImageRenderer.libraryData(image), image.width, image.height)
+                    }.value
+                    openItem(try library.add(png: made.png, width: made.width, height: made.height, title: library.captureName(width: made.width, height: made.height)))
+                } catch { showError("Couldn’t open image", error.localizedDescription) }
+            }
         } else { failure.pointee = "No image to open"; return }
         NSApp.activate(ignoringOtherApps: true)
     }
     // "Copy Text from Image with Still": recognises text and QR codes in the selected images and copies the result.
     @objc func copyTextFromImage(_ pasteboard: NSPasteboard, userData: String?, error failure: AutoreleasingUnsafeMutablePointer<NSString?>) {
-        let images = serviceImages(pasteboard)
-        guard !images.isEmpty else { failure.pointee = "No image to read"; return }
+        let files = serviceFileURLs(pasteboard), data = files.isEmpty ? servicePictureData(pasteboard) : nil
+        guard !files.isEmpty || data != nil else { failure.pointee = "No image to read"; return }
         Task {
+            let images = await serviceImages(files: files, data: data)
+            guard !images.isEmpty else { showError("No image to read", "Still couldn’t open the selected file\(files.count == 1 ? "" : "s") as an image."); return }
             do {
                 var parts: [String] = []
                 for image in images { let text = try await recognizeText(in: image); if !text.isEmpty { parts.append(text) } }
@@ -32,9 +42,12 @@ extension AppController {
     }
     // "Pin Image with Still": floats the selected images above other windows.
     @objc func pinImage(_ pasteboard: NSPasteboard, userData: String?, error failure: AutoreleasingUnsafeMutablePointer<NSString?>) {
-        let images = serviceImages(pasteboard)
-        guard !images.isEmpty else { failure.pointee = "No image to pin"; return }
-        for image in images { pin(image) }
+        let files = serviceFileURLs(pasteboard), data = files.isEmpty ? servicePictureData(pasteboard) : nil
+        guard !files.isEmpty || data != nil else { failure.pointee = "No image to pin"; return }
+        Task {
+            let images = await serviceImages(files: files, data: data)
+            for image in images { pin(image) }
+        }
     }
 
     /// Text and QR codes found in an image, following the OCR settings. Shared with Capture Text.
@@ -48,10 +61,17 @@ extension AppController {
     private func serviceFileURLs(_ pasteboard: NSPasteboard) -> [URL] {
         (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
     }
-    private func serviceImages(_ pasteboard: NSPasteboard) -> [CGImage] {
-        let files = serviceFileURLs(pasteboard).compactMap { ImageRenderer.load($0) }
-        if !files.isEmpty { return files }
-        guard let image = NSImage(pasteboard: pasteboard), let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [] }
-        return [cgImage]
+    /// A picture another app handed over itself (not a file). The pasteboard can only be read during the request, so its
+    /// bytes are taken now; decoding them waits until the work moves off the main thread.
+    private func servicePictureData(_ pasteboard: NSPasteboard) -> Data? {
+        if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) { return data }
+        return NSImage(pasteboard: pasteboard)?.tiffRepresentation
+    }
+    /// The images in a service request, decoded off the main thread so a big one never stalls Still.
+    private func serviceImages(files: [URL], data: Data?) async -> [CGImage] {
+        await Task.detached(priority: .userInitiated) { () -> [CGImage] in
+            if !files.isEmpty { return files.compactMap { ImageRenderer.load($0, decodeNow: true) } }
+            return data.flatMap { ImageRenderer.load(data: $0, decodeNow: true) }.map { [$0] } ?? []
+        }.value
     }
 }
