@@ -4,10 +4,12 @@ from PIL import Image, ImageDraw, ImageFont
 import math
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'assets/readme'; OUT.mkdir(exist_ok=True)
-FONT=Path('/System/Library/Fonts/Avenir Next.ttc')
-MONO=Path('/System/Library/Fonts/Menlo.ttc')
+# Inter and JetBrains Mono first (free fonts, the same wherever this runs); a system collection's first face can be an
+# odd weight that mangles letters, which once turned "Capture" into "CaptUre".
+FONTS=[Path('/usr/share/fonts/opentype/inter/Inter-Medium.otf'),Path('/Library/Fonts/Inter-Medium.otf'),Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')]
+MONOS=[Path('/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf'),Path('/Library/Fonts/JetBrainsMono-Regular.ttf'),Path('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')]
 def font(size, mono=False):
-    candidates=[MONO if mono else FONT,Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')]
+    candidates=MONOS if mono else FONTS
     return next((ImageFont.truetype(str(p),size) for p in candidates if p.exists()),ImageFont.load_default())
 W,H=1200,480
 bg='#17191e'; ink='#f4f5f7'; muted='#a9b0bd'; accent='#8fd4cc'
