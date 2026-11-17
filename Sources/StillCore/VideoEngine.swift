@@ -72,16 +72,22 @@ public enum VideoEngine {
         for (k, at) in places.reversed() where (k.rate ?? 1) > 1.001 { asset.scaleTimeRange(CMTimeRange(start: cm(at), duration: cm(k.end-k.start)), toDuration: cm(k.played)) }
         if speed > 1.001 { asset.scaleTimeRange(CMTimeRange(start: .zero, duration: cm(total)), toDuration: cm(total/speed)) }
         let squeezed = speed > 1.001 || kept.contains { ($0.rate ?? 1) > 1.001 }
-        // The opening and closing fade the sound with the picture.
-        let fade = VideoTransition.length(start: start, end: end)
-        for input in mixInputs where fade > 0 {
+        // The opening and closing fade the sound with the picture. The picture's fade is measured in the recording's
+        // own time from the first and last moments kept, so the sound's is worked out from the same moments: a cut or
+        // fast-forward at either end shortens both alike and they stay in step.
+        let firstKept = kept.first?.start ?? start, lastKept = kept.last?.end ?? end, finished = total/speed
+        let fade = VideoTransition.length(start: firstKept, end: lastKept)
+        let opens = (settings.opening ?? "none") != "none" && fade > 0, closes = (settings.closing ?? "none") != "none" && fade > 0
+        let openUntil = opens ? min(finished, VideoTimeline.outputTime(at: firstKept + fade, kept: kept)/speed) : 0
+        let closeFrom = closes ? max(openUntil, VideoTimeline.outputTime(at: lastKept - fade, kept: kept)/speed) : finished
+        for input in mixInputs {
             let full: Float = settings.muted ? 0 : 1
-            if (settings.opening ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: 0, toEndVolume: full, timeRange: CMTimeRange(start: .zero, duration: cm(fade/speed))) }
-            if (settings.closing ?? "none") != "none" { input.setVolumeRamp(fromStartVolume: full, toEndVolume: 0, timeRange: CMTimeRange(start: cm(max(0, total-fade)/speed), duration: cm(fade/speed))) }
+            if opens && openUntil > 0 { input.setVolumeRamp(fromStartVolume: 0, toEndVolume: full, timeRange: CMTimeRange(start: .zero, duration: cm(openUntil))) }
+            if closes && finished > closeFrom { input.setVolumeRamp(fromStartVolume: full, toEndVolume: 0, timeRange: CMTimeRange(start: cm(closeFrom), duration: cm(finished - closeFrom))) }
         }
         // While fast-forwarding the voice drops to a murmur, so it's there without chattering. Kept clear of the fades.
         if !settings.muted {
-            let from = (settings.opening ?? "none") != "none" ? fade/speed : 0, to = (settings.closing ?? "none") != "none" ? max(0, total-fade)/speed : total/speed
+            let from = openUntil, to = closeFrom
             for k in kept where (k.rate ?? 1) > 1.001 {
                 let a = max(from, VideoTimeline.outputTime(at: k.start, kept: kept)/speed), b = min(to, a + k.played/speed)
                 guard b - a > 0.05 else { continue }
@@ -92,26 +98,20 @@ public enum VideoEngine {
         if let music = settings.music, let musicURL, FileManager.default.fileExists(atPath: musicURL.path),
            let musicTrack = try await AVURLAsset(url: musicURL).loadTracks(withMediaType: .audio).first,
            let track = asset.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            let length = try await musicTrack.load(.timeRange).duration.seconds, finished = total/speed
+            let length = try await musicTrack.load(.timeRange).duration.seconds
             if length > 0.1 {
                 var at = 0.0
                 while at < finished - 0.01 {
                     let piece = min(length, finished - at)
                     try track.insertTimeRange(CMTimeRange(start: .zero, duration: cm(piece)), of: musicTrack, at: cm(at)); at += piece
                 }
-                let input = AVMutableAudioMixInputParameters(track: track), volume = Float(min(1, max(0, music.volume)))
-                input.setVolume(volume, at: .zero)
-                if music.duck {
-                    let low = volume * 0.3, ramp = 0.15
-                    var after = -1.0
-                    for range in music.speech {
-                        let a = VideoTimeline.outputTime(at: range.start, kept: kept)/speed, b = VideoTimeline.outputTime(at: range.end, kept: kept)/speed
-                        guard b - a > 0.05, a - ramp > after else { continue }
-                        input.setVolumeRamp(fromStartVolume: volume, toEndVolume: low, timeRange: CMTimeRange(start: cm(max(0, a - ramp)), duration: cm(ramp)))
-                        input.setVolumeRamp(fromStartVolume: low, toEndVolume: low, timeRange: CMTimeRange(start: cm(max(0, a)), duration: cm(max(0.01, b - a))))
-                        input.setVolumeRamp(fromStartVolume: low, toEndVolume: volume, timeRange: CMTimeRange(start: cm(b), duration: cm(ramp)))
-                        after = b + ramp
-                    }
+                let input = AVMutableAudioMixInputParameters(track: track), volume = min(1, max(0, music.volume))
+                // Mute Audio silences the recording's own sound, so with it on there's no voice for the music to dip under.
+                let speech = music.duck && !settings.muted ? music.speech.map { VideoCut(start: VideoTimeline.outputTime(at: $0.start, kept: kept)/speed, end: VideoTimeline.outputTime(at: $0.end, kept: kept)/speed) } : []
+                let levels = musicLevels(volume: volume, speech: speech, fadeIn: openUntil, fadeOut: closeFrom, finished: finished)
+                input.setVolume(Float(levels.first?.level ?? volume), at: .zero)
+                for (a, b) in zip(levels, levels.dropFirst()) where b.time - a.time > 0.001 {
+                    input.setVolumeRamp(fromStartVolume: Float(a.level), toEndVolume: Float(b.level), timeRange: CMTimeRange(start: cm(a.time), duration: cm(b.time - a.time)))
                 }
                 mixInputs.append(input)
             }
@@ -132,6 +132,49 @@ public enum VideoEngine {
         instruction.live = live
         composition.instructions = [instruction]
         return PreparedVideo(asset: asset, composition: composition, audioMix: mix, duration: total/speed, size: size, quality: VideoQuality(rawValue: settings.quality ?? "high") ?? .high, bitrate: BitratePreset.bitrate(tag: settings.quality), sourceSize: oriented)
+    }
+    /// The music's volume through the finished video (times in its seconds), as points to ramp between: its own volume,
+    /// dipping to 30% under each stretch of speech, and faded in and out with the opening and closing (`fadeIn` is when
+    /// the opening is over, `fadeOut` when the closing begins). One list, so the dips and the fades never overlap.
+    static func musicLevels(volume: Double, speech: [VideoCut], fadeIn: Double, fadeOut: Double, finished: Double) -> [(time: Double, level: Double)] {
+        let low = volume * 0.3, ramp = 0.15
+        var dips: [(time: Double, level: Double)] = [(0, volume)]
+        func add(_ time: Double, _ level: Double) {
+            if let last = dips.last, time <= last.time + 1e-9 { dips[dips.count-1].level = level } else { dips.append((time, level)) }
+        }
+        var after = -1.0
+        for range in speech {
+            let a = range.start, b = range.end
+            guard b - a > 0.05, a - ramp > after else { continue }
+            add(max(0, a - ramp), volume); add(a, low); add(b, low); add(b + ramp, volume)
+            after = b + ramp
+        }
+        func dip(_ t: Double) -> Double {
+            var previous = dips[0]
+            if t <= previous.time { return previous.level }
+            for point in dips.dropFirst() {
+                if t <= point.time { return previous.level + (point.level - previous.level) * (t - previous.time) / (point.time - previous.time) }
+                previous = point
+            }
+            return previous.level
+        }
+        func fade(_ t: Double) -> Double {
+            var k = 1.0
+            if fadeIn > 0, t < fadeIn { k = min(k, t / fadeIn) }
+            if finished > fadeOut, t > fadeOut { k = min(k, (finished - t) / (finished - fadeOut)) }
+            return min(1, max(0, k))
+        }
+        let times = (dips.map { $0.time } + [0, fadeIn, fadeOut, finished]).filter { $0 >= 0 && $0 <= finished }.sorted()
+        var out: [(time: Double, level: Double)] = []
+        for t in times where out.last.map({ t - $0.time > 1e-6 }) ?? true { out.append((t, dip(t) * fade(t))) }
+        return out
+    }
+    /// How long each GIF frame shows. A GIF counts in hundredths of a second, so 1/12 s can't be stored exactly and
+    /// rounding every frame the same way made the GIF play fast; each frame instead runs to its own moment rounded to
+    /// the nearest hundredth, so the whole GIF lasts as long as the video.
+    static func gifDelay(frame index: Int, rate: Int) -> Double {
+        let at = { (i: Int) in Int((Double(i) / Double(max(1, rate)) * 100).rounded()) }
+        return Double(max(2, at(index + 1) - at(index))) / 100
     }
     public static func export(_ prepared: PreparedVideo, to url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
         if prepared.quality != .original || prepared.bitrate != nil { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, progress: progress); return }
@@ -158,7 +201,8 @@ public enum VideoEngine {
                 try Task.checkCancellation()
                 let time = CMTime(seconds: min(prepared.duration-0.001, Double(index)/Double(rate)), preferredTimescale: 600)
                 let result = try await generator.image(at: time)
-                CGImageDestinationAddImage(destination, result.image, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 1.0/Double(rate), kCGImagePropertyGIFUnclampedDelayTime: 1.0/Double(rate)]] as CFDictionary)
+                let delay = gifDelay(frame: index, rate: rate)
+                CGImageDestinationAddImage(destination, result.image, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay, kCGImagePropertyGIFUnclampedDelayTime: delay]] as CFDictionary)
                 progress(Double(index+1)/Double(count))
             }
             guard CGImageDestinationFinalize(destination) else { throw VideoError.export }
