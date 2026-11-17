@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-picture-raw"
+description = "Enables the picture_raw command without any pre-configured scope."
+commands.allow = ["picture_raw"]
+
+[[permission]]
+identifier = "deny-picture-raw"
+description = "Denies the picture_raw command without any pre-configured scope."
+commands.deny = ["picture_raw"]

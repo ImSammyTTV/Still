@@ -729,10 +729,10 @@ window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async 
 });
 addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); still.send('window:close'); } });
 
-$('#copy').onclick = async () => { finishTextEdit(); await still.invoke('editor:copy', await flattenInBackground()); toast('Copied to clipboard'); };
-$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.invoke('editor:export', await flattenInBackground(), document.title, false); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
-$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.invoke('editor:export', await flattenInBackground(), document.title, true); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
-$('#pin').onclick = async () => still.invoke('editor:pin', await flattenInBackground());
+$('#copy').onclick = async () => { finishTextEdit(); await still.picture('copy', await flattenToBlob()); toast('Copied to clipboard'); };
+$('#save').onclick = async () => { finishTextEdit(); try { await persist(); const file = await still.picture('export', await flattenToBlob(), { name: document.title, saveAs: false }); if (file) toast(`Saved to ${file.split(/[\\/]/).slice(-2).join('/')}`); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
+$('#saveAs').onclick = async () => { finishTextEdit(); try { const file = await still.picture('export', await flattenToBlob(), { name: document.title, saveAs: true }); if (file) toast('Saved'); } catch (e) { toast(`Couldn’t save: ${explain(e)}`); } };
+$('#pin').onclick = async () => still.picture('pin', await flattenToBlob());
 $('#ocr').onclick = () => recognize();
 async function recognize() {
   toast('Recognizing text…');
@@ -782,7 +782,7 @@ async function hidePrivate() {
   } catch (error) { toast(`Couldn’t look for private details: ${explain(error)}`); }
 }
 // Encoded without holding up the page; the drag starts the moment the picture is ready, while the button is still down.
-dragOut($('#dragMe'), async () => { finishTextEdit(); still.send('editor:drag', await flattenInBackground()); });
+dragOut($('#dragMe'), async () => { finishTextEdit(); still.picture('drag', await flattenToBlob()).catch(() => {}); });
 
 // ---- Save for Size --------------------------------------------------------------------------------
 // Square or as it is, a width, and a file size to stay under (a profile picture under 500 KB, say). The choices are
@@ -818,7 +818,6 @@ $('#sizeSheet').addEventListener('mousedown', (e) => { if (e.target === e.curren
 $('#saveForSize').onclick = openSaveForSize;
 still.on('editor:sheet', (sheet) => { if (sheet === 'size') openSaveForSize(); });
 const blobOf = (canvas, type, quality) => new Promise((done, failed) => canvas.toBlob((b) => b ? done(b) : failed(new Error('The image is too large')), type, quality));
-const dataUrlOf = (blob) => new Promise((done, failed) => { const r = new FileReader(); r.onload = () => done(r.result); r.onerror = () => failed(r.error); r.readAsDataURL(blob); });
 $('#sizeForm').addEventListener('submit', async (e) => {
   e.preventDefault(); if (sizeBusy) return;
   const c = readSize(); if (c.limitOn && !(c.limit >= 1)) return;
@@ -840,7 +839,7 @@ $('#sizeForm').addEventListener('submit', async (e) => {
     const blob = last && last.scale === result.scale && last.quality === result.quality ? last.blob : await blobOf(make(result.scale), type, result.quality);
     const w = Math.max(1, Math.round(plan.w * result.scale)), h = Math.max(1, Math.round(plan.h * result.scale));
     sizeBusy = false; $('#sizeSheet').hidden = true;
-    const file = await still.invoke('editor:saveFile', await dataUrlOf(blob), `${document.title} ${w}x${h}`, c.format);
+    const file = await still.picture('saveFile', blob, { name: `${document.title} ${w}x${h}`, ext: c.format });
     if (file) toast(result.fits ? `Saved: ${w} × ${h}, ${FS.kb(blob.size)}` : `Saved at ${w} × ${h}, ${FS.kb(blob.size)}: the smallest Still could make, still over ${c.limit} KB`);
   } catch (error) { toast(`Couldn’t save: ${explain(error)}`); }
   finally { sizeBusy = false; $('#sizeSave').textContent = 'Save…'; showSizePlan(); }

@@ -1656,14 +1656,16 @@ fn editor_save_bytes(app: AppHandle, id: String, bytes: Vec<u8>, project: Value)
 }
 #[tauri::command]
 async fn editor_copy(app: AppHandle, data_url: String) -> Result<(), String> { blocking(move || editor_copy_now(app, data_url)).await }
-fn editor_copy_now(app: AppHandle, data_url: String) -> Result<(), String> {
-    let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
+fn editor_copy_now(app: AppHandle, data_url: String) -> Result<(), String> { editor_copy_bytes(app, capture::data_url_bytes(&data_url).ok_or("Bad image")?) }
+fn editor_copy_bytes(app: AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+    let image = capture::decode(&bytes).ok_or("Bad image")?;
     copy_image(&app, &image)
 }
 #[tauri::command]
 async fn editor_export(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> { blocking(move || editor_export_now(app, data_url, name, save_as)).await }
-fn editor_export_now(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> {
-    let image = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)).ok_or("Bad image")?;
+fn editor_export_now(app: AppHandle, data_url: String, name: String, save_as: bool) -> Result<Option<String>, String> { editor_export_bytes(app, capture::data_url_bytes(&data_url).ok_or("Bad image")?, name, save_as) }
+fn editor_export_bytes(app: AppHandle, bytes: Vec<u8>, name: String, save_as: bool) -> Result<Option<String>, String> {
+    let image = capture::decode(&bytes).ok_or("Bad image")?;
     let (bytes, ext) = encode(&app, &image);
     let name = if name.is_empty() { library::capture_name("Still") } else { name };
     let mut file = unique_path(&export_folder(&app), &name, ext);
@@ -1681,12 +1683,51 @@ fn editor_export_now(app: AppHandle, data_url: String, name: String, save_as: bo
 #[tauri::command]
 async fn editor_drag(app: AppHandle, window: tauri::Window, data_url: String) {
     let Some(bytes) = capture::data_url_bytes(&data_url) else { return };
+    editor_drag_bytes(app, window, bytes);
+}
+fn editor_drag_bytes(app: AppHandle, window: tauri::Window, bytes: Vec<u8>) {
     let file = private_temp().join(format!("{}.png", library::capture_name("Still")));
     if std::fs::write(&file, bytes).is_ok() { start_drag(&app, window, file); }
 }
 #[tauri::command]
 async fn editor_pin(app: AppHandle, data_url: String) {
     if let Some(img) = capture::data_url_bytes(&data_url).and_then(|b| capture::decode(&b)) { pin_image(&app, &img); }
+}
+/// The editor's and video editor's pictures, sent as bytes (`x-action` says what to do with it, `x-args` holds the
+/// rest as JSON). As text inside JSON, a big picture was a third larger and had to be read and unpicked on the
+/// thread every window shares, which paused the app.
+#[tauri::command]
+async fn picture_raw(app: AppHandle, window: tauri::Window, request: tauri::ipc::Request<'_>) -> Result<Value, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else { return Err("Expected the picture".into()) };
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string).unwrap_or_default();
+    let action = header("x-action");
+    let args: Value = serde_json::from_str(&urlencoding_decode(&header("x-args"))).unwrap_or(Value::Null);
+    let bytes = body.clone();
+    blocking(move || {
+    let text = |k: &str| args[k].as_str().unwrap_or("").to_string();
+    match action.as_str() {
+        "copy" => editor_copy_bytes(app, bytes).map(|_| Value::Null),
+        "export" => editor_export_bytes(app, bytes, text("name"), args["saveAs"].as_bool().unwrap_or(false)).map(|p| json!(p)),
+        "saveFile" => editor_save_file_bytes(app, bytes, text("name"), text("ext")).map(|p| json!(p)),
+        "pin" => { if let Some(img) = capture::decode(&bytes) { pin_image(&app, &img); } Ok(Value::Null) }
+        "drag" => { editor_drag_bytes(app, window, bytes); Ok(Value::Null) }
+        "videoImage" => video_image_save_bytes(app, bytes, text("title"), args["open"].as_bool().unwrap_or(false)).map(|id| json!(id)),
+        other => Err(format!("Unknown picture action {other}")),
+    }
+    }).await
+}
+/// Header values are ASCII, so `x-args` arrives percent-encoded.
+fn urlencoding_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&text[i + 1..i + 3], 16) { out.push(v); i += 3; continue; }
+        }
+        out.push(bytes[i]); i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 /// Settings → Screenshots → Watermark → Choose Image: a copy of the chosen picture (a logo, say) kept with Still's
 /// data, where the editor can load it, and the watermark switched to it. Very large pictures are scaled down first.
@@ -1751,8 +1792,8 @@ async fn library_save_for_size(app: AppHandle, id: String) {
 /// Save for Size's finished file: the bytes the editor made, saved where the person chooses.
 #[tauri::command]
 async fn editor_save_file(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> { blocking(move || editor_save_file_now(app, data_url, name, ext)).await }
-fn editor_save_file_now(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> {
-    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+fn editor_save_file_now(app: AppHandle, data_url: String, name: String, ext: String) -> Result<Option<String>, String> { editor_save_file_bytes(app, capture::data_url_bytes(&data_url).ok_or("Bad image")?, name, ext) }
+fn editor_save_file_bytes(app: AppHandle, bytes: Vec<u8>, name: String, ext: String) -> Result<Option<String>, String> {
     let ext = if ext == "jpg" { "jpg" } else { "png" };
     let name = if name.is_empty() { library::capture_name("Still") } else { name.replace(['/', '\\', ':'], "-") };
     let Some(file) = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{name}.{ext}"))
@@ -1896,6 +1937,18 @@ fn recording_part(_app: &AppHandle) -> PathBuf { private_temp().join(format!("st
 async fn recording_chunk(app: AppHandle, data: String, ext: String) -> Result<(), String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    append_recording(&app, &bytes, &ext)
+}
+/// The same, sent as bytes with the container in `x-ext`: as text, each second of video was a third bigger and was
+/// unpicked on the thread every window shares.
+#[tauri::command]
+async fn recording_chunk_raw(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected the recorded video".into()) };
+    let ext = request.headers().get("x-ext").and_then(|v| v.to_str().ok()).unwrap_or("webm").to_string();
+    append_recording(&app, bytes, &ext)
+}
+fn append_recording(app: &AppHandle, bytes: &[u8], ext: &str) -> Result<(), String> {
+    let app = app.clone();
     {
         let mut s = st(&app).session.lock().unwrap();
         // A chunk arriving after Still has already ended the recording belongs to nothing.
@@ -1903,7 +1956,7 @@ async fn recording_chunk(app: AppHandle, data: String, ext: String) -> Result<()
         s.recording_ext = if ext == "mp4" { "mp4".into() } else { "webm".into() };
     }
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(recording_part(&app)).map_err(|e| e.to_string())?;
-    std::io::Write::write_all(&mut file, &bytes).map_err(|e| e.to_string())
+    std::io::Write::write_all(&mut file, bytes).map_err(|e| e.to_string())
 }
 /// Restart throws the recording away and begins again.
 #[tauri::command]
@@ -2036,8 +2089,8 @@ async fn video_export_part(window: tauri::Window, request: tauri::ipc::Request<'
 /// the image editor when asked.
 #[tauri::command]
 async fn video_image_save(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> { blocking(move || video_image_save_now(app, data_url, title, open)).await }
-fn video_image_save_now(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> {
-    let bytes = capture::data_url_bytes(&data_url).ok_or("Bad image")?;
+fn video_image_save_now(app: AppHandle, data_url: String, title: String, open: bool) -> Result<String, String> { video_image_save_bytes(app, capture::data_url_bytes(&data_url).ok_or("Bad image")?, title, open) }
+fn video_image_save_bytes(app: AppHandle, bytes: Vec<u8>, title: String, open: bool) -> Result<String, String> {
     let image = capture::decode(&bytes).ok_or("Bad image")?;
     let (w, h) = image.dimensions();
     let title = title.trim().chars().take(120).collect::<String>();
@@ -2322,7 +2375,7 @@ pub fn run() {
             editor_save, editor_copy, editor_export, watermark_choose_image, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, editor_save_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, editor_save_raw, picture_raw, recording_chunk_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
             scroll::scroll_stop, scroll::scroll_auto
         ])
@@ -2351,5 +2404,14 @@ mod tests {
         assert_eq!(image_argument(&args(&["--capture=area"])), None);
         assert_eq!(image_argument(&args(&["--hidden", "notes.txt"])), None);
         assert_eq!(image_argument(&["C:\\Still\\shot.png".to_string()]), None);
+    }
+}
+
+#[cfg(test)]
+mod picture_args_tests {
+    #[test]
+    fn percent_encoded_arguments_come_back_whole() {
+        assert_eq!(super::urlencoding_decode("%7B%22name%22%3A%22Caf%C3%A9%20%231%22%7D"), "{\"name\":\"Café #1\"}");
+        assert_eq!(super::urlencoding_decode("plain%2"), "plain%2");
     }
 }

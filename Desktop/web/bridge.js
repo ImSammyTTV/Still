@@ -64,7 +64,9 @@
     send: (channel, ...args) => { call(channel, args).catch((error) => console.error(channel, error)); },
     on: (channel, callback, listening) => { let stop; win.listen(channel, (event) => callback(event.payload)).then((fn) => { stop = fn; if (listening) listening(); }); return () => stop && stop(); },
     fileUrl: (path) => T.core.convertFileSrc(path),
-    raw: (command, bytes, headers) => T.core.invoke(command, bytes, { headers })
+    raw: (command, bytes, headers) => T.core.invoke(command, bytes, { headers }),
+    // A picture to copy, save, pin or drag out, sent as bytes rather than as text inside JSON (see picture_raw).
+    picture: async (action, blob, args = {}) => T.core.invoke('picture_raw', new Uint8Array(await blob.arrayBuffer()), { headers: { 'x-action': action, 'x-args': encodeURIComponent(JSON.stringify(args)) } })
   };
 
   // Frameless windows: let the title bar areas move the window.
