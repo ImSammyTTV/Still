@@ -105,35 +105,6 @@ jobs:
           # Fail here rather than publish a release with a platform missing.
           if [ "${{ runner.os }}" = "Windows" ]; then ls ../out/*-setup.exe ../out/*-setup.exe.sig ../out/*-portable.exe >/dev/null
           else ls ../out/*.AppImage ../out/*.AppImage.sig ../out/*.deb ../out/*.rpm >/dev/null; fi
-      # Windows code signing through SignPath Foundation (free for open source). It stays off until
-      # the repository variable SIGNPATH_ORGANIZATION_ID and the secret SIGNPATH_API_TOKEN are set.
-      - name: Upload unsigned Windows files for signing
-        id: unsigned
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with: { name: "signing-input-${{ matrix.name }}", path: "out/*.exe", if-no-files-found: error }
-      - name: Sign with SignPath
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
-        with:
-          connector-url: https://githubactions.connectors.signpath.io
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'Still' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed
-      - name: Use the signed files and refresh update signatures
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        working-directory: Desktop
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          # The signed files replace the unsigned ones; only release-* artifacts are published.
-          cp -f ../signed/*.exe ../out/
-          for f in ../out/*-setup.exe; do rm -f "$f.sig"; npx tauri signer sign "$f"; done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with: { name: "release-${{ matrix.name }}", path: out, if-no-files-found: error }
   publish:
