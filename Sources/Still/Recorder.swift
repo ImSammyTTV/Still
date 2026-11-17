@@ -17,7 +17,8 @@ import StillCore
     var systemAudio = false
     var microphone = false
     var onComplete: ((URL) -> Void)?
-    var onError: ((String) -> Void)?
+    /// The alert's title, then its message.
+    var onError: ((String, String) -> Void)?
     var onWarning: ((String) -> Void)?
     var onCancel: (() -> Void)?
     private(set) var completedMetadata = RecordingMetadata()
@@ -41,6 +42,10 @@ import StillCore
     private var segmentStartedAt: Date?
     private var completedDuration: Double = 0
     private var finalizing = false
+    /// The window being recorded, if it is a single window: it can be moved or resized while recording.
+    private var windowID: CGWindowID?
+    private var monitorTicks = 0
+    private var pickerTimeout: Task<Void, Never>?
     func recordArea(screen: NSScreen, rect: CGRect) {
         guard !recording, !choosing, !stopping else { return }
         newSession(); captureRegion = rect; choosing = true; starting = true
@@ -56,7 +61,7 @@ import StillCore
                 guard let window = content.windows.first(where: { $0.windowID == id }) else {
                     throw NSError(domain: "Still", code: 1, userInfo: [NSLocalizedDescriptionKey: "That window is no longer available. Choose another window to record."])
                 }
-                targetRect = window.frame
+                targetRect = window.frame; windowID = id
                 await start(SCContentFilter(desktopIndependentWindow: window))
             } catch { fail(error) }
         }
@@ -69,22 +74,26 @@ import StillCore
         config.excludedBundleIDs = [Bundle.main.bundleIdentifier ?? "local.sam.Still"]; config.allowsChangingSelectedContent = false
         picker.defaultConfiguration = config; picker.add(self); picker.isActive = true; picker.present()
         // If the picker never answers, don't stay stuck in "choosing" (that blocks every later recording).
-        Task { @MainActor in
+        // A timeout left over from an earlier picker must not close this one early, so each picker gets its own.
+        pickerTimeout?.cancel()
+        pickerTimeout = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(60))
+            guard let self, !Task.isCancelled else { return }
             if self.choosing, !self.starting, !self.recording { self.choosing = false; self.deactivatePicker(); self.onCancel?() }
         }
     }
     private func newSession() {
         metadata = RecordingMetadata(); metadata.cursorIncludedInVideo = false; metadata.presentation = Preferences.shared.recordingPresentation
         metadata.defaultShowCursor = Preferences.shared.recordingCursor; metadata.defaultShowClicks = Preferences.shared.recordingClicks; metadata.defaultShowKeystrokes = Preferences.shared.recordingKeys
-        cameraFailed = false; segments = []; cameraSegments = []; completedDuration = 0; elapsed = 0; paused = false; pausing = false; finalizing = false; completedCameraURL = nil
+        cameraFailed = false; segments = []; cameraSegments = []; completedDuration = 0; elapsed = 0; paused = false; pausing = false; finalizing = false; completedCameraURL = nil; windowID = nil
     }
     nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) { Task { @MainActor in self.choosing = false; self.deactivatePicker(); self.onCancel?() } }
     nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         Task { @MainActor in
             guard self.choosing, !self.starting else { return }; self.starting = true
+            self.pickerTimeout?.cancel(); self.pickerTimeout = nil
             if #available(macOS 15.2, *) {
-                if filter.style == .window, let window = filter.includedWindows.first { self.targetRect = window.frame }
+                if filter.style == .window, let window = filter.includedWindows.first { self.targetRect = window.frame; self.windowID = window.windowID }
                 else if let display = filter.includedDisplays.first { self.targetRect = CGDisplayBounds(display.displayID) }
             }
             if self.targetRect.isEmpty { self.targetRect = CGDisplayBounds(CGMainDisplayID()) }
@@ -101,7 +110,16 @@ import StillCore
             if Preferences.shared.recordingKeys, !AXIsProcessTrusted() { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
             if Preferences.shared.recordingCamera && !cameraFailed {
                 let camera = self.camera ?? CameraRecorder(); self.camera = camera
-                try await camera.start(deviceID: Preferences.shared.recordingCameraID); cameraSession = camera.session
+                do { try await camera.start(deviceID: Preferences.shared.recordingCameraID); cameraSession = camera.session }
+                catch where !segments.isEmpty {
+                    // Resuming: losing the camera shouldn't throw away the screen recording made so far, so carry on
+                    // without it, as when the camera fails mid-recording.
+                    cameraFailed = true; cameraSession = nil
+                    for file in cameraSegments { try? FileManager.default.removeItem(at: file) }
+                    cameraSegments = []
+                    _ = try? await camera.stop(); self.camera = nil
+                    onWarning?("The camera couldn’t restart. Recording continues without the camera: \(error.localizedDescription)")
+                }
             }
             let scale = Double(filter.pointPixelScale), config = SCStreamConfiguration()
             let originalWidth = max(2, Double(captureRegion?.width ?? filter.contentRect.width)*scale), originalHeight = max(2, Double(captureRegion?.height ?? filter.contentRect.height)*scale)
@@ -119,8 +137,11 @@ import StillCore
             self.stream = stream; self.output = output; try stream.addRecordingOutput(output); try await stream.startCapture()
         } catch { fail(error) }
     }
+    /// Pause was pressed while a resumed segment was still starting; pause as soon as it has.
+    private var pauseWhenStarted = false
     func togglePause() {
         guard recording, !stopping, !pausing else { return }
+        if starting { if !paused { pauseWhenStarted = true }; return }
         if paused { guard let filter else { return }; starting = true; paused = false; Task { await start(filter) } }
         else { pausing = true; stopMonitoring(); watchFinish(output); Task { do { try await stream?.stopCapture() } catch { fail(error) } } }
     }
@@ -147,7 +168,8 @@ import StillCore
         Task { @MainActor in
             guard recordingOutput === self.output else { return }
             self.choosing = false; self.starting = false; self.recording = true; self.paused = false
-            if self.stopWhenStarted { self.stopWhenStarted = false; DispatchQueue.main.async { self.stop() } }
+            if self.stopWhenStarted { self.stopWhenStarted = false; self.pauseWhenStarted = false; DispatchQueue.main.async { self.stop() } }
+            else if self.pauseWhenStarted { self.pauseWhenStarted = false; DispatchQueue.main.async { self.togglePause() } }
             if self.startedAt == nil { self.startedAt = Date() }
             self.segmentStartedAt = Date()
             if let cameraDate = self.camera?.startedAt { self.segmentCameraOffset = max(0, Date().timeIntervalSince(cameraDate)); self.metadata.cameraOffset = 0 }
@@ -194,20 +216,30 @@ import StillCore
     nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) { Task { @MainActor in guard recordingOutput === self.output else { return }; self.fail(error) } }
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) { Task { @MainActor in if stream === self.stream, !self.stopping && !self.pausing { self.fail(error) } } }
     private var currentTime: Double { completedDuration+(segmentStartedAt.map { Date().timeIntervalSince($0) } ?? 0) }
+    /// Follows a recorded window that has been moved or resized, so the cursor and clicks stay on it. If it can't be
+    /// found (closed or minimized), the last known position is kept.
+    private func refreshWindowRect() {
+        guard let windowID, let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
+              let bounds = info.first?[kCGWindowBounds as String] as? NSDictionary,
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary), !rect.isEmpty else { return }
+        targetRect = rect
+    }
     private func pointer() -> CGPoint {
         let mouse = NSEvent.mouseLocation, top = NSScreen.screens.first?.frame.maxY ?? 0
         return CGPoint(x: (mouse.x-targetRect.minX)/max(1, targetRect.width), y: (top-mouse.y-targetRect.minY)/max(1, targetRect.height))
     }
     private func startMonitoring() {
-        stopMonitoring()
+        stopMonitoring(); refreshWindowRect(); monitorTicks = 0
         timer = Timer.scheduledTimer(withTimeInterval: 1.0/60, repeats: true) { [weak self] _ in Task { @MainActor in
             guard let self, self.recording, !self.paused else { return }
+            // Ten times a second is plenty to follow a dragged window; every tick would be wasted work.
+            self.monitorTicks += 1; if self.monitorTicks % 6 == 0 { self.refreshWindowRect() }
             let p = self.pointer(), time = self.currentTime
             // Published, so only when the whole seconds shown change: 60 updates a second redraw every observer.
             if Int(time) != Int(self.elapsed) { self.elapsed = time }
             self.metadata.pointer.append(PointerSample(time: time, x: p.x, y: p.y))
         } }
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in Task { @MainActor in guard let self, self.recording, !self.paused else { return }; let p = self.pointer(); if p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 { self.metadata.clicks.append(ClickSample(time: self.currentTime, x: p.x, y: p.y)) } } }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in Task { @MainActor in guard let self, self.recording, !self.paused else { return }; self.refreshWindowRect(); let p = self.pointer(); if p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 { self.metadata.clicks.append(ClickSample(time: self.currentTime, x: p.x, y: p.y)) } } }
         if Preferences.shared.recordingKeys {
             keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 let flags = event.modifierFlags, characters = event.charactersIgnoringModifiers ?? ""
@@ -223,12 +255,14 @@ import StillCore
         }
     }
     private func stopMonitoring() { timer?.invalidate(); timer = nil; if let globalMonitor { NSEvent.removeMonitor(globalMonitor); self.globalMonitor = nil }; if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil } }
-    private func deactivatePicker() { SCContentSharingPicker.shared.remove(self); SCContentSharingPicker.shared.isActive = false }
-    private func reset() { stopMonitoring(); stream = nil; output = nil; outputURL = nil; filter = nil; recording = false; choosing = false; starting = false; stopping = false; pausing = false; paused = false; stopWhenStarted = false; startedAt = nil; segmentStartedAt = nil; captureRegion = nil; finalizing = false; cameraSession = nil; deactivatePicker() }
+    private func deactivatePicker() { pickerTimeout?.cancel(); pickerTimeout = nil; SCContentSharingPicker.shared.remove(self); SCContentSharingPicker.shared.isActive = false }
+    private func reset() { stopMonitoring(); stream = nil; output = nil; outputURL = nil; filter = nil; recording = false; choosing = false; starting = false; stopping = false; pausing = false; paused = false; stopWhenStarted = false; pauseWhenStarted = false; startedAt = nil; segmentStartedAt = nil; captureRegion = nil; finalizing = false; cameraSession = nil; deactivatePicker() }
     private func fail(_ error: Error) {
         guard stream != nil || choosing || starting || recording || finalizing else { return }
         let old = stream, urls = segments+(outputURL.map { [$0] } ?? [])+cameraSegments
         let capturedCamera = camera
+        // Say what actually went wrong: a recording that ran for a while didn't fail to start.
+        let title = stopping || finalizing ? "Recording couldn’t be finished" : recording || pausing || paused || !segments.isEmpty ? "Recording stopped unexpectedly" : "Recording couldn’t start"
         reset()
         Task {
             try? await old?.stopCapture()
@@ -240,7 +274,7 @@ import StillCore
                 guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else { continue }
                 do { try FileManager.default.createDirectory(at: recovery, withIntermediateDirectories: true); try FileManager.default.moveItem(at: url, to: recovery.appendingPathComponent(url.lastPathComponent)); count += 1 } catch { /* Leave the original temporary file intact if recovery cannot move it. */ }
             }
-            onError?(error.localizedDescription + (count > 0 ? "\n\n\(count) recording files were preserved in \(recovery.path)." : ""))
+            onError?(title, error.localizedDescription + (count > 0 ? "\n\n\(count) recording files were preserved in \(recovery.path)." : ""))
         }
     }
 }

@@ -23,7 +23,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         let covers = content.windows.filter { DesktopCover.shared.windowIDs.contains($0.windowID) }
         return SCContentFilter(display: display, excludingApplications: own, exceptingWindows: covers)
     }
-    static func image(screen: NSScreen, rect: CGRect? = nil, filter: SCContentFilter? = nil) async throws -> CGImage {
+    static func image(screen: NSScreen, rect: CGRect? = nil, filter: SCContentFilter? = nil, showsCursor: Bool? = nil) async throws -> CGImage {
         let selected: SCContentFilter
         if let filter { selected = filter } else { selected = try await Self.filter(screen: screen) }
         let config = SCStreamConfiguration()
@@ -31,7 +31,7 @@ enum SelectionPurpose { case screenshot, text, scroll, recording }
         config.sourceRect = region
         config.width = max(1, Int(region.width*screen.backingScaleFactor))
         config.height = max(1, Int(region.height*screen.backingScaleFactor))
-        config.showsCursor = Preferences.shared.includeCursor
+        config.showsCursor = showsCursor ?? Preferences.shared.includeCursor
         return try await SCScreenshotManager.captureImage(contentFilter: selected, configuration: config)
     }
     /// Every display at once, from one window list: fetching the list costs as much as the grab itself, and
