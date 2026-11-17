@@ -284,8 +284,9 @@ function forgetOldImages() {
   }
 }
 let lastState = snapshot();
-function undo() { if (!history.length) return; future.push(snapshot()); doc = JSON.parse(history.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
-function redo() { if (!future.length) return; history.push(snapshot()); doc = JSON.parse(future.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
+// An open text box is finished first, so undo and redo step over it rather than under it.
+function undo() { finishTextEdit(); if (!history.length) return; future.push(snapshot()); doc = JSON.parse(history.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
+function redo() { finishTextEdit(); if (!future.length) return; history.push(snapshot()); doc = JSON.parse(future.pop()); lastState = snapshot(); selected = null; afterDocChange(); }
 function afterDocChange() { syncSource(); dirty = true; scheduleSave(); syncPanel(); updateButtons(); syncWatermark(); loadBgImage().then(render); }
 function syncSource() { image = decoded.get(doc.source) || original; }
 function updateButtons() { $('#undo').disabled = !history.length; $('#redo').disabled = !future.length; $('#undo').style.opacity = history.length ? 1 : 0.4; $('#redo').style.opacity = future.length ? 1 : 0.4; }
@@ -310,7 +311,8 @@ stage.addEventListener('mousedown', (e) => {
   }
   if (tool === 'text') { const existing = hit(p); if (existing && existing.type === 'text') return editText(existing); return editText(null, p); }
   if (tool === 'step') {
-    const n = doc.marks.filter((m) => m.type === 'step').length + 1;
+    // One past the highest, so deleting a step in the middle never leads to two with the same number.
+    const n = doc.marks.reduce((max, m) => (m.type === 'step' ? Math.max(max, m.n || 0) : max), 0) + 1;
     doc.marks.push({ type: 'step', x: p.x, y: p.y, n, color, stroke }); commit(); render(); return;
   }
   const mark = tool === 'pen' ? { type: 'pen', points: [p], color, stroke }
@@ -421,7 +423,9 @@ function finishTextEdit() {
   const { area, target } = textEditor; textEditor = null;
   target.text = area.value.replace(/\s+$/, ''); delete target.hidden; area.remove();
   if (target.text) { doc.marks.push(target); selected = target; }
-  commit(); render();
+  // An empty new label, or one left as it was, isn't a change, so it doesn't take away what Redo could bring back.
+  if (snapshot() !== lastState) commit();
+  render();
 }
 
 // ---- Toolbar ------------------------------------------------------------------------------------
@@ -440,10 +444,11 @@ function applyCrop() {
   pendingCrop = null; $('#cropBar').classList.remove('show'); tool = 'select'; setTool('select');
   if (!r || r.w <= 4 || r.h <= 4) return;
   if (!size) { doc.crop = r; commit(); return; }
-  // A size crops and then scales to exactly its pixels, as one step that one undo takes back.
-  doc.crop = r; cropSize = null; $('#cropSize').value = '';
-  bake((content) => ({ w: size.w, h: size.h, paint: (t) => t.drawImage(content, 0, 0, size.w, size.h) }));
-  toast(`${size.group} ${size.name}: ${size.w} × ${size.h}`);
+  // A size crops and then scales to exactly its pixels, as one step that one undo takes back. The crop is set when
+  // its turn comes, so a rotate or resize still finishing can't throw it away.
+  cropSize = null; $('#cropSize').value = '';
+  bake((content) => ({ w: size.w, h: size.h, paint: (t) => t.drawImage(content, 0, 0, size.w, size.h) }), () => { doc.crop = r; })
+    .then((done) => { if (done) toast(`${size.group} ${size.name}: ${size.w} × ${size.h}`); });
 }
 function cancelCrop() { pendingCrop = null; $('#cropBar').classList.remove('show'); }
 function showCropNote() { $('#cropNote').textContent = S.note(pendingCrop, cropSize); }
@@ -537,20 +542,25 @@ function currentContent() {
 
 // Like the Mac app, this bakes the marks and crop into a new image, and undo brings them back. The new image is saved
 // in the project so it survives reopening. `plan` gets the current content and returns the output size and how to draw it.
-let baking = false;
-async function bake(plan) {
-  if (baking) return;
+// Changes to the image take turns: a second rotate, resize or crop, or a dropped image, waits for the one under way
+// rather than being skipped or cleared away when that one lands. `before` runs just before the content is taken.
+// Resolves to whether the image changed.
+let bakeQueue = Promise.resolve();
+function queued(step) { const run = bakeQueue.then(step); bakeQueue = run.catch(() => {}); return run; }
+const bake = (plan, before) => queued(() => runBake(plan, before));
+async function runBake(plan, before) {
   finishTextEdit();
   if (tool === 'crop') setTool('select');
-  baking = true;
   try {
+    before?.();
     const { w, h, paint } = plan(currentContent()), out = document.createElement('canvas'); out.width = w; out.height = h;
     const t = out.getContext('2d'); t.imageSmoothingQuality = 'high'; paint(t);
     const url = out.toDataURL('image/png');
-    if (url === 'data:,') { toast('That size is too large to edit.'); return; }
+    if (url === 'data:,') { toast('That size is too large to edit.'); return false; }
     doc.source = await storeAsset(url); doc.marks = []; doc.crop = null; selected = null;
     syncSource(); commit(); render();
-  } catch (error) { toast(`Couldn’t change the image: ${explain(error)}`); } finally { baking = false; }
+    return true;
+  } catch (error) { toast(`Couldn’t change the image: ${explain(error)}`); return false; }
 }
 const reorient = (kind) => bake((content) => {
   const o = M.orient({ w: content.width, h: content.height }, kind);
@@ -594,18 +604,21 @@ async function readImage(src) {
 async function addImages(sources, point) {
   finishTextEdit();
   if (tool === 'crop') setTool('select');
-  const at = point ? toImage(point) : null, canvas = doc.crop || { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight };
-  let last = null, failed = 0;
-  for (const [i, src] of sources.entries()) {
-    try {
-      const { id, size } = await readImage(src);
+  const at = point ? toImage(point) : null, read = [];
+  let failed = 0;
+  for (const src of sources) { try { read.push(await readImage(src)); } catch { failed++; } }
+  if (failed) toast(failed === 1 ? 'That image couldn’t be opened.' : `${failed} images couldn’t be opened.`);
+  if (!read.length) return;
+  // Placed in turn with rotates, resizes and crops, so one still finishing can't clear them away.
+  await queued(() => {
+    const canvas = doc.crop || { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight };
+    let last = null;
+    for (const [i, { id, size }] of read.entries()) {
       last = { type: 'image', asset: id, ...M.placeImage(size, canvas, at ? { x: at.x + i * 24, y: at.y + i * 24 } : null) };
       doc.marks.push(last);
-    } catch { failed++; }
-  }
-  if (failed) toast(failed === 1 ? 'That image couldn’t be opened.' : `${failed} images couldn’t be opened.`);
-  if (!last) return;
-  commit(); setTool('select'); selected = last; render();
+    }
+    commit(); setTool('select'); selected = last; render();
+  });
 }
 async function chooseImage() { const data = await still.invoke('editor:openImage'); if (data) await addImages([data]); }
 
@@ -692,9 +705,10 @@ async function saveBytes(id, edits) {
   return still.raw('editor_save_raw', body, { 'x-id': id, 'x-project-length': String(json.length) });
 }
 const project = () => M.projectFile(doc, assets);
-let captureGone = false, saving = Promise.resolve();
-// One save at a time, so a slower older save can never land on top of a newer one.
-function persist() { saving = saving.catch(() => {}).then(saveEdits); return saving; }
+let captureGone = false, saving = Promise.resolve(), inFlight = 0;
+// One save at a time, so a slower older save can never land on top of a newer one. `inFlight` counts saves not yet
+// finished, so closing the window waits for one that's still encoding.
+function persist() { inFlight++; saving = saving.catch(() => {}).then(saveEdits).finally(() => { inFlight--; }); return saving; }
 async function saveEdits() {
   if (!itemId || !dirty || captureGone) return;
   dirty = false;
@@ -721,7 +735,7 @@ addEventListener('blur', () => { pointerDown = false; });
 // Closing the window (the close button, Alt+F4, Ctrl+W) waits for the last edits to be saved first;
 // a save fired from beforeunload could be cut off when the page goes away.
 window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async (event) => {
-  if (!itemId || !dirty || captureGone) return;
+  if (!itemId || captureGone || (!dirty && !inFlight)) return;
   event.preventDefault();
   clearTimeout(saveTimer);
   try { await persist(); } catch { return; }
@@ -914,7 +928,9 @@ function demoImage() {
     if (item.project) { ({ doc, assets } = M.openProject(item.project, doc)); lastState = snapshot(); }
     src = `${still.fileUrl(item.original)}?t=${Date.now()}`;
   } else src = demoImage();
-  image.crossOrigin = 'anonymous'; image.src = src; await image.decode();
+  // The file was moved or deleted while it was still listed in History: say so rather than show an empty editor.
+  try { image.crossOrigin = 'anonymous'; image.src = src; await image.decode(); }
+  catch { document.body.textContent = 'This capture’s picture file has been moved or deleted.'; return; }
   await Promise.all(Object.keys(assets).map((id) => decodeAsset(id).catch(() => {})));
   syncSource(); await loadBgImage();
   refreshIcons(); syncPanel(); updateButtons(); setTool(doc.marks.length ? 'select' : 'arrow');

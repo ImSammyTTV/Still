@@ -16,6 +16,7 @@
     "allow-video-project-save",
     "allow-editor-open-image",
     "allow-video-music-choose",
-    "allow-video-image-save"
+    "allow-video-image-save",
+    "core:window:allow-destroy"
   ]
 }

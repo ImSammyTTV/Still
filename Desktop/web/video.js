@@ -222,11 +222,23 @@ function saveProject() {
   if (!duration) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    remember();
-    project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, skims: skims.length ? skims : null, captions: captions.length ? captions : null, music, callouts: callouts.length ? callouts : null, chapters: chapters.length ? chapters : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
-    still.invoke('video:project', project).catch(() => {}); // Losing the trim points is no reason to interrupt editing.
+    saveTimer = 0;
+    writeProject().catch(() => {}); // Losing the trim points is no reason to interrupt editing.
   }, 400);
 }
+function writeProject() {
+  remember();
+  project = { ...project, trim: StillTrim.isFull(trim, duration) ? null : { start: trim.start, end: trim.end }, cuts: cuts.length ? cuts : null, skims: skims.length ? skims : null, captions: captions.length ? captions : null, music, callouts: callouts.length ? callouts : null, chapters: chapters.length ? chapters : null, blurs: blurs.length ? blurs : null, opening: opening === 'none' ? null : opening, closing: closing === 'none' ? null : closing, bg: hasBg() ? bg : null, zooms, showClicks, cursorFx };
+  return still.invoke('video:project', project);
+}
+// Closing the window right after a change saves that change first, rather than dropping it with the waiting timer.
+window.__TAURI__.webviewWindow.getCurrentWebviewWindow().onCloseRequested(async (event) => {
+  if (!saveTimer || !duration) return;
+  event.preventDefault();
+  clearTimeout(saveTimer); saveTimer = 0;
+  try { await writeProject(); } catch {}
+  window.__TAURI__.webviewWindow.getCurrentWebviewWindow().destroy();
+});
 
 function renderPlayhead() {
   $('#playhead').style.left = `${StillTrim.position(video.currentTime, duration) * 100}%`;
@@ -312,7 +324,8 @@ function renderView() {
   const e = ends(t);
   const zoomed = z.scale === 1 ? '' : `translate(${-src.x / vw * z.scale * 100}%, ${-src.y / vh * z.scale * 100}%) scale(${z.scale})`;
   $('#clip').style.opacity = e.level < 1 ? String(e.level) : ''; $('#clip').style.transform = e.scale < 1 ? `scale(${e.scale})` : '';
-  video.volume = Math.max(0, Math.min(1, e.level));
+  // Faded with the opening and closing, and dipped while fast-forwarding, as in the export.
+  video.volume = Math.max(0, Math.min(1, e.level * voiceLevel(t)));
   video.style.transform = zoomed;
   const fx = $('#fx'), ctx = fx.getContext('2d');
   ctx.clearRect(0, 0, fx.width, fx.height);
@@ -492,8 +505,14 @@ $('#chooseMusic').onclick = async () => {
   if (!picked) return;
   music = { name: picked.name, path: picked.path, volume: music ? music.volume : 0.3, duck: music ? music.duck : true, speech: [] };
   await loadMusic(); renderMusic();
-  try { music.speech = StillTrim.speech(await recordingLevels(), 0.05); saveProject(); toast(music.speech.length ? 'Music added. It dips whenever someone speaks.' : 'Music added'); }
-  catch { toast('Music added. Couldn’t listen for speech, so it stays at one volume.'); }
+  // Listening can take a while; the volume or dip may change meanwhile, so the speech goes onto the music as it is then,
+  // and only if it's still this track.
+  const current = () => music && music.path === picked.path;
+  try {
+    const speech = StillTrim.speech(await recordingLevels(), 0.05);
+    if (!current()) return;
+    music = { ...music, speech }; saveProject(); toast(speech.length ? 'Music added. It dips whenever someone speaks.' : 'Music added');
+  } catch { if (current()) toast('Music added. Couldn’t listen for speech, so it stays at one volume.'); }
 };
 $('#musicVolume').oninput = (e) => { if (music) { music = { ...music, volume: Number(e.target.value) / 100 }; renderView(); renderMusic(); } };
 $('#musicDuck').onchange = (e) => { if (music) { music = { ...music, duck: e.target.checked }; renderMusic(); } };
@@ -953,7 +972,7 @@ function renderUndo() {
   $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length;
 }
 async function step(from, to, verb) {
-  clearTimeout(saveTimer); remember(); // A change still settling counts as a step of its own.
+  clearTimeout(saveTimer); saveTimer = 0; remember(); // A change still settling counts as a step of its own.
   if (!from.length) return;
   const target = from.pop(), current = snapshot(), parts = changed(current, target);
   to.push(current);
@@ -1038,7 +1057,6 @@ function watchPlayback() {
   else if (!video.paused) { const next = StillTrim.skip(video.currentTime, cuts); if (next !== video.currentTime) video.currentTime = next; }
   const rate = StillTrim.skimAt(video.currentTime, skims);
   if (video.playbackRate !== rate) { video.playbackRate = rate; video.preservesPitch = true; }
-  video.volume = voiceLevel(video.currentTime);
   renderPlayhead();
 }
 function animate() { if (video.paused) return; watchPlayback(); requestAnimationFrame(animate); }
@@ -1055,7 +1073,7 @@ $('#mute').onclick = () => {
 };
 $('#setIn').onclick = () => setStart(video.currentTime);
 $('#setOut').onclick = () => setEnd(video.currentTime);
-$('#reset').onclick = () => { trim = StillTrim.full(duration); cuts = []; cutStart = null; render(); };
+$('#reset').onclick = () => { trim = StillTrim.full(duration); cuts = []; cutStart = null; skims = []; selectedSkim = -1; render(); };
 $('#gifWidth').onchange = $('#gifFps').onchange = renderGifHint;
 $('#exportGif').onclick = () => { renderGifHint(); $('#gifSheet').hidden = false; $('#gifGo').focus(); };
 $('#gifCancel').onclick = () => { $('#gifSheet').hidden = true; };
@@ -1204,7 +1222,8 @@ async function recordClip(run, type, plan) {
       const next = StillTrim.skip(player.currentTime, clipCuts);
       if (next !== player.currentTime && recorder.state === 'recording') {
         jumping = true; recorder.pause(); player.pause(); capture.hold?.(true);
-        player.addEventListener('seeked', () => { capture.hold?.(false); player.play().catch(() => {}); recorder.resume(); jumping = false; }, { once: true });
+        // If the window was hidden during the jump, both stay paused until it's shown again (see `hidden`).
+        player.addEventListener('seeked', () => { capture.hold?.(false); jumping = false; if (document.hidden || recorder.state === 'inactive') return; player.play().catch(() => {}); recorder.resume(); }, { once: true });
         player.currentTime = next;
       }
     }, 10);

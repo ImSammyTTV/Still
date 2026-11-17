@@ -33,8 +33,8 @@ const patchFor = (path, value) => path.split('.').reduceRight((acc, k) => ({ [k]
 // `off` is for a feature this desktop can't do: it shows as off whatever was saved. `disabled` only locks the switch.
 const toggle = (label, path, { disabled = false, off = false, redraw = false } = {}) => row(label, el('input', { type: 'checkbox', class: 'switch', 'aria-label': label, checked: !!get(path) && !off, disabled: disabled || off,
   onchange: async (e) => { await set(patchFor(path, e.target.checked)); if (redraw) render(); } }));
-const select = (label, path, options, number = false, { disabled = false } = {}) => {
-  const s = el('select', { class: 'field', 'aria-label': label, disabled, onchange: (e) => set(patchFor(path, number ? Number(e.target.value) : e.target.value)) },
+const select = (label, path, options, number = false, { disabled = false, redraw = false } = {}) => {
+  const s = el('select', { class: 'field', 'aria-label': label, disabled, onchange: async (e) => { await set(patchFor(path, number ? Number(e.target.value) : e.target.value)); if (redraw) render(); } },
     options.map(([value, text]) => el('option', { value, selected: String(get(path)) === String(value) }, text)));
   return row(label, s);
 };
@@ -65,7 +65,8 @@ const watermarkGroup = () => {
   } }, wm.image ? 'Choose Another…' : 'Choose Image…');
   const preview = wm.image ? el('img', { src: `${still.fileUrl(wm.image)}?t=${Date.now()}`, alt: 'Watermark image', style: 'max-width:72px;max-height:36px;object-fit:contain;margin-right:8px;vertical-align:middle' }) : null;
   return group('Watermark', [
-    select('Type', 'watermark.kind', [['text', 'Text'], ['image', 'Image']]),
+    // Text and Image have different controls, so the group redraws when the type changes.
+    select('Type', 'watermark.kind', [['text', 'Text'], ['image', 'Image']], false, { redraw: true }),
     image ? row('Image', el('div', { style: 'display:flex;align-items:center' }, [preview, choose])) : row('Text', text),
     select('Position', 'watermark.position', [['bottomRight', 'Bottom right'], ['bottomLeft', 'Bottom left'], ['topRight', 'Top right'], ['topLeft', 'Top left'], ['center', 'Centre']], false, { disabled: !on }),
     select('Size', 'watermark.size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], false, { disabled: !on }),
