@@ -15,42 +15,83 @@ import CryptoKit
 
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
 
+    /// Read each time, so turning automatic checks off in Settings takes effect straight away.
+    private var autoUpdateOn: Bool { UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true }
+    /// Where the install script notes why an update didn't go in, for the relaunched Still to say so.
+    private var failedInstallFile: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Still/update-failed") }
+
     func start() {
         guard installedApp else { return }
-        guard UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true else { return }
+        reportFailedInstall()
+        scheduleChecks()
+    }
+    /// Checks shortly after launch (or after automatic checks are turned on), then every six hours.
+    func scheduleChecks() {
+        stop()
+        guard installedApp, autoUpdateOn else { return }
         DispatchQueue.main.asyncAfter(deadline: .now()+15) { self.check(manual: false) }
         timer = Timer.scheduledTimer(withTimeInterval: 6*60*60, repeats: true) { _ in Task { @MainActor in self.check(manual: false) } }
     }
+    func stop() { timer?.invalidate(); timer = nil }
+    /// The last update couldn't replace Still (no permission for its folder, or a full disk), so the old version
+    /// was reopened: say so once, rather than leave the same update to be offered again with no word why.
+    private func reportFailedInstall() {
+        let file = failedInstallFile
+        guard let reason = try? String(contentsOf: file, encoding: .utf8) else { return }
+        try? FileManager.default.removeItem(at: file)
+        let text = reason.hasPrefix("copy")
+            ? "Still couldn’t copy the new version into place. Check that there’s free disk space and that you can change the folder Still is in, then try again."
+            : "Still couldn’t swap in the new version, so it kept the one you have. Check that you can change the folder Still is in, then try again."
+        DispatchQueue.main.asyncAfter(deadline: .now()+2) { self.info("The update didn’t install", text) }
+    }
 
+    /// Set when Check for Updates is chosen while a background check is already under way, so that check reports
+    /// back as if it had been chosen by hand.
+    private var reportCheck = false
     func check(manual: Bool) {
-        guard !checking else { return }
         guard installedApp else { if manual { info("Updates are off for this build", "Only Still.app in Applications updates itself.") }; return }
+        if manual { reportCheck = true }
+        guard !checking else { return }
+        guard manual || autoUpdateOn else { return }
         checking = true
         Task {
-            defer { checking = false }
+            defer { checking = false; reportCheck = false }
             do {
-                guard let release = try await latestRelease() else { if manual { info("You’re up to date", "Still \(currentVersion) is the latest version.") }; return }
-                let skipped = UserDefaults.standard.string(forKey: "skippedVersion")
-                if !manual, skipped == release.version { return }
-                offer(release)
-            } catch { if manual { info("Couldn’t check for updates", error.localizedDescription) } }
+                let result = try await latestRelease()
+                let report = reportCheck
+                switch result {
+                case .upToDate: if report { info("You’re up to date", "Still \(currentVersion) is the latest version.") }
+                case .failed(let reason): if report { info("Couldn’t check for updates", reason) }
+                case .available(let release):
+                    let skipped = UserDefaults.standard.string(forKey: "skippedVersion")
+                    if !report, skipped == release.version { return }
+                    offer(release)
+                }
+            } catch { if reportCheck { info("Couldn’t check for updates", error.localizedDescription) } }
         }
     }
 
     private struct Release { let version: String; let notes: String; let zip: URL; let sums: URL }
+    /// "Up to date" only when the newest release really is this version; a check that didn't get a clear answer
+    /// says why instead.
+    private enum CheckResult { case upToDate, available(Release), failed(String) }
 
-    private func latestRelease() async throws -> Release? {
+    private func latestRelease() async throws -> CheckResult {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tag = json["tag_name"] as? String, let assets = json["assets"] as? [[String: Any]] else { return nil }
+        let http = response as? HTTPURLResponse, status = http?.statusCode ?? 0
+        guard status == 200 else {
+            let limited = (status == 403 || status == 429) && http?.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0"
+            return .failed(limited ? "Still has checked too often for now. Try again in an hour." : "The update server answered with an error (\(status)). Try again later.")
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let tag = json["tag_name"] as? String, let assets = json["assets"] as? [[String: Any]] else { return .failed("The update server sent an answer Still couldn’t read. Try again later.") }
         let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-        guard Self.isNewer(version, than: currentVersion) else { return nil }
+        guard Self.isNewer(version, than: currentVersion) else { return .upToDate }
         let url = { (match: (String) -> Bool) in assets.first(where: { match($0["name"] as? String ?? "") }).flatMap { ($0["browser_download_url"] as? String).flatMap(URL.init(string:)) } }
-        guard let zip = url({ $0.hasSuffix("mac-universal.zip") }), let sums = url({ $0 == "SHA256SUMS" }) else { return nil }
-        return Release(version: version, notes: json["body"] as? String ?? "", zip: zip, sums: sums)
+        guard let zip = url({ $0.hasSuffix("mac-universal.zip") }), let sums = url({ $0 == "SHA256SUMS" }) else { return .failed("Still \(version) is still being published. Try again in a few minutes.") }
+        return .available(Release(version: version, notes: json["body"] as? String ?? "", zip: zip, sums: sums))
     }
 
     static func isNewer(_ a: String, than b: String) -> Bool {
@@ -75,9 +116,21 @@ import CryptoKit
         }
     }
 
+    /// A verified update waiting for Still to quit; the script that swaps it in starts only once quitting is certain.
+    private var pendingInstall: (app: URL, work: URL)?
+    private var installing = false
     private func install(_ release: Release) {
+        guard !installing else { return }
+        // Replacing Still needs permission to change the folder it's in; find out now, not after quitting.
+        let folder = Bundle.main.bundleURL.deletingLastPathComponent()
+        guard FileManager.default.isWritableFile(atPath: folder.path) else {
+            info("Can’t update Still", "You don’t have permission to replace Still in \(folder.path). Ask an administrator to install the update, or move Still to a folder you can change.")
+            return
+        }
+        installing = true
         AppController.shared.library.toast("Downloading Still \(release.version)…")
         Task {
+            defer { installing = false }
             do {
                 let (zip, _) = try await URLSession.shared.download(from: release.zip)
                 let (sumData, _) = try await URLSession.shared.data(from: release.sums)
@@ -89,21 +142,38 @@ import CryptoKit
                         continuation.resume(with: Result { try Updater.verifyAndUnpack(zip: zip, sums: sumData, name: name, requirement: requirement) })
                     }
                 }
-                // Once this process has quit: copy the new app next to the old one, swap them, and only then
-                // remove the old copy, so a failure part-way never leaves you without Still. Paths are passed as
-                // arguments, not pasted into the script.
-                let script = #"""
-                while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
-                ditto "$2" "$3.new" || { rm -rf "$3.new"; open "$3"; exit 1; }
-                mv "$3" "$3.old" && mv "$3.new" "$3" && rm -rf "$3.old" || { [ -d "$3" ] || mv "$3.old" "$3"; }
-                open "$3"; rm -rf "$4"
-                """#
-                let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = ["-c", script, "still-update", String(ProcessInfo.processInfo.processIdentifier), app.path, Bundle.main.bundlePath, work.path]
-                try process.run()
+                // Quitting can still be called off (a recording under way, or Keep Editing for unsaved edits). The
+                // update is only handed over once it's certain, so it never installs later at a moment nobody chose.
+                pendingInstall = (app, work)
                 NSApp.terminate(nil)
+                // Still here: quitting was called off, so nothing was installed.
+                if pendingInstall != nil {
+                    pendingInstall = nil; try? FileManager.default.removeItem(at: work)
+                    AppController.shared.library.toast("The update wasn’t installed because Still didn’t quit. Choose Check for Updates to try again.")
+                }
             } catch { info("Update failed", error.localizedDescription) }
         }
+    }
+    /// Called as Still quits for good: starts the script that swaps in the verified update and reopens Still. Returns
+    /// false (and says why) if it couldn't start, so Still stays open rather than quitting without updating.
+    func startPendingInstall() -> Bool {
+        guard let pending = pendingInstall else { return true }
+        let app = pending.app, work = pending.work; pendingInstall = nil
+        // Once this process has quit: copy the new app next to the old one, swap them, and only then remove the old
+        // copy, so a failure part-way never leaves you without Still. A failure is noted for the reopened Still to
+        // report. Paths are passed as arguments, not pasted into the script.
+        let script = #"""
+        while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
+        ditto "$2" "$3.new" || { rm -rf "$3.new" "$4"; echo copy > "$5"; open "$3"; exit 1; }
+        if mv "$3" "$3.old"; then
+          if mv "$3.new" "$3"; then rm -rf "$3.old"; else mv "$3.old" "$3"; rm -rf "$3.new"; echo swap > "$5"; fi
+        else rm -rf "$3.new"; echo swap > "$5"; fi
+        open "$3"; rm -rf "$4"
+        """#
+        let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script, "still-update", String(ProcessInfo.processInfo.processIdentifier), app.path, Bundle.main.bundlePath, work.path, failedInstallFile.path]
+        do { try process.run(); return true }
+        catch { try? FileManager.default.removeItem(at: work); info("Update failed", error.localizedDescription); return false }
     }
 
     /// Checks the download against its published checksum, unpacks it and checks its signature. Returns the new app and

@@ -12,6 +12,13 @@ final class CaptureNamingTests: XCTestCase {
         XCTAssertEqual(CaptureNaming.name(pattern: "Bug: {date}/{time}?", date: date, calendar: calendar), "Bug- 2026-10-31-09.05.07-")
     }
 
+    func testDateIsGregorianWhateverTheCalendar() {
+        for identifier in [Calendar.Identifier.buddhist, .japanese, .islamicUmmAlQura] {
+            var other = Calendar(identifier: identifier); other.timeZone = calendar.timeZone
+            XCTAssertEqual(CaptureNaming.name(pattern: "{date} {time}", date: date, calendar: other), "2026-10-31 09.05.07")
+        }
+    }
+
     func testFallsBackAndStaysShort() {
         XCTAssertEqual(CaptureNaming.name(pattern: " ... ", date: date, calendar: calendar), "Screenshot 2026-10-31 at 09.05.07")
         XCTAssertEqual(CaptureNaming.name(pattern: String(repeating: "x", count: 300), date: date, calendar: calendar).count, 180)

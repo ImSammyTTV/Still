@@ -5,6 +5,9 @@ import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
 
+/// Whether the newest write of history's index failed; only read and set on Library's index queue.
+private final class IndexWriteState: @unchecked Sendable { var failed = false }
+
 @MainActor
 final class Library: ObservableObject {
     @Published private(set) var items: [CaptureItem] = []
@@ -56,6 +59,8 @@ final class Library: ObservableObject {
             }
         } catch { message = "Couldn’t load capture history: \(error.localizedDescription)" }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.defaultsChanged() } }
+        // Captures that went past Keep history while Still was closed go now, not only at the next capture.
+        pruneHistory()
     }
     /// Settings change in bursts (a slider, a resized window, the magnifier's zoom), and every change used to redraw
     /// every view watching this. Gather a burst into one update.
@@ -63,7 +68,8 @@ final class Library: ObservableObject {
     private func defaultsChanged() {
         guard !defaultsPending else { return }
         defaultsPending = true
-        DispatchQueue.main.asyncAfter(deadline: .now()+0.15) { [weak self] in MainActor.assumeIsolated { self?.defaultsPending = false; self?.objectWillChange.send() } }
+        // A shorter Keep history in Settings applies straight away, too.
+        DispatchQueue.main.asyncAfter(deadline: .now()+0.15) { [weak self] in MainActor.assumeIsolated { self?.defaultsPending = false; self?.objectWillChange.send(); self?.pruneHistory() } }
     }
 
     /// Every capture file in the folder, newest first, for when the index can't be read.
@@ -86,18 +92,31 @@ final class Library: ObservableObject {
     private static let indexQueue = DispatchQueue(label: "Still history index", qos: .utility)
     /// Copying, saving and trashing capture files, one at a time and off the main thread.
     private static let fileQueue = DispatchQueue(label: "Still capture files", qos: .userInitiated)
+    /// Whether the newest write of the index failed, so quitting tries it once more. Only read and set on indexQueue.
+    private static let indexWrite = IndexWriteState()
+    /// Throws only when the history can't be encoded. Writing it happens later; if that fails, the next change or
+    /// quitting writes the whole history again, so a capture already on disk isn't left out of it.
     func persist() throws {
-        let data = try JSONEncoder().encode(items), file = root.appendingPathComponent("index.json")
+        let data = try JSONEncoder().encode(items), file = root.appendingPathComponent("index.json"), state = Self.indexWrite
         Self.indexQueue.async { [weak self] in
-            do { try data.write(to: file, options: .atomic) }
+            do { try data.write(to: file, options: .atomic); state.failed = false }
             catch {
+                state.failed = true
                 let text = error.localizedDescription
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.toast("Couldn’t save capture history: \(text)") } }
             }
         }
     }
-    /// Waits for history's index to reach the disk, for quitting.
-    func finishWriting() { Self.indexQueue.sync {} }
+    /// Waits for saves, Save As copies, edited pictures and history's index to reach the disk, for quitting, so a file
+    /// still being written isn't lost. None of that work waits on the main thread, so this can't stall forever.
+    func finishWriting() {
+        Self.fileQueue.sync {}; Self.updateQueue.sync {}
+        let state = Self.indexWrite
+        guard Self.indexQueue.sync(execute: { state.failed }), let data = try? JSONEncoder().encode(items) else { return }
+        // The last write of the index failed: one more try with the history as it is now.
+        let file = root.appendingPathComponent("index.json")
+        Self.indexQueue.sync { if (try? data.write(to: file, options: .atomic)) != nil { state.failed = false } }
+    }
     /// Adds a picture or recording file to history. Copying, decoding and encoding happen off the main thread, so
     /// opening a big image or finishing a long recording never stalls Still.
     @discardableResult
@@ -144,12 +163,19 @@ final class Library: ObservableObject {
         do { try persist() } catch { items.removeAll { $0.id == item.id }; try? FileManager.default.removeItem(at: destination); throw error }
         return item
     }
+    /// Edited pictures and their projects are written here, one at a time, so when two saves of the same capture
+    /// overlap (a background save, then saving as the window closes) the newer one always lands last.
+    private static let updateQueue = DispatchQueue(label: "Still capture updates", qos: .userInitiated)
+    /// The newest save of each capture, so an older one finishing late doesn't put back its picture's size.
+    private var updateTokens: [UUID: UUID] = [:]
     func update(_ item: CaptureItem, image: CGImage, document: ProjectDocument? = nil) throws {
-        try ImageRenderer.data(image).write(to: url(item), options: .atomic)
+        updateTokens[item.id] = UUID()
+        let png = try ImageRenderer.data(image), file = url(item)
+        try Self.updateQueue.sync { try png.write(to: file, options: .atomic) }
         if let idx = items.firstIndex(where: { $0.id == item.id }) { items[idx].width = image.width; items[idx].height = image.height }
         if let document, let idx = items.firstIndex(where: { $0.id == item.id }) {
-            let name = "\(item.id.uuidString).stillshot"
-            try document.write(root.appendingPathComponent(name)); items[idx].projectFilename = name
+            let name = "\(item.id.uuidString).stillshot", projectURL = root.appendingPathComponent(name)
+            try Self.updateQueue.sync { try document.write(projectURL) }; items[idx].projectFilename = name
         }
         forgetThumbnail(item.id)
         try persist()
@@ -158,10 +184,18 @@ final class Library: ObservableObject {
     /// Like update(_:image:document:), with the picture already encoded; the files are written off the main thread.
     func update(_ item: CaptureItem, png: Data, width: Int, height: Int, document: ProjectDocument?) async throws {
         let file = url(item), projectName = "\(item.id.uuidString).stillshot", projectURL = root.appendingPathComponent(projectName)
-        try await Task.detached(priority: .userInitiated) {
-            try png.write(to: file, options: .atomic)
-            if let document { try document.write(projectURL) }
-        }.value
+        let token = UUID(); updateTokens[item.id] = token
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            Self.updateQueue.async {
+                let result: Result<Void, Error> = Result {
+                    try png.write(to: file, options: .atomic)
+                    if let document { try document.write(projectURL) }
+                }
+                done.resume(with: result)
+            }
+        }
+        // A newer save of this capture came in meanwhile and has already recorded its own picture.
+        guard updateTokens[item.id] == token else { return }
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx].width = width; items[idx].height = height
             if document != nil { items[idx].projectFilename = projectName }
@@ -185,8 +219,9 @@ final class Library: ObservableObject {
         return root.appendingPathComponent(name)
     }
     private var pruning = false
-    /// Moves captures older than Settings keeps to the Trash. It runs before each new capture is stored, so the files
-    /// go to the Trash off the main thread and the index is saved once for all of them, not once per capture.
+    /// Moves captures older than Settings keeps to the Trash. It runs at launch, when Keep history changes and before
+    /// each new capture is stored; the files go to the Trash off the main thread and the index is saved once for all
+    /// of them, not once per capture. Starred captures are always kept.
     func pruneHistory() {
         let days = Preferences.shared.retentionDays
         guard !pruning, days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
@@ -201,8 +236,11 @@ final class Library: ObservableObject {
         Self.fileQueue.async { [weak self] in
             var trashed: [UUID] = []
             for job in jobs {
-                // Only a capture whose own file went to the Trash leaves the history, as when deleting one by hand.
-                guard (try? FileManager.default.trashItem(at: job.file, resultingItemURL: nil)) != nil else { continue }
+                // Only a capture whose own file went to the Trash (or was already gone) leaves the history, as when
+                // deleting one by hand.
+                if FileManager.default.fileExists(atPath: job.file.path) {
+                    guard (try? FileManager.default.trashItem(at: job.file, resultingItemURL: nil)) != nil else { continue }
+                }
                 trashed.append(job.id)
                 let camera = job.metadata == nil ? nil : Library.readRecordingMetadata(job.metadata).cameraFilename
                 for name in Set(job.sidecars + [camera].compactMap { $0 }) where !name.contains("/") && name != "." && name != ".." {
@@ -223,7 +261,9 @@ final class Library: ObservableObject {
     }
     func delete(_ item: CaptureItem) {
         do {
-            try FileManager.default.trashItem(at: url(item), resultingItemURL: nil)
+            // A capture whose file was already removed by hand still leaves the history, with its other files.
+            let file = url(item)
+            if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.trashItem(at: file, resultingItemURL: nil) }
             let camera = recordingMetadata(item).cameraFilename
             let sidecars = [item.projectFilename, item.metadataFilename, item.sourceVideoFilename, camera, "\(item.id).videoedit.json"].compactMap { $0 }
             for name in Set(sidecars) where !name.contains("/") && name != "." && name != ".." {

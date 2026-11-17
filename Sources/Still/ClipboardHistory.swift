@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CryptoKit
 import StillCore
 import SwiftUI
@@ -108,34 +109,38 @@ final class ClipboardThumbnails: @unchecked Sendable {
         lastChange = change
         guard let reading = read() else { return }
         // In copy order, even when a text copy lands just after an image that is still being converted.
-        let previous = lastRead
-        lastRead = Task { await previous?.value; if let item = await reading.value { remember(item) } }
+        let previous = lastRead, image = reading.image
+        // Until a new image is in the history, tidying the image folder must not delete its file.
+        if image { convertingImages += 1 }
+        lastRead = Task { await previous?.value; if let item = await reading.task.value { remember(item) }; if image { convertingImages -= 1; if cleanPending { cleanImages() } } }
     }
+    private var convertingImages = 0, cleanPending = false
 
     /// Reads the current clipboard into an entry, or nil when it's empty or marked private. The pasteboard is read
     /// here; converting an image is slow (Still's own captures land here too), so that part runs off the main thread.
-    private func read() -> Task<ClipItem?, Never>? {
+    private func read() -> (task: Task<ClipItem?, Never>, image: Bool)? {
         let types = Set((pasteboard.types ?? []).map(\.rawValue))
         guard !types.isEmpty, types.isDisjoint(with: Self.privateTypes) else { return nil }
         let source = NSWorkspace.shared.frontmostApplication?.localizedName
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
             let item = ClipItem(kind: .files, files: urls.map(\.path), source: source)
-            return Task { item }
+            return (Task<ClipItem?, Never> { item }, false)
         }
         if let text = pasteboard.string(forType: .string), !text.isEmpty, text.utf16.count <= Self.maxTextLength {
             let item = ClipItem(kind: .text, text: text, source: source)
-            return Task { item }
+            return (Task<ClipItem?, Never> { item }, false)
         }
         if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff), data.count <= Self.maxImageBytes {
             let imageFolder = imageFolder, thumbnails = thumbnails
-            return Task.detached(priority: .userInitiated) {
+            return (Task.detached(priority: .userInitiated) { () -> ClipItem? in
                 guard let image = NSBitmapImageRep(data: data), let png = image.representation(using: .png, properties: [:]) else { return nil }
                 let name = SHA256.hash(data: png).prefix(12).map { String(format: "%02x", $0) }.joined() + ".png"
                 let url = imageFolder.appendingPathComponent(name)
-                if !FileManager.default.fileExists(atPath: url.path) { try? png.write(to: url) }
+                // An image that couldn't be stored (a full disk, say) isn't remembered: it couldn't be put back later.
+                if !FileManager.default.fileExists(atPath: url.path) { do { try png.write(to: url) } catch { return nil } }
                 _ = thumbnails.image(for: url)
                 return ClipItem(kind: .image, imageFile: name, width: image.pixelsWide, height: image.pixelsHigh, source: source)
-            }
+            }, true)
         }
         return nil
     }
@@ -146,33 +151,65 @@ final class ClipboardThumbnails: @unchecked Sendable {
         trim(); save()
     }
 
-    /// Puts an entry back on the clipboard (and at the top of the history).
-    func restore(_ item: ClipItem) {
+    /// Puts an entry back on the clipboard (and at the top of the history). An image whose file has gone can't be put
+    /// back: the entry is dropped and what's on the clipboard now is left alone, rather than emptied.
+    @discardableResult func restore(_ item: ClipItem) -> Bool {
+        var picture: NSImage?
+        if item.kind == .image {
+            guard let file = item.imageFile, let loaded = NSImage(contentsOf: imageFolder.appendingPathComponent(file)) else {
+                items.removeAll { $0.id == item.id }; save(); NSSound.beep()
+                return false
+            }
+            picture = loaded
+        }
         pasteboard.clearContents()
         switch item.kind {
         case .text: pasteboard.setString(item.text ?? "", forType: .string)
         case .files: pasteboard.writeObjects((item.files ?? []).map { URL(fileURLWithPath: $0) as NSURL })
-        case .image: if let file = item.imageFile, let image = NSImage(contentsOf: imageFolder.appendingPathComponent(file)) { pasteboard.writeObjects([image]) }
+        case .image: if let picture { pasteboard.writeObjects([picture]) }
         }
         lastChange = pasteboard.changeCount
         var moved = item; moved.date = Date(); remember(moved)
+        return true
     }
 
     /// Restores an entry, then pastes it into the app you were using when that's switched on.
     func choose(_ item: ClipItem, returnTo app: NSRunningApplication?) {
-        restore(item)
-        guard pasteAutomatically else { return }
+        guard restore(item), pasteAutomatically else { return }
         guard AXIsProcessTrusted() else {
             _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
             return
         }
         app?.activate()
         DispatchQueue.main.asyncAfter(deadline: .now()+0.15) {
-            let source = CGEventSource(stateID: .combinedSessionState)
+            let source = CGEventSource(stateID: .combinedSessionState), key = ClipboardHistory.pasteKeyCode()
             for down in [true, false] {
-                let event = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down) // V
+                let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
                 event?.flags = .maskCommand; event?.post(tap: .cghidEventTap)
             }
+        }
+    }
+    /// The key that makes ⌘V in the keyboard layout in use. Apps match ⌘ shortcuts by the letter a key types, so on
+    /// Dvorak and other layouts that move V, the key where V sits on a US keyboard would send a different command.
+    /// Layouts with no "v" (non-Latin ones) use the US position, as macOS does for their ⌘ shortcuts.
+    nonisolated private static func pasteKeyCode() -> CGKeyCode {
+        let fallback = CGKeyCode(kVK_ANSI_V)
+        guard let layoutSource = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let raw = TISGetInputSourceProperty(layoutSource, kTISPropertyUnicodeKeyLayoutData) else { return fallback }
+        let layoutData = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+        let keyboard = UInt32(LMGetKbdType())
+        // With ⌘ held, as some layouts switch to US letters while it is.
+        let command = UInt32((cmdKey >> 8) & 0xFF)
+        return layoutData.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> CGKeyCode in
+            guard let layout = bytes.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return fallback }
+            for code in 0..<128 {
+                var dead: UInt32 = 0, length = 0
+                var characters = [UniChar](repeating: 0, count: 4)
+                let capacity = characters.count
+                let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), command, keyboard, OptionBits(kUCKeyTranslateNoDeadKeysMask), &dead, capacity, &length, &characters)
+                if status == OSStatus(noErr), length == 1, characters[0] == UniChar(UInt8(ascii: "v")) { return CGKeyCode(code) }
+            }
+            return fallback
         }
     }
 
@@ -183,6 +220,9 @@ final class ClipboardThumbnails: @unchecked Sendable {
 
     private func trim() { if items.count > limit { items.removeLast(items.count - limit); cleanImages() } }
     private func cleanImages() {
+        // A copied image still being converted has its file written but isn't in the history yet; wait for it.
+        guard convertingImages == 0 else { cleanPending = true; return }
+        cleanPending = false
         let keep = Set(items.compactMap(\.imageFile))
         for file in (try? FileManager.default.contentsOfDirectory(atPath: imageFolder.path)) ?? [] where !keep.contains(file) {
             try? FileManager.default.removeItem(at: imageFolder.appendingPathComponent(file))
@@ -191,6 +231,8 @@ final class ClipboardThumbnails: @unchecked Sendable {
     /// Encoding and writing up to a hundred long entries is slow, so it's done in order on a background queue.
     private static let saving = DispatchQueue(label: "Still.clipboard-save", qos: .utility)
     private func save() { let items = items, url = indexURL; Self.saving.async { if let data = try? JSONEncoder().encode(items) { try? data.write(to: url, options: .atomic) } } }
+    /// Waits for the history to reach the disk, for quitting, so the last thing copied isn't forgotten.
+    func finishWriting() { Self.saving.sync {} }
 
     /// Builds menu items for the history: the newest `menuCount` (the first ten get 1–9 and 0 as keys), then an
     /// Older submenu with the rest, so a long history keeps the menu short without losing anything.

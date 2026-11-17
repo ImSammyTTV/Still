@@ -167,6 +167,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.selection.prewarm(); self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
         ClipboardHistory.shared.start()
+        EditorModel.sweepDragFolders()
         // After an update, ask macOS to re-read Still's right-click Services.
         if UserDefaults.standard.string(forKey: "servicesVersion") != Updater.shared.currentVersion {
             NSUpdateDynamicServices(); UserDefaults.standard.set(Updater.shared.currentVersion, forKey: "servicesVersion")
@@ -211,11 +212,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alert.addButton(withTitle: "Keep Editing"); alert.addButton(withTitle: "Quit Without Saving")
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
         }
+        // Quitting is certain now: an update chosen with Install and Restart is handed over to be swapped in.
+        guard Updater.shared.startPendingInstall() else { return .terminateCancel }
         for model in videoModels.values { model.close() }
         captureProcess?.interrupt()
         selection.close(); scrolling.cancel(); DesktopCover.shared.reset()
-        // History's index is written in the background; let the last write land before quitting.
-        library.finishWriting()
+        // History's index, saves and the clipboard history are written in the background; let them land before quitting.
+        library.finishWriting(); ClipboardHistory.shared.finishWriting()
         return .terminateNow
     }
     private func setupMenu() {

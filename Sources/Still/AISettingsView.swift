@@ -6,7 +6,8 @@ import StillCore
     static let gemini = "local.sam.Still.gemini", claude = "local.sam.Still.anthropic"
     /// The key for the service Settings picked.
     static var service: String { Preferences.shared.describeProvider == "claude" ? claude : gemini }
-    private static var query: [CFString: Any] { [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: "default"] }
+    private static var query: [CFString: Any] { keychainQuery(service) }
+    private static func keychainQuery(_ service: String) -> [CFString: Any] { [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: "default"] }
     static var value: String? {
         var q = query; q[kSecReturnData] = true; q[kSecMatchLimit] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -14,8 +15,10 @@ import StillCore
         return String(data: data, encoding: .utf8)
     }
     static func remove() { SecItemDelete(query as CFDictionary) }
-    static func save(_ key: String) throws {
-        let data = Data(key.utf8)
+    static func save(_ key: String) throws { try save(key, service: service) }
+    /// Saves a key for one service in particular, whichever one Settings shows by the time it's saved.
+    static func save(_ key: String, service: String) throws {
+        let data = Data(key.utf8), query = keychainQuery(service)
         var status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
         if status == errSecItemNotFound { var entry = query; entry[kSecValueData] = data; status = SecItemAdd(entry as CFDictionary, nil) }
         guard status == errSecSuccess else { throw KeyError(message: "The key could not be saved in Keychain (\(status)).") }
@@ -51,13 +54,17 @@ struct AISettingsView: View {
         .onAppear { geminiSaved = GeminiKey.value != nil }
     }
     private func saveGemini() {
-        let key = geminiKey.trimmingCharacters(in: .whitespaces); geminiStatus = "Checking…"
+        // The service is fixed when Save is pressed: switching the picker during the check must not store this key
+        // as the other service's, nor show its result under the other one.
+        let key = geminiKey.trimmingCharacters(in: .whitespaces), provider = prefs.describeProvider; geminiStatus = "Checking…"
         Task {
             do {
-                if prefs.describeProvider == "claude" { try await ImageDescriber.checkClaude(key: key) } else { try await ImageDescriber.check(key: key) }
-                try GeminiKey.save(key); geminiSaved = true; geminiKey = ""; geminiStatus = "Key saved"
+                if provider == "claude" { try await ImageDescriber.checkClaude(key: key) } else { try await ImageDescriber.check(key: key) }
+                try GeminiKey.save(key, service: provider == "claude" ? GeminiKey.claude : GeminiKey.gemini)
+                guard prefs.describeProvider == provider else { return }
+                geminiSaved = true; geminiKey = ""; geminiStatus = "Key saved"
             }
-            catch { geminiStatus = error.localizedDescription }
+            catch { if prefs.describeProvider == provider { geminiStatus = error.localizedDescription } }
         }
     }
     private func card<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View { VStack(alignment: .leading, spacing: 9) { Text(title).font(.system(size: 11, weight: .semibold)); VStack(alignment: .leading, spacing: 13, content: content).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10)) } }
