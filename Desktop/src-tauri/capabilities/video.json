@@ -6,6 +6,7 @@
     "video-*"
   ],
   "permissions": [
+    "allow-picture-raw",
     "allow-library-get",
     "allow-library-play",
     "allow-video-export-target",

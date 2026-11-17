@@ -13,6 +13,7 @@
     "allow-recording-cancel",
     "allow-recording-error",
     "allow-recording-chunk",
+    "allow-recording-chunk-raw",
     "allow-recording-reset",
     "allow-recording-save",
     "allow-recording-tick",

@@ -10,7 +10,11 @@ let media = null, triedWebm = false, failure = '', got = 0, watchdog = 0;
 let written = 0, writes = Promise.resolve();
 const base64 = (blob) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.onerror = () => reject(reader.error || new Error('The recorded data couldn’t be read.')); reader.readAsDataURL(blob); });
 function queueChunk(blob) {
-  writes = writes.then(async () => { await still.invoke('recording:chunk', await base64(blob), ext); written += blob.size; })
+  writes = writes.then(async () => {
+    if (still.raw) await still.raw('recording_chunk_raw', new Uint8Array(await blob.arrayBuffer()), { 'x-ext': ext });
+    else await still.invoke('recording:chunk', await base64(blob), ext);
+    written += blob.size;
+  })
     .catch((error) => { failure = failure || (error && error.message) || String(error); });
 }
 function discardWritten() { written = 0; writes = writes.then(() => still.invoke('recording:reset')).catch(() => {}); }

@@ -1284,11 +1284,13 @@ function framePicture(player, width) {
   ctx.imageSmoothingQuality = 'high'; ctx.setTransform(k, 0, 0, k, 0, 0); drawFrame(ctx, player, F);
   return canvas;
 }
+// Encoded without holding up the page, and sent as bytes.
+const pictureBlob = (canvas) => new Promise((done, failed) => canvas.toBlob((blob) => blob ? done(blob) : failed(new Error('The picture is too large')), 'image/png'));
 $('#saveFrame').onclick = async () => {
   pause();
   try {
     const kept = StillTrim.kept(trim, cuts, skims), at = StillChapters.stamp(StillTrim.outputAt(video.currentTime, kept));
-    await still.invoke('video:image', framePicture(video).toDataURL('image/png'), `${(item && item.title) || 'Recording'} at ${at}`, false);
+    await still.picture('videoImage', await pictureBlob(framePicture(video)), { title: `${(item && item.title) || 'Recording'} at ${at}`, open: false });
     toast('Frame saved to History and copied');
   } catch (error) { showError(`Couldn’t save the frame: ${message(error)}`); }
 };
@@ -1311,7 +1313,7 @@ $('#storyboard').onclick = () => runExport('Making storyboard…', async (run) =
       setProgress((i + 1) / shots.length * 0.95);
     }
   } finally { player.removeAttribute('src'); player.load(); }
-  await still.invoke('video:image', sheet.toDataURL('image/png'), `${(item && item.title) || 'Recording'} storyboard`, true);
+  await still.picture('videoImage', await pictureBlob(sheet), { title: `${(item && item.title) || 'Recording'} storyboard`, open: true });
   toast('Storyboard saved to History and opened');
   return null;
 });
