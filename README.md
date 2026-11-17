@@ -200,8 +200,8 @@ PC". Choose **More info**, then **Run anyway**. Every release is built by this r
 [GitHub Actions release workflow](.github/workflows/release.yml) from its public source code, and each release lists
 SHA-256 checksums of its files in `SHA256SUMS` so you can check a download.
 
-**Privacy:** screenshots and recordings stay on your computer. Still contacts the internet only to check GitHub for
-updates.
+**Privacy:** screenshots and recordings stay on your computer. Still contacts the internet to check GitHub for
+updates, and, only when you use Describe Image with your own key, to send that one picture to the AI service you chose.
 
 </details>
 
