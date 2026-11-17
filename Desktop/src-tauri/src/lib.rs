@@ -146,14 +146,22 @@ fn take_focus(win: &WebviewWindow) {
 /// While an overlay is open, Escape cancels the capture even if the overlay never got keyboard focus.
 /// The shortcut lives only as long as the selection: end_selection removes it.
 fn watch_escape(app: &AppHandle) {
+    WATCHING_ESCAPE.store(true, std::sync::atomic::Ordering::SeqCst);
     let _ = app.global_shortcut().on_shortcut("Escape", |app, _shortcut, event| {
         if event.state != ShortcutState::Pressed { return; }
         let app = app.clone();
         // Off the handler's thread, so removing the shortcut inside end_selection never waits on the handler itself.
         std::thread::spawn(move || {
-            if st(&app).session.lock().unwrap().busy { end_selection(&app); } else { let _ = app.global_shortcut().unregister("Escape"); }
+            if st(&app).session.lock().unwrap().busy { end_selection(&app); } else { unwatch_escape(&app); }
         });
     });
+}
+/// Whether Escape is held for an open selection, so shortcuts registered again meanwhile (Settings closing, a
+/// shortcut being recorded) don't take away the way out of the capture.
+static WATCHING_ESCAPE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn unwatch_escape(app: &AppHandle) {
+    WATCHING_ESCAPE.store(false, std::sync::atomic::Ordering::SeqCst);
+    let _ = app.global_shortcut().unregister("Escape");
 }
 
 fn focus_or<F: FnOnce() -> Option<WebviewWindow>>(app: &AppHandle, label: &str, make: F) -> Option<WebviewWindow> {
@@ -296,7 +304,12 @@ fn warm_overlays(app: &AppHandle) {
 /// Gives a waiting page this display. A page can't be trusted just because it loaded earlier, so it has to answer;
 /// if it doesn't, the capture goes on with a fresh page rather than leaving a blank window over the screen.
 fn warm_overlay(app: &AppHandle, g: &Grab, init: &Value) -> Option<(String, WebviewWindow)> {
-    let label = { let mut s = st(app).session.lock().unwrap(); let label = s.warm.pop()?; s.handing = Some(label.clone()); label };
+    // A page that has gone meanwhile is passed over, so a good one waiting under it is still used.
+    let label = loop {
+        let label = st(app).session.lock().unwrap().warm.pop()?;
+        if app.get_webview_window(&label).is_some() { break label; }
+    };
+    st(app).session.lock().unwrap().handing = Some(label.clone());
     let win = app.get_webview_window(&label);
     if let Some(win) = &win {
         place_overlay(win, g);
@@ -336,7 +349,11 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         // Escape works from the moment the first overlay can appear, not only once they all have.
         watch_escape(&app);
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
-        let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+        let found = app.cursor_position().ok();
+        let cursor = found.unwrap_or(PhysicalPosition::new(0.0, 0.0));
+        // Where the pointer is, for the page: a new window hears nothing of the mouse until it moves, so without this
+        // window selection would hide the pointer with nothing drawn in its place. Wayland doesn't say where it is.
+        let pointer_known = found.is_some() && !is_wayland();
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
         let temp = private_temp();
@@ -367,12 +384,14 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 "imageParts": parts, "imageWidth": w, "imageHeight": h, "windows": mine,
                 "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"), "adjust": setting(&app, "adjustAreaBeforeCapture").as_bool().unwrap_or(false),
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
+                "pointer": if under_cursor && pointer_known { json!({ "x": cursor.x - g.x as f64, "y": cursor.y - g.y as f64 }) } else { Value::Null },
                 "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
             });
             let (label, built) = match warm_overlay(&app, g, &init) {
                 Some((label, win)) => (label, Ok(win)),
                 None => {
-                    let label = format!("overlay-{i}");
+                    // Named for this capture, so a cancelled one still closing its windows never closes this one's.
+                    let label = format!("overlay-{generation}-{i}");
                     if let Some(old) = app.get_webview_window(&label) { let _ = old.destroy(); }
                     let built = overlay_window(&app, &label, json!({ "init": init })).build();
                     if let Ok(win) = &built { place_overlay(win, g); }
@@ -380,11 +399,19 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 }
             };
             if built.is_ok() {
-                // Shown by overlay_drawn once its page has the picture on it.
-                let mut s = st(&app).session.lock().unwrap();
-                s.unshown.push(label.clone());
-                if under_cursor { s.focus_overlay = Some(label.clone()); }
+                // Shown by overlay_drawn once its page has the picture on it. Once this capture has been cancelled
+                // (and perhaps a new one started) its windows are only closed below, never handed to the new one.
+                let current = {
+                    let mut s = st(&app).session.lock().unwrap();
+                    let current = s.generation == generation && s.busy;
+                    if current {
+                        s.unshown.push(label.clone());
+                        if under_cursor { s.focus_overlay = Some(label.clone()); }
+                    }
+                    current
+                };
                 labels.push(label);
+                if !current { break; }
             }
         }
         let cancelled = {
@@ -397,6 +424,13 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         // stay on screen, or a frozen picture would sit over everything with nothing left to close it.
         if cancelled {
             for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
+            return;
+        }
+        // Not one overlay could be opened: say so and let go of the capture, rather than leave it waiting invisibly
+        // and refusing every new one.
+        if labels.is_empty() {
+            end_selection(&app);
+            notify(&app, "Capture failed", "The capture overlay couldn’t be opened.");
             return;
         }
         // A page that never says it has drawn (a picture that fails to load) is shown anyway, so the capture isn't stuck invisible.
@@ -461,7 +495,7 @@ fn countdown(app: &AppHandle, seconds: u64) -> bool {
 async fn countdown_cancel() { COUNTDOWN_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst); }
 
 fn end_selection(app: &AppHandle) {
-    let _ = app.global_shortcut().unregister("Escape");
+    unwatch_escape(app);
     let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.generation += 1; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
     // Only the files that are there: trying every possible name was 256 file calls each time.
@@ -675,8 +709,14 @@ fn window_gone(app: &AppHandle, label: &str) {
         // A page that was only waiting, or that never answered, isn't part of the selection on screen.
         _ if label.starts_with("overlay-warm-") && !st(app).session.lock().unwrap().overlays.iter().any(|l| l == label) => {}
         _ if label.starts_with("overlay-") => {
-            let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
-            if !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
+            // Only a window of the selection on screen ends it: one left over from a cancelled capture, closing while
+            // the next is being built, must not cancel that one.
+            let (mine, still_open) = {
+                let s = st(app).session.lock().unwrap();
+                let mine = s.overlays.iter().any(|l| l == label) || label.starts_with(&format!("overlay-{}-", s.generation));
+                (mine, s.overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some()))
+            };
+            if mine && !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
         }
         _ => {}
     }
@@ -836,6 +876,8 @@ fn register_shortcuts(app: &AppHandle) {
         });
         if ok.is_err() { failed.push(action_key(accel, &shortcuts)); }
     }
+    // Clearing every shortcut above also took Escape from a capture that is open right now.
+    if WATCHING_ESCAPE.load(std::sync::atomic::Ordering::SeqCst) { watch_escape(app); }
     st(app).session.lock().unwrap().failed_shortcuts = failed.clone();
     broadcast(app, "shortcuts:status", json!(failed));
 }
@@ -1139,7 +1181,13 @@ async fn settings_choose_folder(app: AppHandle) -> Option<String> {
     Some(path)
 }
 #[tauri::command]
-async fn shortcuts_pause(app: AppHandle, paused: bool) { if paused { let _ = app.global_shortcut().unregister_all(); } else { register_shortcuts(&app); } }
+async fn shortcuts_pause(app: AppHandle, paused: bool) {
+    if paused {
+        let _ = app.global_shortcut().unregister_all();
+        // Recording a shortcut never takes Escape from a capture that is open.
+        if WATCHING_ESCAPE.load(std::sync::atomic::Ordering::SeqCst) { watch_escape(&app); }
+    } else { register_shortcuts(&app); }
+}
 
 #[tauri::command]
 async fn overlay_done(app: AppHandle, payload: Value) { let a = app.clone(); std::thread::spawn(move || finish_selection(&a, payload)); }
@@ -1148,9 +1196,14 @@ async fn overlay_cancel(app: AppHandle) { end_selection(&app); }
 #[tauri::command]
 async fn overlay_fullscreen(app: AppHandle, display_id: u32) { blocking(move || overlay_fullscreen_now(app, display_id)).await }
 fn overlay_fullscreen_now(app: AppHandle, display_id: u32) {
-    let grab = { let mut s = st(&app).session.lock().unwrap(); std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id) };
+    let (grab, text) = { let mut s = st(&app).session.lock().unwrap(); (std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id), s.purpose == "text") };
     end_selection(&app);
-    if let Some(g) = grab { complete_image(&app, g.image, false); }
+    if let Some(g) = grab {
+        // The whole display is the area Capture Previous Area repeats, as with any other.
+        let (w, h) = g.image.dimensions();
+        previous::remember(&app, &json!({ "px": { "x": 0, "y": 0, "w": w, "h": h } }), &g);
+        complete_image(&app, g.image, text);
+    }
 }
 #[tauri::command]
 async fn overlay_timer(app: AppHandle, delay: u64) {
@@ -1161,8 +1214,13 @@ async fn overlay_timer(app: AppHandle, delay: u64) {
         broadcast(&app, "overlay:timer", json!(delay.min(60)));
         return;
     }
-    // A recording or scrolling capture starts again after the countdown, as before.
-    if delay == 0 { return; }
+    // A recording or scrolling capture starts again after the countdown, as before. Off still clears a timer set
+    // before switching to one, so the bar stops showing it and it doesn't come back with Screenshot.
+    if delay == 0 {
+        st(&app).session.lock().unwrap().timer = 0;
+        broadcast(&app, "overlay:timer", json!(0));
+        return;
+    }
     end_selection(&app);
     start_selection(&app, &purpose, delay, false);
 }
@@ -1176,9 +1234,11 @@ async fn overlay_window_mode(app: AppHandle, on: bool) { broadcast(&app, "overla
 /// A waiting page reports in twice: once when it has loaded, and again when it has been given a screen.
 #[tauri::command]
 async fn overlay_ready(app: AppHandle, window: tauri::Window) {
-    let mut s = st(&app).session.lock().unwrap();
     let label = window.label().to_string();
-    if s.handing.as_deref() == Some(label.as_str()) { s.handing = None; } else { s.warm.push(label); }
+    // An answer that came too late, after its page was given up and closed, doesn't put that page back in line.
+    let alive = app.get_webview_window(&label).is_some();
+    let mut s = st(&app).session.lock().unwrap();
+    if s.handing.as_deref() == Some(label.as_str()) { s.handing = None; } else if alive && !s.warm.contains(&label) { s.warm.push(label); }
 }
 /// A colour picked in the capture overlay: copied as #RRGGBB and kept at the front of the recent colours that the
 /// editor offers.
