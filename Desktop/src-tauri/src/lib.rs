@@ -680,6 +680,9 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let _ = std::fs::remove_file(recording_part(app)); // Never let a previous recording's leftovers lead this one.
     let built = builder(app, "hud", "hud.html", params).title("Recording").inner_size(300.0, 52.0).decorations(false).transparent(true).shadow(false)
         .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).on_permission_request(hud_access).build();
+    // Without its controls the recording could neither run nor be stopped, and every capture would be refused as
+    // busy: undo it and say why.
+    if let Err(e) = &built { stop_recording_state(app); notify(app, "Recording couldn’t start", &format!("The recording controls couldn’t open: {e}")); return; }
     if let Ok(hud) = built {
         media_on(&hud);
         let icons = desktop::hide(app);
@@ -989,7 +992,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "settings" => open_settings(app, None),
-        "quit" => app.exit(0),
+        "quit" => { let app = app.clone(); std::thread::spawn(move || { save_recording_before_exit(&app); app.exit(0); }); }
         "open-image" => import_image(app),
         "unlock-pins" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") { let _ = w.set_ignore_cursor_events(false); } },
         "close-overlays" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") || l.starts_with("quick-") { let _ = w.close(); } },
@@ -1117,7 +1120,16 @@ fn install_update(app: &AppHandle) {
         // Still reopens by itself a few seconds after it closes.
         let (finish_app, finish_version) = (app.clone(), update.version.clone());
         let on_finish = move || set_update(&finish_app, json!({ "state": "installing", "version": finish_version }));
-        match update.download_and_install(on_chunk, on_finish).await {
+        // Installing ends Still, so a recording still running is stopped and saved before the installer starts.
+        let installed = match update.download(on_chunk, on_finish).await {
+            Ok(bytes) => {
+                let saving = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || save_recording_before_exit(&saving)).await;
+                update.install(bytes)
+            }
+            Err(e) => Err(e),
+        };
+        match installed {
             Ok(()) => app.restart(),
             Err(e) => { set_update(&app, json!({ "state": "error", "error": e.to_string() })); notify(&app, "Update failed", &e.to_string()); }
         }
@@ -1929,7 +1941,16 @@ fn native_part() -> PathBuf { private_temp().join(format!("still-native-{}.mp4",
 /// Starts Still's own recorder on the area chosen for this recording.
 #[tauri::command]
 async fn recording_begin(app: AppHandle) -> Result<(), String> { blocking(move || recording_begin_now(app)).await }
+/// Still's own recorder is starting, which can take several seconds (sound devices, the encoder). A stop that arrives
+/// meanwhile waits for it rather than deciding the controls have stopped answering.
+static NATIVE_STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn recording_begin_now(app: AppHandle) -> Result<(), String> {
+    NATIVE_STARTING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let started = start_native(app);
+    NATIVE_STARTING.store(false, std::sync::atomic::Ordering::SeqCst);
+    started
+}
+fn start_native(app: AppHandle) -> Result<(), String> {
     let (params, place) = { let s = st(&app).session.lock().unwrap(); (s.recording.clone(), s.recorded) };
     let (Some(params), Some(place)) = (params, place) else { return Err("There is no recording to start.".into()) };
     let rect = &params["rect"];
@@ -1947,9 +1968,15 @@ fn recording_begin_now(app: AppHandle) -> Result<(), String> {
     };
     let separate = !options.cursor && params["options"]["cursorEffects"].as_bool().unwrap_or(false);
     let handle = record::start(options)?;
-    st(&app).session.lock().unwrap().cursor_separate = separate;
-    if !handle.warnings.is_empty() { notify(&app, "Recording without some sound", &handle.warnings.join(" ")); }
-    st(&app).session.lock().unwrap().recorder = Some(Arc::new(handle));
+    let warnings = handle.warnings.join(" ");
+    {
+        let mut s = st(&app).session.lock().unwrap();
+        // Stopped or cancelled while the recorder was starting: it must not go on recording with no controls.
+        if s.recording.is_none() { drop(s); handle.cancel(); return Err("The recording was stopped before it started.".into()); }
+        s.cursor_separate = separate;
+        s.recorder = Some(Arc::new(handle));
+    }
+    if !warnings.is_empty() { notify(&app, "Recording without some sound", &warnings); }
     Ok(())
 }
 #[tauri::command]
@@ -1969,12 +1996,19 @@ async fn recording_restart(app: AppHandle) {
 
 /// Ends a recording made by Still's own recorder and puts it in the library.
 fn finish_native(app: &AppHandle) -> Result<(), String> {
+    let _saving = Saving::begin();
     let Some(recorder) = st(app).session.lock().unwrap().recorder.take() else { return Ok(()) }; // Already finished.
     let finished = recorder.stop();
+    // Nothing worth keeping came of it: make sure the recorder lets go of the file, which it then deletes.
+    if finished.is_err() { recorder.cancel(); }
     let saved = finished.and_then(|f| {
         if std::fs::metadata(&f.path).map(|m| m.len()).unwrap_or(0) == 0 { let _ = std::fs::remove_file(&f.path); return Err("The recording’s file couldn’t be read.".into()); }
         eprintln!("[recording] {} frames, {} dropped, hardware encoder: {}", f.frames, f.dropped, f.hardware);
-        store_recording(app, &f.path, "mp4", f.duration)
+        store_recording(app, &f.path, "mp4", f.duration)?;
+        // The recorder ran into a problem partway (a full disk, say): what it recorded until then is saved, and the
+        // user hears why the recording ends early.
+        if let Some(problem) = &f.problem { notify(app, "Recording stopped early", &format!("Recording ran into a problem ({problem}), so Still saved the video it had recorded until then.")); }
+        Ok(())
     });
     if let Err(e) = &saved { stop_recording_state(app); notify(app, "Recording couldn’t be saved", e); }
     saved
@@ -2016,7 +2050,12 @@ fn append_recording(app: &AppHandle, bytes: &[u8], ext: &str) -> Result<(), Stri
         s.recording_ext = if ext == "mp4" { "mp4".into() } else { "webm".into() };
     }
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(recording_part(&app)).map_err(|e| e.to_string())?;
-    std::io::Write::write_all(&mut file, bytes).map_err(|e| e.to_string())
+    let before = file.metadata().map(|m| m.len()).ok();
+    std::io::Write::write_all(&mut file, bytes).map_err(|e| {
+        // A second only partly written (a full disk, say) is cut off again, so what was saved before it still plays.
+        if let Some(len) = before { let _ = file.set_len(len); }
+        e.to_string()
+    })
 }
 /// Restart throws the recording away and begins again.
 #[tauri::command]
@@ -2049,6 +2088,7 @@ fn salvage_recording(app: &AppHandle) -> bool {
 /// Puts a finished recording in the library and does what the After Recording settings ask.
 /// The file is moved into the library (see Library::add_file); if that fails it's moved to the Desktop instead.
 fn store_recording(app: &AppHandle, file: &std::path::Path, ext: &str, duration: f64) -> Result<(), String> {
+    let _saving = Saving::begin();
     let (trail, separate) = { let mut s = st(app).session.lock().unwrap(); (s.trail.take().map(marks::Trail::finish), std::mem::take(&mut s.cursor_separate)) };
     stop_recording_state(app);
     let added = st(app).library.lock().unwrap().add_file(file, "recording", ext, None, 0, 0);
@@ -2087,12 +2127,51 @@ fn request_stop(app: &AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(8));
         if st(&app).session.lock().unwrap().recording.is_none() { return; }
-        if !salvage_recording(&app) { notify(&app, "Recording stopped", "The recording controls stopped responding before any video was captured."); }
+        stop_unanswered(&app);
     });
+}
+/// Ends a recording the controls didn't end when asked. Still's own recorder may only have been starting, or the
+/// video already on its way into the library: either is let finish first, so neither is mistaken for silence.
+fn stop_unanswered(app: &AppHandle) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while (NATIVE_STARTING.load(std::sync::atomic::Ordering::SeqCst) || SAVING.load(std::sync::atomic::Ordering::SeqCst) > 0) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if st(app).session.lock().unwrap().recorder.is_some() { let _ = finish_native(app); return; }
+    if st(app).session.lock().unwrap().recording.is_none() { return; }
+    if !salvage_recording(app) { notify(app, "Recording stopped", "The recording controls stopped responding before any video was captured."); }
+}
+
+/// Recordings being finished or moved into the library right now. Until then the video is in Still's temporary
+/// folder, which is emptied when Still quits, so quitting waits for them.
+static SAVING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+struct Saving;
+impl Saving { fn begin() -> Self { SAVING.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Saving } }
+impl Drop for Saving { fn drop(&mut self) { SAVING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }
+
+/// Quitting or installing an update mid-recording stops and saves the recording first, rather than emptying the
+/// temporary folder with the video still in it. Returns once it is saved, or once saving has had its chance.
+fn save_recording_before_exit(app: &AppHandle) {
+    let (recording, native) = { let s = st(app).session.lock().unwrap(); (s.recording.is_some(), s.recorder.is_some()) };
+    if native { let _ = finish_native(app); }
+    else if recording {
+        let _ = app.emit_to("hud", "hud:stop", ());
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while st(app).session.lock().unwrap().recording.is_some() && std::time::Instant::now() < deadline { std::thread::sleep(Duration::from_millis(100)); }
+        stop_unanswered(app);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while SAVING.load(std::sync::atomic::Ordering::SeqCst) > 0 && std::time::Instant::now() < deadline { std::thread::sleep(Duration::from_millis(100)); }
 }
 
 #[tauri::command]
-async fn recording_tick(app: AppHandle, seconds: u64, paused: bool) { show_recording_time(&app, seconds, paused); }
+async fn recording_tick(app: AppHandle, seconds: u64, paused: bool) {
+    show_recording_time(&app, seconds, paused);
+    // Still's own recorder stopped by itself (a full disk, say): end the recording now and keep what it recorded,
+    // rather than letting the clock run on with nothing being recorded.
+    let failed = st(&app).session.lock().unwrap().recorder.as_ref().is_some_and(|r| r.failed());
+    if failed { std::thread::spawn(move || { let _ = finish_native(&app); }); }
+}
 
 // ---- Video editor -------------------------------------------------------------------------------
 
