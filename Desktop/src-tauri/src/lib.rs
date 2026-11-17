@@ -121,7 +121,18 @@ fn broadcast(app: &AppHandle, event: &str, payload: Value) {
     let _ = app.emit(event, payload);
 }
 fn platform() -> &'static str { if cfg!(windows) { "win32" } else if cfg!(target_os = "macos") { "darwin" } else { "linux" } }
-fn is_wayland() -> bool { cfg!(target_os = "linux") && std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false) && std::env::var("DISPLAY").is_err() }
+/// Whether the desktop is a Wayland session. Most of them run X11 apps too (DISPLAY is set), but capture still goes
+/// through the desktop's picker and global shortcuts only fire while an X11 app is in front, so the hints apply.
+fn is_wayland() -> bool {
+    let set = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
+    cfg!(target_os = "linux") && (std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false) || set("WAYLAND_DISPLAY"))
+}
+/// Whether Still's own windows are on Wayland itself (see `run`), where the desktop, not Still, decides where each
+/// window goes and whether it stays on top.
+fn wayland_windows() -> bool {
+    let set = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
+    cfg!(target_os = "linux") && set("WAYLAND_DISPLAY") && match std::env::var("GDK_BACKEND") { Ok(b) => !b.trim_start().starts_with("x11"), Err(_) => !set("DISPLAY") }
+}
 
 // ---- Windows ----------------------------------------------------------------------------------
 
@@ -225,7 +236,12 @@ fn open_video(app: &AppHandle, id: &str) {
     close_preview(app, id);
     let monitor = pointer_monitor(app);
     let (w, h) = monitor.as_ref().map(|m| { let a = m.work_area(); let s = m.scale_factor(); ((a.size.width as f64 / s - 40.0).min(960.0), (a.size.height as f64 / s - 40.0).min(700.0)) }).unwrap_or((960.0, 700.0));
-    focus_or(app, &label, || place_on(glass(builder(app, &label, "video.html", json!({ "id": id }))).title(title).inner_size(w, h).min_inner_size(w.min(720.0), h.min(560.0)).decorations(false), monitor.as_ref(), w, h));
+    // Exporting an edited video records it again, which WebKitGTK only allows with media capture switched on.
+    focus_or(app, &label, || {
+        let win = place_on(glass(builder(app, &label, "video.html", json!({ "id": id }))).title(title).inner_size(w, h).min_inner_size(w.min(720.0), h.min(560.0)).decorations(false), monitor.as_ref(), w, h)?;
+        media_on(&win);
+        Some(win)
+    });
 }
 
 // ---- Floating Preview -------------------------------------------------------------------------------
@@ -307,6 +323,8 @@ fn place_overlay(win: &WebviewWindow, g: &Grab) {
     let (w, h) = g.image.dimensions();
     let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
     let _ = win.set_size(PhysicalSize::new(w, h));
+    // Wayland ignores both and doesn't keep the window above the panels: filling the screen is the one way to cover it.
+    if wayland_windows() { let _ = win.set_fullscreen(true); }
 }
 
 /// Starting a webview is the slowest part of opening the overlay, so one page per display is loaded ahead of time and
@@ -723,9 +741,24 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let native = native_engine(&rec);
     let mut rec = rec;
     if cfg!(windows) { rec["engine"] = json!(if native.is_ok() { "auto" } else { "webview" }); }
-    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
+    let mut params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
         "stopShortcut": setting(app, "shortcuts")["record"], "native": native.is_ok(), "nativeWhy": native.err() });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    let mut hud_spot = (grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32);
+    // Only Windows can keep the controls out of the video. On Linux they go just outside the recorded area, and when
+    // the area leaves no room (the whole screen) the recording blacks out their spot instead of showing them.
+    if cfg!(target_os = "linux") {
+        let display = marks::Area { x: grab.x as f64, y: grab.y as f64, w: iw as f64, h: ih as f64 };
+        let screen = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten()
+            .map(|m| { let a = m.work_area(); marks::Area { x: a.position.x as f64, y: a.position.y as f64, w: a.size.width as f64, h: a.size.height as f64 } })
+            .unwrap_or(display);
+        match marks::hud_outside(marks::Area { x: grab.x as f64 + x, y: grab.y as f64 + y, w, h }, screen, 300.0 * scale, 52.0 * scale, 8.0 * scale) {
+            Some(spot) => hud_spot = spot,
+            // Where Wayland places the window itself, its spot isn't known, so there's nothing to black out.
+            None if !wayland_windows() => params["hudMask"] = json!({ "x": hud_spot.0 - grab.x, "y": hud_spot.1 - grab.y, "w": 300.0 * scale, "h": 52.0 * scale }),
+            None => {}
+        }
+    }
     {
         let mut s = st(app).session.lock().unwrap();
         s.recording = Some(params.clone());
@@ -741,7 +774,7 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
         media_on(&hud);
         let icons = desktop::hide(app);
         st(app).session.lock().unwrap().icons = icons;
-        let _ = hud.set_position(PhysicalPosition::new(grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32));
+        let _ = hud.set_position(PhysicalPosition::new(hud_spot.0, hud_spot.1));
         let _ = hud.show(); let _ = hud.set_focus();
     }
     build_tray_menu(app);
@@ -804,8 +837,9 @@ fn stop_recording_state(app: &AppHandle) {
 // ---- Camera bubble, clicks and keys -------------------------------------------------------------
 //
 // These are ordinary windows floating over the screen, so the screen capture records them where they overlap
-// the selection. The HUD is the only window kept out of the video (content_protected), so neither of these
-// may be protected, and the keys only ever exist on screen and in that video.
+// the selection. The HUD is the only window kept out of the video (content_protected on Windows; on Linux it sits
+// outside the selection or is blacked out, see `start_recording`), so neither of these may be protected, and the
+// keys only ever exist on screen and in that video.
 
 /// WebKitGTK has no permission prompt of its own: it says no to everything Still doesn't answer, and it ships
 /// with media capture switched off (see `media_on`). The user asked for the recording, so say yes here.
@@ -845,7 +879,15 @@ fn open_marks(app: &AppHandle, place: Recorded) {
     let options = marks::Options { area: place.area, clicks: setting(app, "recording.clicks").as_bool().unwrap_or(false), keys: setting(app, "recording.keys").as_bool().unwrap_or(false),
         shortcuts_only: setting(app, "recording.keysShortcutsOnly").as_bool().unwrap_or(true) };
     if !options.clicks && !options.keys { return; }
-    if !marks::available() { notify(app, "Clicks and keys are off", "Wayland doesn’t let apps see clicks or keys in other windows. Sign in to an X11 session to show them."); return; }
+    if !marks::available() {
+        // Once per run: the setting may have been turned on in an X11 session, and Settings can't switch it off here.
+        static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            notify(app, "Clicks and keys are off", if is_wayland() { "Wayland doesn’t let apps see clicks or keys in other windows. Sign in to an X11 session to show them." }
+                else { "This desktop doesn’t let apps see clicks or keys in other windows. They work in an X11 session." });
+        }
+        return;
+    }
     let (w, h) = (place.area.w, place.area.h);
     let built = builder(app, "marks", "marks.html", json!({})).title("Clicks and Keys").inner_size(w / place.scale, h / place.scale).decorations(false).transparent(true).shadow(false).resizable(false)
         .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).visible_on_all_workspaces(true).build();
@@ -960,10 +1002,12 @@ fn show_recording_time(app: &AppHandle, seconds: u64, paused: bool) {
 }
 
 /// The tray shows a plain ripple glyph, like other menu bar and tray icons: white on a dark taskbar or
-/// panel, black on a light Windows taskbar.
+/// panel, black on a light Windows taskbar. Linux panels can be light or dark and don't say which, so there the
+/// white glyph has a dark rim that shows it on either.
 fn tray_icon() -> tauri::image::Image<'static> {
     let light = cfg!(windows) && windows_light_taskbar();
-    let bytes: &'static [u8] = if light { include_bytes!("../icons/tray-black.png") } else { include_bytes!("../icons/tray-white.png") };
+    let bytes: &'static [u8] = if light { include_bytes!("../icons/tray-black.png") }
+        else if cfg!(target_os = "linux") { include_bytes!("../icons/tray-linux.png") } else { include_bytes!("../icons/tray-white.png") };
     tauri::image::Image::from_bytes(bytes).expect("tray icon")
 }
 /// Windows stores the taskbar's theme in SystemUsesLightTheme (1 = light).
@@ -2556,6 +2600,13 @@ fn run_args(app: &AppHandle, args: &[String]) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if desktop::watch() { return; }
+    // Wayland doesn't let an app place its own windows or keep them above others, and the capture overlays (one over
+    // each display) and the recording controls need both. When the desktop runs X11 apps too, Still's windows go that
+    // way instead. A backend chosen with GDK_BACKEND is left alone.
+    #[cfg(target_os = "linux")] {
+        let set = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
+        if std::env::var_os("GDK_BACKEND").is_none() && set("WAYLAND_DISPLAY") && set("DISPLAY") { gdk::set_allowed_backends("x11"); }
+    }
     tauri::Builder::default()
         .on_window_event(|window, event| if let tauri::WindowEvent::Destroyed = event { window_gone(window.app_handle(), window.label()); })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| { if !run_args(app, &args) { open_settings(app, None); } }))

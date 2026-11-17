@@ -24,3 +24,24 @@ test('A window recording cannot silently record the whole screen', () => {
   assert.equal(input.recordingSourceAllowed(true, undefined), false);
   assert.equal(input.recordingSourceAllowed(false, 'monitor'), true);
 });
+test('Linux draws every frame when the controls have to be blacked out, but never for a window', () => {
+  const mask = { x: 810, y: 990, w: 300, h: 52 };
+  assert.equal(input.shouldDraw('monitor', true, mask), true);
+  assert.equal(input.shouldDraw(undefined, true, mask), true);
+  assert.equal(input.shouldDraw('monitor', true, undefined), false);
+  assert.equal(input.shouldDraw('monitor', false, undefined), true);
+  assert.equal(input.shouldDraw('window', true, mask), false);
+  assert.equal(input.shouldDraw('window', false, mask), false);
+});
+test('The controls are blacked out where they sit in the cropped picture', () => {
+  const mask = { x: 810, y: 990, w: 300, h: 52 };
+  // The whole 1920x1080 display, recorded at its own size and at half size.
+  assert.deepEqual(input.maskRect(mask, { x: 0, y: 0, w: 1920, h: 1080 }, 1920, 1080), { x: 810, y: 990, w: 300, h: 52 });
+  assert.deepEqual(input.maskRect(mask, { x: 0, y: 0, w: 1920, h: 1080 }, 960, 540), { x: 405, y: 495, w: 150, h: 26 });
+  // Only part of them inside the selection, and rounded outwards.
+  assert.deepEqual(input.maskRect(mask, { x: 1000, y: 0, w: 920, h: 1001 }, 920, 1001), { x: 0, y: 990, w: 110, h: 11 });
+  assert.deepEqual(input.maskRect({ x: 10.5, y: 10.5, w: 10, h: 10 }, { x: 0, y: 0, w: 100, h: 100 }, 100, 100), { x: 10, y: 10, w: 11, h: 11 });
+  // Outside the selection, or nothing to hide.
+  assert.equal(input.maskRect(mask, { x: 0, y: 0, w: 800, h: 600 }, 800, 600), null);
+  assert.equal(input.maskRect(undefined, { x: 0, y: 0, w: 800, h: 600 }, 800, 600), null);
+});

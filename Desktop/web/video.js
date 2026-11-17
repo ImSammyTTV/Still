@@ -1265,7 +1265,7 @@ $('#exportGo').onclick = () => {
       return target && still.invoke('video:copy');
     });
   }
-  const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && MediaRecorder.isTypeSupported(type));
+  const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && !!window.MediaStream && MediaRecorder.isTypeSupported(type));
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
   runExport(needsCanvas() || plan.scaled ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);
@@ -1412,7 +1412,8 @@ async function open() {
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.
 }
 
-applyTheme().then((loaded) => { prefs = loaded || {}; if (prefs.platform !== 'darwin') addWindowControls(); return open(); })
+// Exporting an edit records it again, so on Linux the page needs media capture, which can arrive after the first load.
+if (!reloadForMedia()) applyTheme().then((loaded) => { prefs = loaded || {}; if (prefs.platform !== 'darwin') addWindowControls(); return open(); })
   .catch((error) => { $('#status').hidden = true; showError(`Couldn’t open this recording: ${message(error)}`, true); });
 refreshIcons();
 still.on('library:changed', async () => { if (!(await still.invoke('library:get', id))) still.send('window:close'); });

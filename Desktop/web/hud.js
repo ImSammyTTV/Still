@@ -119,15 +119,21 @@ async function begin() {
   const r = opts.rect, sx = video.videoWidth / opts.imageWidth, sy = video.videoHeight / opts.imageHeight;
   const full = r.x <= 1 && r.y <= 1 && r.w >= opts.imageWidth - 2 && r.h >= opts.imageHeight - 2;
   let videoTrack = track;
-  if (StillCaptureInput.shouldCrop(displaySurface, full)) {
+  if (StillCaptureInput.shouldDraw(displaySurface, full, opts.hudMask)) {
     const src = { x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy };
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(2, Math.round(src.w / 2) * 2); canvas.height = Math.max(2, Math.round(src.h / 2) * 2);
     const ctx = canvas.getContext('2d', { alpha: false });
+    // These controls, when they had to go over the recorded area (Linux only).
+    const hide = StillCaptureInput.maskRect(opts.hudMask, r, canvas.width, canvas.height);
     // Each new screen frame is drawn as it arrives and handed to the recorder explicitly, so frames keep coming
     // even when Windows slows the page's timers down (the timer stays as a backstop).
     videoTrack = canvas.captureStream(0).getVideoTracks()[0];
-    const draw = () => { ctx.drawImage(video, src.x, src.y, src.w, src.h, 0, 0, canvas.width, canvas.height); if (videoTrack.requestFrame) videoTrack.requestFrame(); };
+    const draw = () => {
+      ctx.drawImage(video, src.x, src.y, src.w, src.h, 0, 0, canvas.width, canvas.height);
+      if (hide) { ctx.fillStyle = '#000'; ctx.fillRect(hide.x, hide.y, hide.w, hide.h); }
+      if (videoTrack.requestFrame) videoTrack.requestFrame();
+    };
     draw(); cropTimer = setInterval(draw, 1000 / (o.fps || 30));
     if (video.requestVideoFrameCallback) { const onFrame = () => { if (finishing) return; draw(); video.requestVideoFrameCallback(onFrame); }; video.requestVideoFrameCallback(onFrame); }
   }

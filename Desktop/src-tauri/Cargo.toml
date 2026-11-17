@@ -73,4 +73,6 @@ windows = { version = "=0.62.2", features = ["Foundation", "Graphics", "Graphics
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "=2.0.2"
+# Choosing X11 windows under Wayland when both are there (see run). The same version the window toolkit already uses.
+gdk = "=0.18.2"
 x11rb = { version = "=0.13.2", features = ["xtest"] }
