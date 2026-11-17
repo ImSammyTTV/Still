@@ -4,6 +4,13 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.59 — 2026-11-17
+
+- **Copying, saving and pinning from the image editor are smoother** (Windows, Linux). Copy, Save, Save As, Pin,
+  dragging the picture out and Save for Size no longer pause Still on large screenshots.
+- **Save Frame and Storyboard in the video editor are smoother** (Windows, Linux).
+- **Recording uses less effort when Still records through its backup recorder** (Linux).
+
 ## v1.2.58 — 2026-11-16
 
 The last of the smoothness work: places where Still could still pause.
