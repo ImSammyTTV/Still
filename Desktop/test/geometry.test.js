@@ -19,6 +19,21 @@ test('arrow keys move or resize inside the display', () => {
   assert.deepEqual(G.nudge({ x: 0, y: 0, w: 10, h: 10 }, 5, 5, { resize: true, bounds }), { x: 0, y: 0, w: 15, h: 15 });
 });
 
+test('growing a selection that touches the screen edge stops there instead of sliding it', () => {
+  const bounds = { x: 0, y: 0, w: 1000, h: 800 }, edge = { x: 100, y: 750, w: 900, h: 50 };
+  assert.deepEqual(G.nudge(edge, 1, 1, { resize: true, bounds }), edge);
+  assert.deepEqual(G.nudge(edge, 10, 10, { resize: true, bounds }), edge);
+  assert.deepEqual(G.nudge(edge, -10, -10, { resize: true, bounds }), { x: 100, y: 750, w: 890, h: 40 });
+});
+
+test('a square or locked shape keeps its shape when dragged past the screen edge', () => {
+  const bounds = { x: 0, y: 0, w: 100, h: 100 };
+  assert.deepEqual(G.dragRect({ x: 50, y: 90 }, { x: 120, y: 160 }, { square: true, bounds }), { x: 50, y: 90, w: 10, h: 10 });
+  assert.deepEqual(G.dragRect({ x: 50, y: 50 }, { x: -40, y: 0 }, { square: true, bounds }), { x: 0, y: 0, w: 50, h: 50 });
+  assert.deepEqual(G.dragRect({ x: 20, y: 40 }, { x: 200, y: 41 }, { aspect: 2, bounds }), { x: 20, y: 40, w: 80, h: 40 });
+  assert.deepEqual(G.dragRect({ x: 0, y: 70 }, { x: 160, y: 71 }, { aspect: 2, bounds }), { x: 0, y: 70, w: 60, h: 30 });
+});
+
 test('Space window mode picks the frontmost window under the pointer', () => {
   const windows = [{ id: 1, x: 10, y: 10, w: 50, h: 50 }, { id: 2, x: 0, y: 0, w: 200, h: 200 }];
   assert.equal(G.windowAt(windows, { x: 20, y: 20 }).id, 1);
@@ -146,4 +161,12 @@ test('resizing keeps the opposite side, the minimum size, the screen and the sha
   assert.deepStrictEqual(G.resizeRect(r, 'n', 0, -500, { bounds }), { x: 100, y: 0, w: 200, h: 200 });
   assert.deepStrictEqual(G.resizeRect({ x: 100, y: 100, w: 100, h: 100 }, 'se', 60, 10, { bounds, aspect: 1 }), { x: 100, y: 100, w: 160, h: 160 });
   assert.deepStrictEqual(G.resizeRect({ x: 100, y: 100, w: 100, h: 100 }, 's', 0, 40, { bounds, aspect: 1 }), { x: 100, y: 100, w: 140, h: 140 });
+});
+
+test('a locked shape resized into the screen edge stops growing and keeps its shape', () => {
+  const bounds = { x: 0, y: 0, w: 100, h: 100 };
+  assert.deepStrictEqual(G.resizeRect({ x: 10, y: 60, w: 40, h: 20 }, 'se', 80, 0, { bounds, aspect: 1 }), { x: 10, y: 60, w: 40, h: 40 });
+  assert.deepStrictEqual(G.resizeRect({ x: 50, y: 50, w: 20, h: 20 }, 'nw', -70, 0, { bounds, aspect: 1 }), { x: 0, y: 0, w: 70, h: 70 });
+  assert.deepStrictEqual(G.resizeRect({ x: 60, y: 10, w: 20, h: 20 }, 's', 0, 60, { bounds, aspect: 1 }), { x: 60, y: 10, w: 40, h: 40 });
+  assert.deepStrictEqual(G.resizeRect({ x: 10, y: 80, w: 20, h: 10 }, 'e', 60, 0, { bounds, aspect: 2 }), { x: 10, y: 80, w: 40, h: 20 });
 });

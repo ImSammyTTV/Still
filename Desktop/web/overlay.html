@@ -6,7 +6,9 @@
 <link rel="stylesheet" href="style.css">
 <style>
   html, body { background: #000; cursor: crosshair; }
-  body.window-mode { cursor: none; }
+  /* Window selection draws its own camera pointer, so the system one is hidden, but only once the page knows where
+     the pointer is: until then the normal pointer stays, or there would be none at all. */
+  body.window-mode.pointer-known { cursor: none; }
   body.moving-selection { cursor: grabbing; }
   /* Under an area being adjusted: takes it, like Enter or a double-click inside. */
   .sel-capture { position: fixed; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border: 1px solid var(--chrome-border);
@@ -32,8 +34,9 @@
   .times { color: var(--on-chrome-2); }
   #aspect { padding: 0 9px; }
   .camera { position: fixed; pointer-events: none; display: none; color: var(--on-chrome); filter: drop-shadow(0 1px 2px rgba(0,0,0,.9)); transform: translate(-50%, -50%); }
-  body.window-mode .camera { display: block; }
-  .menu { color: var(--on-chrome); background: var(--hud); border-color: var(--chrome-border); }
+  body.window-mode.pointer-known .camera { display: block; }
+  /* The bar's menus keep the normal pointer, as the bar does, whatever the screen behind them shows. */
+  .menu { color: var(--on-chrome); background: var(--hud); border-color: var(--chrome-border); cursor: default; }
 
 </style>
 </head>

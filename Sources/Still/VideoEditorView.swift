@@ -37,6 +37,8 @@ struct AtPlayhead<Content: View>: View {
     /// Called before each change made by dragging on the preview: changes within a moment of each other are one undo step.
     func liveEdit() { if Date() >= liveEditUntil { liveEditRecorded = false }; liveEditUntil = Date().addingTimeInterval(0.6) }
     @Published var metadata = RecordingMetadata()
+    /// The recording's details file is there but couldn't be read; saving a transcript would write over it.
+    @Published var metadataUnreadable = false
     @Published var duration: Double = 0
     let clock = PlayheadClock()
     var playhead: Double {
@@ -92,11 +94,31 @@ struct AtPlayhead<Content: View>: View {
     /// megabytes of JSON), then sets the editor up with them.
     private func readSaved() async {
         let metadataURL = library.recordingMetadataURL(item), editsURL = library.root.appendingPathComponent("\(item.id).videoedit.json")
-        let (metadata, saved) = await Task.detached(priority: .userInitiated) { () -> (RecordingMetadata, VideoSettings?) in
-            let metadata = Library.readRecordingMetadata(metadataURL)
-            let saved = (try? Data(contentsOf: editsURL)).flatMap { try? JSONDecoder().decode(VideoSettings.self, from: $0) }
-            return (metadata, saved)
+        let (metadata, metadataUnreadable, saved, editsUnreadable, editsBackup) = await Task.detached(priority: .userInitiated) { () -> (RecordingMetadata, Bool, VideoSettings?, Bool, String?) in
+            // A details file that's there but can't be read is told apart from a missing one, so a transcript saved
+            // later doesn't write empty details over the pointer, clicks and camera.
+            var metadata = RecordingMetadata(), metadataUnreadable = false
+            if let metadataURL, FileManager.default.fileExists(atPath: metadataURL.path) {
+                if let data = try? Data(contentsOf: metadataURL), let decoded = try? JSONDecoder().decode(RecordingMetadata.self, from: data) { metadata = decoded } else { metadataUnreadable = true }
+            }
+            // Saved edits that can't be read are copied aside before anything could save over them.
+            var saved: VideoSettings?, editsUnreadable = false, editsBackup: String?
+            if FileManager.default.fileExists(atPath: editsURL.path) {
+                if let data = try? Data(contentsOf: editsURL), let decoded = try? JSONDecoder().decode(VideoSettings.self, from: data) { saved = decoded }
+                else {
+                    editsUnreadable = true
+                    let backup = editsURL.appendingPathExtension("bak")
+                    try? FileManager.default.removeItem(at: backup)
+                    if (try? FileManager.default.copyItem(at: editsURL, to: backup)) != nil { editsBackup = backup.lastPathComponent }
+                }
+            }
+            return (metadata, metadataUnreadable, saved, editsUnreadable, editsBackup)
         }.value
+        var problems: [String] = []
+        if editsUnreadable { problems.append("This video’s saved edits couldn’t be read, so the editor started fresh. " + (editsBackup.map { "A copy of them was kept as \($0) in the library folder." } ?? "Saving will replace them.")) }
+        if metadataUnreadable { problems.append("This recording’s details couldn’t be read, so its pointer, clicks and camera may be missing and a transcript can’t be saved.") }
+        if !problems.isEmpty { error = problems.joined(separator: "\n\n") }
+        self.metadataUnreadable = metadataUnreadable
         restoring = true
         self.metadata = metadata
         if let saved { settings = saved }
@@ -176,7 +198,14 @@ struct AtPlayhead<Content: View>: View {
         guard player.rate == 0, let item = player.currentItem, let composition = item.videoComposition?.mutableCopy() as? AVVideoComposition else { return }
         item.videoComposition = composition
     }
-    func togglePlay() { if player.rate > 0 { player.pause(); playing = false } else { if playhead >= settings.end-0.05 { seek(settings.start) }; scrubbing = false; player.play(); playing = true } }
+    func togglePlay() {
+        if player.rate > 0 { player.pause(); playing = false; return }
+        // Played to the end, Play starts again from the beginning. The end is where the video in the player stops,
+        // which is before the trim's end when the last stretch is cut out.
+        let atEnd = !seeking && player.currentItem.map { $0.duration.isNumeric && $0.currentTime().seconds >= $0.duration.seconds - 0.05 } ?? false
+        if atEnd || playhead >= (shownKept.last?.end ?? settings.end) - 0.05 { seek(settings.start) }
+        scrubbing = false; player.play(); playing = true
+    }
     /// Moves the playhead. While scrubbing or dragging, `exact: false` lets the player show the nearest frame it can
     /// find quickly, and only one seek is on its way at a time (the latest wins), so the drag keeps up; the exact frame
     /// follows when the drag ends.
@@ -201,18 +230,27 @@ struct AtPlayhead<Content: View>: View {
     /// Dragging a trim handle: the whole drag is one undo step, the preview follows with quick seeks, and the video is
     /// built again only when the handle is let go, not on every step of the drag.
     private var trimming = false
+    /// When a drag that's still held was finished early because the handle rested; if it carries on soon after, it's
+    /// still the same drag and the same undo step. Cleared when the handle is let go.
+    private var trimPaused: Date?
     private var trimWatchdog: Task<Void, Never>?
     func trimMoved() {
-        if !trimming { trimming = true; liveEditRecorded = false }
+        if !trimming {
+            trimming = true
+            // A pause of more than ten seconds more likely means the end of the drag was lost: start a new step.
+            if trimPaused.map({ Date().timeIntervalSince($0) > 10 }) ?? true { liveEditRecorded = false }
+        }
+        trimPaused = nil
         // If the end of the drag never arrives, finish it once the handle has been still for a second.
         trimWatchdog?.cancel()
         trimWatchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
-            self?.endTrim()
+            self?.endTrim(gestureEnded: false)
         }
     }
-    func endTrim() {
+    func endTrim(gestureEnded: Bool = true) {
+        if gestureEnded { trimPaused = nil } else if trimming { trimPaused = Date() }
         guard trimming else { return }
         trimming = false; trimWatchdog?.cancel(); trimWatchdog = nil
         seek(playhead)
@@ -444,9 +482,17 @@ struct AtPlayhead<Content: View>: View {
     /// Fast-forward: a stretch from the playhead that plays faster in the finished video, with a badge so viewers know.
     @Published var skimRate: Double = UserDefaults.standard.double(forKey: "videoSkimRate") > 1 ? UserDefaults.standard.double(forKey: "videoSkimRate") : 4
     func fastForward() {
+        // A cut-out stretch isn't in the finished video, so speeding it up would change nothing.
+        if VideoTimeline.normalized(settings.cuts ?? [], start: settings.start, end: settings.end).contains(where: { playhead >= $0.start && playhead < $0.end }) {
+            library.toast("This part is cut out. Move the playhead to a kept part to fast-forward."); return
+        }
         let skims = VideoTimeline.addingSkim(settings.skims ?? [], at: playhead, start: settings.start, end: settings.end, rate: skimRate)
         if skims == VideoTimeline.normalizedSkims(settings.skims ?? [], start: settings.start, end: settings.end) {
             library.toast(VideoTimeline.skimRate(at: playhead, skims: skims) > 1 ? "Already fast-forwarding here" : "Too close to the end to fast-forward"); return
+        }
+        // Nearly all of it falls in a cut just after the playhead: it wouldn't make the video any shorter.
+        if VideoTimeline.length(settings.kept) - VideoTimeline.length(VideoTimeline.kept(start: settings.start, end: settings.end, cuts: settings.cuts ?? [], skims: skims)) < 0.05 {
+            library.toast("Too little is kept here to fast-forward"); return
         }
         settings.skims = skims
         library.toast("Fast-forward added. Click it to change its speed; right-click to move or remove it.")
@@ -461,12 +507,18 @@ struct AtPlayhead<Content: View>: View {
     func save() {
         // Before the saved edits are read in there is nothing new to save, and saving would overwrite them.
         guard ready else { return }
-        do { try JSONEncoder().encode(settings).write(to: library.root.appendingPathComponent("\(item.id).videoedit.json"), options: .atomic); dirty = false; library.toast("Video edits saved") }
+        let editsURL = library.root.appendingPathComponent("\(item.id).videoedit.json")
+        // Nothing changed since the edits were read: the file stays as it is, so opening and closing never rewrites it.
+        if !dirty && FileManager.default.fileExists(atPath: editsURL.path) { return }
+        do { try JSONEncoder().encode(settings).write(to: editsURL, options: .atomic); dirty = false; library.toast("Video edits saved") }
         catch { self.error = error.localizedDescription }
     }
     func transcribe() {
         // The recording's details have to be read in first, or saving the transcript would write over them.
-        guard ready, !transcribing else { return }; transcribing = true
+        guard ready, !transcribing else { return }
+        // Details that couldn't be read were never loaded, so saving the transcript with them would lose them.
+        if metadataUnreadable { error = "This recording’s details couldn’t be read, so a transcript can’t be saved with them."; return }
+        transcribing = true
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
             defer { transcribing = false }
@@ -567,7 +619,7 @@ struct VideoEditorView: View {
                         AtPlayhead(model.clock) { now in
                             HStack { Text(time(now)).monospacedDigit(); Slider(value: Binding(get: { model.playhead }, set: { model.seek($0, exact: false) }), in: model.settings.start...max(model.settings.start+0.01, model.settings.end), onEditingChanged: { editing in if !editing { model.seek(model.playhead) } }) }
                         }
-                        Text(time(model.settings.end)).monospacedDigit(); Button { model.settings.muted.toggle() } label: { Image(systemName: model.settings.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.buttonStyle(.plain)
+                        Text(time(model.settings.end)).monospacedDigit(); Button { model.settings.muted.toggle() } label: { Image(systemName: model.settings.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") }.buttonStyle(.plain).help(model.settings.muted ? "Unmute the recording’s sound" : "Mute the recording’s sound (background music still plays)")
                     }.font(.system(size: 11)).padding(13).disabled(!model.ready)
                 }
                 inspector.frame(width: 265).background(Studio.paper).overlay(alignment: .leading) { Divider() }.disabled(!model.ready)
@@ -768,12 +820,12 @@ struct VideoEditorView: View {
             slider("Horizontal Position", value: $model.settings.cameraX, range: 0...1)
             slider("Vertical Position", value: $model.settings.cameraY, range: 0...1)
         default:
-            Toggle("Mute Audio", isOn: $model.settings.muted)
+            Toggle("Mute Audio", isOn: $model.settings.muted).help("Silences the microphone and system audio; background music still plays")
             Divider()
             Text("Transcript").fontWeight(.semibold)
             Text("Transcribe audio on this Mac. Speech Recognition permission is requested when you start.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.transcribing { ProgressView("Transcribing…"); Button("Cancel") { model.cancelTranscription() } }
-            else { Button(model.metadata.transcript == nil ? "Transcribe Recording" : "Transcribe Again") { model.transcribe() } }
+            else { Button(model.metadata.transcript == nil ? "Transcribe Recording" : "Transcribe Again") { model.transcribe() }.disabled(model.metadataUnreadable).help(model.metadataUnreadable ? "This recording’s details couldn’t be read, so a transcript can’t be saved" : "") }
             if let transcript = model.metadata.transcript { Text(transcript).textSelection(.enabled).font(.system(size: 11)); Button("Copy Transcript") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(transcript, forType: .string) } }
             Text("Microphone and system audio are preserved in MP4 exports. GIFs have no audio.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

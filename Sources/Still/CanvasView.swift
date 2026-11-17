@@ -17,6 +17,9 @@ final class MarkCanvas: NSView {
     private var movingMark: Mark?
     private var resizing = false
     private var movingControl = false
+    /// The undo step for moving, resizing or bending a mark is taken at its first real change, so a click that only
+    /// selects a mark (or opens a text mark for editing) adds nothing to undo and doesn't mark the picture edited.
+    private var changeSnapshotTaken = false
     private var resizeAnchor = CGPoint.zero
     private var resizeCorner = CGPoint.zero
     private let previewCache = PreviewCache()
@@ -93,7 +96,7 @@ final class MarkCanvas: NSView {
             }
             if !resizing && !movingControl { model.select(model.marks.reversed().first { $0.bounds.contains(start) }) }
             movingMark = model.selectedMark
-            if movingMark != nil { model.beginChange() }
+            changeSnapshotTaken = false
             if event.clickCount == 2, let mark = movingMark, mark.tool == .text { model.textPoint = mark.points.first?.cg ?? start; model.textInput = mark.text; model.showTextSheet = true }
             needsDisplay = true; return
         }
@@ -114,7 +117,7 @@ final class MarkCanvas: NSView {
         if model.tool == .select, let original = movingMark {
             let end = pixel(event)
             if movingControl {
-                var changed = original; changed.control = PixelPoint(end); model.replace(changed)
+                var changed = original; changed.control = PixelPoint(end); change(changed)
             } else if resizing {
                 var scaled = original
                 let dx = resizeCorner.x-resizeAnchor.x, dy = resizeCorner.y-resizeAnchor.y
@@ -124,8 +127,8 @@ final class MarkCanvas: NSView {
                 scaled.points = original.points.map { PixelPoint(x: resizeAnchor.x+($0.x-resizeAnchor.x)*sx, y: resizeAnchor.y+($0.y-resizeAnchor.y)*sy) }
                 if let control = original.control { scaled.control = PixelPoint(x: resizeAnchor.x+(control.x-resizeAnchor.x)*sx, y: resizeAnchor.y+(control.y-resizeAnchor.y)*sy) }
                 if original.tool == .text || original.tool == .number { scaled.width = max(2, original.width*Double(min(sx, sy))) }
-                model.replace(scaled)
-            } else { model.replace(original.moved(dx: end.x-start.x, dy: end.y-start.y)) }
+                change(scaled)
+            } else { change(original.moved(dx: end.x-start.x, dy: end.y-start.y)) }
             needsDisplay = true; return
         }
         guard var mark = draft else { return }
@@ -149,6 +152,11 @@ final class MarkCanvas: NSView {
         else if mark.tool == .highlight, !event.modifierFlags.contains(.option), let snapped = model.smartHighlight(from: start, to: end) { mark.points = [PixelPoint(snapped.0), PixelPoint(snapped.1)] }
         else { mark.points = [PixelPoint(start), PixelPoint(end)] }
         draft = mark; needsDisplay = true
+    }
+    private func change(_ mark: Mark) {
+        guard let current = model.marks.first(where: { $0.id == mark.id }), current != mark else { return }
+        if !changeSnapshotTaken { model.beginChange(); changeSnapshotTaken = true }
+        model.replace(mark)
     }
     override func mouseUp(with event: NSEvent) {
         if movingMark != nil { movingMark = nil; resizing = false; movingControl = false; needsDisplay = true; return }

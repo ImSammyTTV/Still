@@ -64,17 +64,37 @@ impl Settings {
     pub fn load(dir: PathBuf) -> Self {
         let file = dir.join("settings.json");
         let mut values = defaults();
-        if let Ok(text) = fs::read_to_string(&file) {
-            // Anything but a JSON object (a damaged or hand-edited file) is ignored rather than replacing
-            // the settings and crashing later.
-            if let Ok(saved) = serde_json::from_str::<Value>(&text) { if saved.is_object() { merge(&mut values, &saved); } }
+        // Another program can have the file open for a moment (a virus scan, say): ask again before giving up on it.
+        let mut read = fs::read(&file);
+        for _ in 0..3 {
+            if !matches!(&read, Err(e) if e.kind() != std::io::ErrorKind::NotFound) { break; }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            read = fs::read(&file);
+        }
+        let saved = match &read { Ok(bytes) => serde_json::from_slice::<Value>(bytes).ok().filter(|v| v.is_object()), Err(_) => None };
+        match saved {
+            Some(saved) => merge(&mut values, &saved),
+            // Anything but a JSON object (a damaged or hand-edited file), or a file that can't be read, is kept aside
+            // as settings-damaged-<time>.json rather than replacing the settings and crashing later, or being written
+            // over by the next change and taking every setting in it with it.
+            None if !matches!(&read, Err(e) if e.kind() == std::io::ErrorKind::NotFound) => {
+                let kept = file.with_file_name(format!("settings-damaged-{}.json", chrono::Utc::now().timestamp_millis()));
+                if fs::rename(&file, &kept).is_err() { let _ = fs::copy(&file, &kept); }
+            }
+            None => {}
         }
         Settings { file, values }
     }
     pub fn update(&mut self, patch: &Value) -> Value {
+        // Only an object of changes is a patch: anything else would replace every setting at once.
+        if !patch.is_object() { return self.values.clone(); }
         merge(&mut self.values, patch);
         if let Some(dir) = self.file.parent() { let _ = fs::create_dir_all(dir); }
-        let _ = fs::write(&self.file, serde_json::to_string_pretty(&self.values).unwrap_or_default());
+        // Written beside the old file and renamed into place, so a crash or a full disk mid-write never leaves a
+        // half-written settings.json (which would bring back every default on the next start).
+        let temp = self.file.with_file_name("settings.json.tmp");
+        let saved = fs::write(&temp, serde_json::to_string_pretty(&self.values).unwrap_or_default()).and_then(|_| fs::rename(&temp, &self.file));
+        if let Err(e) = saved { let _ = fs::remove_file(&temp); eprintln!("Still couldn’t save its settings: {e}"); }
         self.values.clone()
     }
     pub fn reset(&mut self, key: &str) -> Value {
@@ -100,6 +120,20 @@ mod tests {
         assert_eq!(again.str("shortcuts.area"), "Alt+Shift+A");
         assert_eq!(again.str("shortcuts.fullscreen"), "CommandOrControl+Shift+3");
         assert_eq!(again.get("quickAccess.closeAfter").as_i64(), Some(15));
+    }
+    #[test]
+    fn only_an_object_changes_settings_and_a_damaged_file_is_kept() {
+        let dir = std::env::temp_dir().join(format!("still-settings-{}", uuid::Uuid::new_v4()));
+        let mut s = Settings::load(dir.clone());
+        s.update(&json!({ "theme": "dark" }));
+        assert_eq!(s.update(&Value::Null)["theme"], "dark");
+        assert_eq!(s.update(&json!("light"))["theme"], "dark");
+        assert!(!dir.join("settings.json.tmp").exists());
+        fs::write(dir.join("settings.json"), "{ \"theme\": \"da").unwrap();
+        let again = Settings::load(dir.clone());
+        assert_eq!(again.str("theme"), "system");
+        assert!(fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("settings-damaged-")));
+        let _ = fs::remove_dir_all(dir);
     }
     #[test]
     fn overlays_start_off_and_keys_start_as_shortcuts_only() {

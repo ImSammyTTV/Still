@@ -4,6 +4,47 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.60 — 2026-11-17
+
+A big bug-fixing release: more than 100 fixes across Mac, Windows and Linux.
+
+**Capture**
+- **The pointer no longer disappears when picking a window** (Windows, Linux). It stays visible until Still can draw its
+  window-picking pointer where your mouse is, and the Timer and aspect menus show a normal pointer too.
+- Screen (F) follows Text, Record and Scroll modes and waits for the timer; Timer Off works in every mode; Ctrl, Alt
+  and ⌘ combinations no longer trigger the overlay's one-letter keys (Windows, Linux).
+- Square and fixed-ratio areas keep their shape at the screen edge, Shift squares the area as soon as you press it, and
+  dragging across the Capture Bar keeps following the pointer (Windows, Linux).
+- Starting a new capture right after cancelling one no longer makes it vanish, and Escape always cancels (Windows, Linux).
+- Full Screen captures the display the pointer is on, Capture Previous Area copes with a changed resolution, and
+  scrolling captures no longer repeat the cursor (Mac).
+
+**Recording**
+- Quitting or updating during a recording saves it first (Windows, Linux).
+- Stop and Cancel work right after the countdown; a resolution change no longer freezes the video; changing
+  headphones or the default sound device no longer silences the rest; a recording that fails partway keeps everything
+  up to that point and says why (Windows).
+- Pause right after Resume works, a typed size records that size, window recordings keep cursor effects on the window
+  as it moves, and a camera that can't restart no longer ends the recording (Mac).
+- Exporting a trimmed video now works, and the recording controls no longer appear in full-screen recordings (Linux).
+
+**Editors and History**
+- History can no longer lose its list if its file can't be read, and saving edits, projects and settings can't leave
+  half-written files (Windows, Linux).
+- Closing an editor right after an edit or during a save keeps your latest changes (all platforms).
+- Hide Private Info, Undo, step numbers, Auto Balance and Save for Size on very tall pictures all behave correctly.
+- Video editor: Play after a cut-out ending, fades with background music, music under speech, Reset, and GIF speed
+  are fixed.
+- With JPEG as the image format, History keeps a lossless copy and makes the JPEG only when you save one out
+  (Windows, Linux).
+
+**Other**
+- Check for Updates reports failed checks, automatic update settings apply at once, and a failed update says so (Mac,
+  Windows, Linux).
+- Describe Image no longer comes back empty on busy screenshots.
+- Paste automatically works on keyboard layouts that move the V key (Mac); the tray icon is visible on light panels
+  and Wayland desktops are recognised properly (Linux).
+
 ## v1.2.59 — 2026-11-17
 
 - **Copying, saving and pinning from the image editor are smoother** (Windows, Linux). Copy, Save, Save As, Pin,

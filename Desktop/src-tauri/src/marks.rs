@@ -34,12 +34,27 @@ pub fn bubble_origin(area: Area, display: Area, size: f64, margin: f64) -> (i32,
     (x.round() as i32, y.round() as i32)
 }
 
+/// Where the recording controls go where they can't be kept out of the video (Linux): just below the recorded area,
+/// else just above it, else beside it, always on the screen. Nothing when the area leaves no room around it.
+pub fn hud_outside(area: Area, screen: Area, w: f64, h: f64, gap: f64) -> Option<(i32, i32)> {
+    let keep = |value: f64, low: f64, high: f64| value.min(high).max(low);
+    let (right, bottom) = (screen.x + screen.w, screen.y + screen.h);
+    let x = keep(area.x + (area.w - w) / 2.0, screen.x, right - w);
+    let y = keep(area.y + area.h - h, screen.y, bottom - h);
+    let spot = if area.y + area.h + gap + h <= bottom { (x, area.y + area.h + gap) }
+        else if area.y - gap - h >= screen.y { (x, area.y - gap - h) }
+        else if area.x + area.w + gap + w <= right { (area.x + area.w + gap, y) }
+        else if area.x - gap - w >= screen.x { (area.x - gap - w, y) }
+        else { return None };
+    Some((spot.0.round() as i32, spot.1.round() as i32))
+}
+
 /// A hand-edited settings file can't make the bubble tiny or larger than the screen.
 pub fn bubble_size(value: Option<f64>) -> f64 { value.filter(|v| v.is_finite()).unwrap_or(180.0).clamp(100.0, 360.0) }
 
 /// Wayland keeps every window's input to itself, and XWayland only sees X11 windows, so a session with a
-/// Wayland compositor can't show clicks or keys even when DISPLAY is set (`is_wayland` is about capture,
-/// where XWayland does help). Each value is the environment variable, if set.
+/// Wayland compositor can't show clicks or keys even when DISPLAY is set. Each value is the environment
+/// variable, if set.
 pub fn x11_input(session_type: Option<&str>, wayland_display: Option<&str>, display: Option<&str>) -> bool {
     let set = |v: Option<&str>| v.map(|s| !s.is_empty()).unwrap_or(false);
     session_type != Some("wayland") && !set(wayland_display) && set(display)
@@ -550,6 +565,22 @@ mod tests {
         assert_eq!(bubble_origin(Area { x: 2000.0, y: 100.0, w: 800.0, h: 600.0 }, display, 180.0, 24.0), (2596, 496));
         assert_eq!(bubble_origin(Area { x: 1920.0, y: 0.0, w: 50.0, h: 50.0 }, display, 180.0, 24.0), (1920, 0));
         assert_eq!(bubble_origin(display, display, 180.0, 24.0), (3636, 876));
+    }
+
+    #[test]
+    fn the_recording_controls_stay_out_of_the_area_when_there_is_room() {
+        let screen = Area { x: 1920.0, y: 0.0, w: 1920.0, h: 1080.0 };
+        // Below, centred on the area.
+        assert_eq!(hud_outside(Area { x: 2000.0, y: 100.0, w: 800.0, h: 600.0 }, screen, 300.0, 52.0, 8.0), Some((2250, 708)));
+        // No room below: above.
+        assert_eq!(hud_outside(Area { x: 2000.0, y: 400.0, w: 800.0, h: 650.0 }, screen, 300.0, 52.0, 8.0), Some((2250, 340)));
+        // As tall as the screen: beside it, level with its bottom.
+        assert_eq!(hud_outside(Area { x: 1920.0, y: 0.0, w: 1000.0, h: 1080.0 }, screen, 300.0, 52.0, 8.0), Some((2928, 1028)));
+        assert_eq!(hud_outside(Area { x: 2900.0, y: 0.0, w: 940.0, h: 1080.0 }, screen, 300.0, 52.0, 8.0), Some((2592, 1028)));
+        // Kept on the screen when the area is at its edge.
+        assert_eq!(hud_outside(Area { x: 1920.0, y: 0.0, w: 100.0, h: 100.0 }, screen, 300.0, 52.0, 8.0), Some((1920, 108)));
+        // The whole screen: nowhere outside.
+        assert_eq!(hud_outside(screen, screen, 300.0, 52.0, 8.0), None);
     }
 
     #[test]

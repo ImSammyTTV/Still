@@ -102,10 +102,11 @@ function addWindowControls(target = $('.titlebar')) {
 }
 
 // Tauri switches off the web page's own drag and drop on Windows, so start a native file drag
-// once the pointer has moved a few pixels with the button held.
+// once the pointer has moved a few pixels with the button held. Not from a field being typed in, such as a title
+// being renamed, where dragging selects text.
 function dragOut(element, start) {
   element.addEventListener('mousedown', (down) => {
-    if (down.button !== 0 || down.target.closest('button')) return;
+    if (down.button !== 0 || down.target.closest('button, input, textarea, [contenteditable="true"]')) return;
     const move = (e) => {
       if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 4) return;
       removeEventListener('mousemove', move); removeEventListener('mouseup', up);

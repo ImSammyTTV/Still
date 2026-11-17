@@ -44,6 +44,8 @@ pub struct Finished {
     pub lit: f64,
     /// Whether the file has a sound track.
     pub audio: bool,
+    /// Why the recording ended early or lost its sound, when it did: the file still holds what was recorded until then.
+    pub problem: Option<String>,
 }
 
 /// Share of BGRA pixels brighter than near-black. Tells a real capture from an empty one.
@@ -107,26 +109,42 @@ enum Cmd {
     Cancel,
 }
 
+/// How a recording ended when the recorder stopped by itself, before anyone asked it to.
+type Ended = std::sync::Arc<std::sync::Mutex<Option<Result<Finished, String>>>>;
+
 /// A recording in progress. Every call is answered by the recorder's own thread.
 pub struct Handle {
     tx: std::sync::Mutex<std::sync::mpsc::Sender<Cmd>>,
     /// Sound sources that were asked for but couldn't be opened, and why. The recording goes on without them.
     pub warnings: Vec<String>,
+    ended: Ended,
 }
 
 impl Handle {
     fn send(&self, cmd: Cmd) -> bool { self.tx.lock().map(|tx| tx.send(cmd).is_ok()).unwrap_or(false) }
+    fn take_ended(&self) -> Option<Result<Finished, String>> { self.ended.lock().ok().and_then(|mut e| e.take()) }
     pub fn pause(&self, on: bool) { self.send(Cmd::Pause(on)); }
     /// Throws away what was recorded and begins again.
     pub fn restart(&self) { self.send(Cmd::Restart); }
     /// Ends the recording and finishes the file.
     pub fn stop(&self) -> Result<Finished, String> {
+        // A recorder that stopped by itself (a full disk, the graphics card reset) has already finished the file with
+        // what it had recorded: that is the answer, rather than losing the whole recording.
+        let gone = || self.take_ended().unwrap_or_else(|| Err("The recorder had already stopped.".into()));
         let (tx, rx) = std::sync::mpsc::channel();
-        if !self.send(Cmd::Stop(tx)) { return Err("The recorder had already stopped.".into()); }
-        rx.recv_timeout(std::time::Duration::from_secs(30)).map_err(|_| "The recorder didn’t finish the file.".to_string())?
+        if !self.send(Cmd::Stop(tx)) { return gone(); }
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(result) => result,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => gone(),
+            Err(_) => Err("The recorder didn’t finish the file.".into()),
+        }
     }
+    /// Whether the recorder stopped by itself while recording, so the recording should end now.
+    pub fn failed(&self) -> bool { self.ended.lock().map(|e| e.is_some()).unwrap_or(false) }
     /// Ends the recording and deletes the file.
-    pub fn cancel(&self) { self.send(Cmd::Cancel); }
+    pub fn cancel(&self) {
+        if !self.send(Cmd::Cancel) { if let Some(Ok(f)) = self.take_ended() { let _ = std::fs::remove_file(f.path); } }
+    }
 }
 
 /// The recording clock: time spent paused doesn't count, so the video has no gap and no jump.
@@ -159,7 +177,7 @@ pub fn start(_: Options) -> Result<Handle, String> { Err("Still’s own recorder
 
 #[cfg(windows)]
 mod imp {
-    use super::{bitrate, lit_share, mix, Cmd, Finished, Handle, Options, Queue, Timeline, RATE};
+    use super::{bitrate, lit_share, mix, Cmd, Ended, Finished, Handle, Options, Queue, Timeline, RATE};
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc, Mutex};
@@ -242,15 +260,17 @@ mod imp {
         }
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+        let ended: Ended = Default::default();
+        let ended_here = ended.clone();
         std::thread::Builder::new().name("still-recorder".into()).spawn(move || {
             unsafe { let _ = RoInitialize(RO_INIT_MULTITHREADED); }
             if let Err(e) = unsafe { (mf.startup)(MF_VERSION, MFSTARTUP_FULL) }.ok() { let _ = ready_tx.send(Err(err("Media Foundation didn’t start", e))); return; }
-            let outcome = run(&mf, options, Sound::new(sources), rx, &ready_tx);
+            let outcome = run(&mf, options, Sound::new(sources), rx, &ready_tx, &ended_here);
             if let Err(e) = outcome { let _ = ready_tx.send(Err(e)); }
             unsafe { let _ = (mf.shutdown)(); }
         }).map_err(|e| err("The recorder couldn’t start", e))?;
         ready_rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "The recorder didn’t start in time.".to_string())??;
-        Ok(Handle { tx: std::sync::Mutex::new(tx), warnings })
+        Ok(Handle { tx: std::sync::Mutex::new(tx), warnings, ended })
     }
 
     /// The screen, as Windows.Graphics.Capture delivers it.
@@ -268,6 +288,8 @@ mod imp {
         slot: usize,
         pending: Option<usize>,
         crop: (u32, u32, u32, u32),
+        /// How much of the area each frame copy holds: less than all of it once the display has shrunk.
+        covered: [(u32, u32); 2],
     }
 
     fn device(kind: D3D_DRIVER_TYPE) -> windows::core::Result<(ID3D11Device, ID3D11DeviceContext)> {
@@ -302,7 +324,7 @@ mod imp {
             let crop = (x.min(size.Width as u32 - 2), y.min(size.Height as u32 - 2), w.min(size.Width as u32 - x.min(size.Width as u32 - 2)) / 2 * 2, h.min(size.Height as u32 - y.min(size.Height as u32 - 2)) / 2 * 2);
             let staging = [staging_texture(&device, crop.2, crop.3)?, staging_texture(&device, crop.2, crop.3)?];
             session.StartCapture().map_err(|e| err("Screen capture didn’t start", e))?;
-            Ok(Capture { context, device, winrt_device, pool, session, size, staging, slot: 0, pending: None, crop })
+            Ok(Capture { context, device, winrt_device, pool, session, size, staging, slot: 0, pending: None, crop, covered: [(crop.2, crop.3); 2] })
         }
 
         /// The newest frame, cropped and copied into `buffer`; false when there's nothing new. A frame comes out one
@@ -312,15 +334,22 @@ mod imp {
             let ready = std::mem::replace(&mut self.pending, started);
             let Some(slot) = ready else { return Ok(false) };
             let (_, _, w, h) = self.crop;
+            let (cw, ch) = self.covered[slot];
             let staging = &self.staging[slot];
+            let row = w as usize * 4;
+            buffer.resize(row * h as usize, 0);
+            // Whatever the display no longer shows is black, never a picture left over from an earlier frame.
+            for line in 0..h as usize {
+                let start = if line < ch as usize { line * row + cw as usize * 4 } else { line * row };
+                buffer[start..(line + 1) * row].fill(0);
+            }
+            if cw == 0 || ch == 0 { return Ok(true); }
             unsafe {
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 self.context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).map_err(|e| err("Reading the frame", e))?;
-                let row = w as usize * 4;
-                buffer.resize(row * h as usize, 0);
-                for line in 0..h as usize {
+                for line in 0..ch as usize {
                     let source = (mapped.pData as *const u8).add(line * mapped.RowPitch as usize);
-                    std::ptr::copy_nonoverlapping(source, buffer.as_mut_ptr().add(line * row), row);
+                    std::ptr::copy_nonoverlapping(source, buffer.as_mut_ptr().add(line * row), cw as usize * 4);
                 }
                 self.context.Unmap(staging, 0);
             }
@@ -335,7 +364,7 @@ mod imp {
             let Some(frame) = newest else { return Ok(None) };
             let content = frame.ContentSize().map_err(|e| err("Capture frame", e))?;
             if content.Width != self.size.Width || content.Height != self.size.Height {
-                // The display changed resolution: carry on at the new size, keeping the area inside it.
+                // The display changed resolution: carry on at the new size (see below for an area now partly off it).
                 self.size = content;
                 let _ = self.pool.Recreate(&self.winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, content);
                 return Ok(None);
@@ -345,11 +374,21 @@ mod imp {
                 let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(|e| err("Capture surface", e))?;
                 access.GetInterface().map_err(|e| err("Capture texture", e))?
             };
+            // The display may have become smaller than when recording began (its resolution changed, a remote session
+            // was resized). The video keeps its size and takes the part of the area still on screen: copying from
+            // beyond the edge would copy nothing, and the video would freeze on its last picture.
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            unsafe { texture.GetDesc(&mut desc); }
+            let (width, height) = ((content.Width.max(0) as u32).min(desc.Width), (content.Height.max(0) as u32).min(desc.Height));
             let (x, y, w, h) = self.crop;
-            let region = D3D11_BOX { left: x, top: y, front: 0, right: x + w, bottom: y + h, back: 1 };
+            let (cw, ch) = (w.min(width.saturating_sub(x)), h.min(height.saturating_sub(y)));
             let slot = self.slot;
             self.slot = 1 - slot;
-            unsafe { self.context.CopySubresourceRegion(&self.staging[slot], 0, 0, 0, 0, &texture, 0, Some(&region)); }
+            self.covered[slot] = (cw, ch);
+            if cw > 0 && ch > 0 {
+                let region = D3D11_BOX { left: x, top: y, front: 0, right: x + cw, bottom: y + ch, back: 1 };
+                unsafe { self.context.CopySubresourceRegion(&self.staging[slot], 0, 0, 0, 0, &texture, 0, Some(&region)); }
+            }
             Ok(Some(slot))
         }
     }
@@ -499,16 +538,34 @@ mod imp {
             let (into, stopped) = (queue.clone(), stop.clone());
             let thread = std::thread::Builder::new().name(if loopback { "still-sound" } else { "still-microphone" }.into()).spawn(move || unsafe {
                 let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-                let (client, capture, silence) = match open_endpoint(loopback) {
+                let (mut client, mut capture, mut silence, mut id) = match open_endpoint(loopback) {
                     Ok(opened) => { let _ = ready_tx.send(Ok(())); opened }
                     Err(e) => { let _ = ready_tx.send(Err(e)); return; }
                 };
+                let devices: Option<IMMDeviceEnumerator> = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok();
+                let (mut lost, mut checked) = (false, Instant::now());
                 while !stopped.load(Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_millis(10));
+                    // Headphones plugged in or out, a device removed, another default chosen in Windows: follow the
+                    // default device, so the rest of the recording keeps its sound instead of going silent.
+                    if checked.elapsed() >= Duration::from_secs(1) {
+                        checked = Instant::now();
+                        let moved = !id.is_empty() && devices.as_ref().and_then(|d| default_id(d, loopback)).is_some_and(|now| now != id);
+                        if lost || moved {
+                            let _ = client.Stop();
+                            if let Some(silence) = &silence { let _ = silence.client.Stop(); }
+                            match open_endpoint(loopback) {
+                                Ok(opened) => { (client, capture, silence, id) = opened; lost = false; }
+                                Err(_) => lost = true, // No device right now: try again in a second.
+                            }
+                        }
+                    }
+                    if lost { continue; }
                     if let Some(silence) = &silence { silence.feed(); }
-                    while capture.GetNextPacketSize().unwrap_or(0) > 0 {
+                    loop {
+                        match capture.GetNextPacketSize() { Ok(0) => break, Ok(_) => {} Err(_) => { lost = true; break; } }
                         let (mut data, mut frames, mut flags) = (std::ptr::null_mut(), 0u32, 0u32);
-                        if capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None).is_err() { break; }
+                        if capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None).is_err() { lost = true; break; }
                         let count = frames as usize * 2;
                         if let Ok(mut queue) = into.lock() {
                             if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() { queue.extend(std::iter::repeat_n(0i16, count)); }
@@ -539,12 +596,13 @@ mod imp {
     }
 
     /// Opens the default speakers (to record what they play) or microphone, asking Windows to convert to 16-bit
-    /// stereo at `RATE` whatever the device's own format.
-    unsafe fn open_endpoint(loopback: bool) -> Result<(IAudioClient, IAudioCaptureClient, Option<Silence>), String> {
+    /// stereo at `RATE` whatever the device's own format. Also answers which device that is.
+    unsafe fn open_endpoint(loopback: bool) -> Result<(IAudioClient, IAudioCaptureClient, Option<Silence>, String), String> {
         let what = if loopback { "The computer’s sound can’t be recorded" } else { "The microphone can’t be used" };
         let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| err(what, e))?;
         let device = devices.GetDefaultAudioEndpoint(if loopback { eRender } else { eCapture }, eConsole)
             .map_err(|e| err(if loopback { "There are no speakers or headphones to record from" } else { "There is no microphone" }, e))?;
+        let id = device_id(&device);
         // Windows only hands over loopback sound while something plays; playing silence keeps it flowing, so quiet
         // stretches are in the recording as silence instead of being left out. Without it, sound may drift.
         let silence = Silence::start(&device).ok();
@@ -554,7 +612,21 @@ mod imp {
         client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2_000_000, 0, &format, None).map_err(|e| err(what, e))?;
         let capture: IAudioCaptureClient = client.GetService().map_err(|e| err(what, e))?;
         client.Start().map_err(|e| err(what, e))?;
-        Ok((client, capture, if loopback { silence } else { None }))
+        Ok((client, capture, if loopback { silence } else { None }, id))
+    }
+
+    /// Windows' name for a sound device, to notice when the default becomes another one. Empty if it has none.
+    unsafe fn device_id(device: &IMMDevice) -> String {
+        let Ok(id) = device.GetId() else { return String::new() };
+        let text = id.to_string().unwrap_or_default();
+        CoTaskMemFree(Some(id.0 as *const _));
+        text
+    }
+
+    /// The device that is the default speakers or microphone right now.
+    unsafe fn default_id(devices: &IMMDeviceEnumerator, loopback: bool) -> Option<String> {
+        let device = devices.GetDefaultAudioEndpoint(if loopback { eRender } else { eCapture }, eConsole).ok()?;
+        Some(device_id(&device)).filter(|id| !id.is_empty())
     }
 
     /// Silence played to the speakers for the length of the recording.
@@ -617,7 +689,7 @@ mod imp {
         }
     }
 
-    fn run(mf: &Mf, options: Options, mut sound: Sound, commands: mpsc::Receiver<Cmd>, ready: &mpsc::Sender<Result<(), String>>) -> Result<(), String> {
+    fn run(mf: &Mf, options: Options, mut sound: Sound, commands: mpsc::Receiver<Cmd>, ready: &mpsc::Sender<Result<(), String>>, ended: &Ended) -> Result<(), String> {
         let mut capture = Capture::open(&options)?;
         let (_, _, width, height) = capture.crop;
         let fps = options.fps.clamp(1, 60);
@@ -635,28 +707,33 @@ mod imp {
         let (mut frames, mut dropped, mut written_until) = (1u64, 0u64, frame);
         let _ = ready.send(Ok(()));
         let mut next_tick = Instant::now() + Duration::from_nanos(1_000_000_000 / fps as u64);
-        loop {
+        // Anything that fails from here on ends the loop with the reason, so the file can still be finished below.
+        let failure = loop {
             match commands.try_recv() {
                 Ok(Cmd::Pause(on)) => {
                     // The sound up to the pause is already captured: write it all now, so none of it is lost and
                     // the sound after resuming lines up with the picture again.
-                    if on && !timeline.paused() { if let Some(w) = &writer { sound.write(mf, w, timeline.now_hns(), true)?; } }
+                    if on && !timeline.paused() { if let Some(w) = &writer { if let Err(e) = sound.write(mf, w, timeline.now_hns(), true) { break e; } } }
                     timeline.pause(on);
                 }
                 Ok(Cmd::Restart) => {
                     drop(writer.take());
-                    writer = Some(open_writer(mf, &options, width, height, &pixels, frame, sound.wanted())?);
+                    match open_writer(mf, &options, width, height, &pixels, frame, sound.wanted()) { Ok(w) => writer = Some(w), Err(e) => break e }
                     sound.clear(); sound.written = 0;
                     timeline = Timeline::new(); frames = 1; dropped = 0; written_until = frame;
                 }
                 Ok(Cmd::Stop(reply)) => {
                     let hardware = writer.as_ref().map(|w| w.hardware).unwrap_or(false);
                     let audio = writer.as_ref().is_some_and(|w| w.audio.is_some());
-                    let mut result = Ok(());
-                    if let Some(w) = &writer { result = sound.write(mf, w, written_until, true); }
+                    let mut sound_written = Ok(());
+                    if let Some(w) = &writer { sound_written = sound.write(mf, w, written_until, true); }
+                    // The last moment of sound not making it is no reason to lose the video: it is kept, and says why.
                     let finished = writer.take().map(Writer::finish).unwrap_or(Ok(()));
-                    let result = result.and(finished);
-                    let _ = reply.send(result.map(|_| Finished { path: options.path.clone(), duration: written_until as f64 / 10_000_000.0, frames, dropped, hardware, lit: lit_share(&pixels), audio }));
+                    let outcome = finished.map(|_| Finished { path: options.path.clone(), duration: written_until as f64 / 10_000_000.0, frames, dropped, hardware, lit: lit_share(&pixels), audio, problem: sound_written.err() });
+                    let failed = outcome.is_err();
+                    // A file that couldn't be finished, or that nobody waits for any more (the stop gave up), would
+                    // only sit in Still's temporary folder.
+                    if reply.send(outcome).is_err() || failed { let _ = std::fs::remove_file(&options.path); }
                     return Ok(());
                 }
                 Ok(Cmd::Cancel) | Err(mpsc::TryRecvError::Disconnected) => {
@@ -667,10 +744,10 @@ mod imp {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
             // Keep the pool drained while paused too, so resuming shows the screen as it is then.
-            let changed = capture.next(&mut pixels)?;
+            let changed = match capture.next(&mut pixels) { Ok(changed) => changed, Err(e) => break e };
             let _ = changed;
             if timeline.paused() { sound.clear(); }
-            else if let Some(w) = &writer { sound.write(mf, w, timeline.now_hns(), false)?; }
+            else if let Some(w) = &writer { if let Err(e) = sound.write(mf, w, timeline.now_hns(), false) { break e; } }
             if !timeline.paused() {
                 let time = timeline.now_hns();
                 // Constant frame rate: one frame per tick, repeating the last picture when the screen is still.
@@ -678,7 +755,7 @@ mod imp {
                     if let Some(w) = &writer {
                         match w.write(mf, &pixels, written_until, frame) {
                             Ok(()) => { frames += 1; written_until += frame; }
-                            Err(e) => return Err(e),
+                            Err(e) => break e,
                         }
                         // Fell more than a frame behind: skip ahead instead of writing a burst of stale frames.
                         let behind = (timeline.now_hns() - written_until) / frame;
@@ -690,7 +767,17 @@ mod imp {
             if next_tick > now { std::thread::sleep(next_tick - now); }
             next_tick += Duration::from_nanos(1_000_000_000 / fps as u64);
             if next_tick < Instant::now() { next_tick = Instant::now(); }
-        }
+        };
+        // Recording stopped working partway (a full disk, a removed drive, the graphics card reset): finish the file
+        // with what was recorded until then, so the recording can still be saved, and keep the reason for the stop.
+        let hardware = writer.as_ref().map(|w| w.hardware).unwrap_or(false);
+        let audio = writer.as_ref().is_some_and(|w| w.audio.is_some());
+        let outcome = match writer.take().map(Writer::finish) {
+            Some(Ok(())) => Ok(Finished { path: options.path.clone(), duration: written_until as f64 / 10_000_000.0, frames, dropped, hardware, lit: lit_share(&pixels), audio, problem: Some(failure.clone()) }),
+            _ => { let _ = std::fs::remove_file(&options.path); Err(failure.clone()) }
+        };
+        if let Ok(mut ended) = ended.lock() { *ended = Some(outcome); }
+        Err(failure)
     }
 }
 

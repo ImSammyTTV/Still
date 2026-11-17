@@ -11,6 +11,11 @@ final class ExportSizeTests: XCTestCase {
         XCTAssertEqual(ExportSize.plan(width: 1000, height: 500, square: false, width: 400), .init(crop: CGRect(x: 0, y: 0, width: 1000, height: 500), width: 400, height: 200))
         XCTAssertEqual(ExportSize.plan(width: 800, height: 1200, square: true), .init(crop: CGRect(x: 0, y: 200, width: 800, height: 800), width: 800, height: 800))
     }
+    func testVeryTallPictureKeepsItsShapeUnderTheLargestSide() {
+        XCTAssertEqual(ExportSize.plan(width: 1200, height: 10000, square: false), .init(crop: CGRect(x: 0, y: 0, width: 1200, height: 10000), width: 960, height: 8000))
+        XCTAssertEqual(ExportSize.plan(width: 1000, height: 10000, square: false, width: 2000), .init(crop: CGRect(x: 0, y: 0, width: 1000, height: 10000), width: 800, height: 8000))
+        XCTAssertEqual(ExportSize.plan(width: 20000, height: 1000, square: false), .init(crop: CGRect(x: 0, y: 0, width: 20000, height: 1000), width: 8000, height: 400))
+    }
     func testNoLimitIsFullSizeAtTopQuality() {
         let r = ExportSize.fit(limit: 0, jpeg: true, encode: fake(100, 100))
         XCTAssertEqual([r.scale, r.quality], [1, 0.92]); XCTAssertTrue(r.fits)

@@ -7,17 +7,25 @@ let media = null, triedWebm = false, failure = '', got = 0, watchdog = 0;
 // Each second of video goes to Still as soon as the recorder hands it over, in order, and Still appends it to a
 // file. Nothing waits in memory for the end, so stopping is quick however long the recording ran, and a
 // recording that is interrupted still exists on disk up to its last second.
-let written = 0, writes = Promise.resolve();
+let written = 0, writes = Promise.resolve(), chunkFailed = false;
 const base64 = (blob) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.onerror = () => reject(reader.error || new Error('The recorded data couldn’t be read.')); reader.readAsDataURL(blob); });
 function queueChunk(blob) {
   writes = writes.then(async () => {
+    if (chunkFailed) return; // Never write past a gap: the file stays a whole recording up to the problem.
     if (still.raw) await still.raw('recording_chunk_raw', new Uint8Array(await blob.arrayBuffer()), { 'x-ext': ext });
     else await still.invoke('recording:chunk', await base64(blob), ext);
     written += blob.size;
   })
-    .catch((error) => { failure = failure || (error && error.message) || String(error); });
+    .catch((error) => {
+      // A second that couldn't be written (a full disk, say) ends the recording here, and saving says so, rather
+      // than going on and saving a video with a hole in it as if nothing happened.
+      chunkFailed = true; failure = failure || (error && error.message) || String(error);
+      toast(`Part of the recording couldn’t be saved: ${failure}`);
+      if (!finishing) stop();
+    });
 }
-function discardWritten() { written = 0; writes = writes.then(() => still.invoke('recording:reset')).catch(() => {}); }
+// The count is cleared in turn, after any second of the old take still on its way, so it can't count toward the new one.
+function discardWritten() { writes = writes.then(() => { written = 0; return still.invoke('recording:reset'); }).catch(() => {}); }
 
 // The recorder can fail after it has started (most often an MP4 encoder that this machine doesn't really have).
 // Without a handler that failure was silent: the stop produced no data and the HUD quietly cancelled.
@@ -85,9 +93,13 @@ async function beginNative() {
   try {
     await still.invoke('recording:begin');
   } catch (error) {
+    if (cancelled || finishing) return still.invoke('recording:cancel').catch(() => {}); // Stopped while starting: nothing to report.
     // Say why, rather than quietly opening the system picker this recorder exists to avoid.
     return still.invoke('recording:error', `Still’s recorder couldn’t start: ${error && error.message ? error.message : String(error)}`);
   }
+  // Stop or Cancel arrived while the recorder was starting: carry it out now, or the recording would run on with
+  // controls that no longer answer.
+  if (cancelled || finishing) { $('#time').textContent = 'Saving…'; return still.invoke(cancelled ? 'recording:cancel' : 'recording:stop').catch(() => {}); }
   nativeLive = true; start = performance.now(); $('#time').textContent = '0:00';
   still.invoke('recording:started');
 }
@@ -107,15 +119,21 @@ async function begin() {
   const r = opts.rect, sx = video.videoWidth / opts.imageWidth, sy = video.videoHeight / opts.imageHeight;
   const full = r.x <= 1 && r.y <= 1 && r.w >= opts.imageWidth - 2 && r.h >= opts.imageHeight - 2;
   let videoTrack = track;
-  if (StillCaptureInput.shouldCrop(displaySurface, full)) {
+  if (StillCaptureInput.shouldDraw(displaySurface, full, opts.hudMask)) {
     const src = { x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy };
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(2, Math.round(src.w / 2) * 2); canvas.height = Math.max(2, Math.round(src.h / 2) * 2);
     const ctx = canvas.getContext('2d', { alpha: false });
+    // These controls, when they had to go over the recorded area (Linux only).
+    const hide = StillCaptureInput.maskRect(opts.hudMask, r, canvas.width, canvas.height);
     // Each new screen frame is drawn as it arrives and handed to the recorder explicitly, so frames keep coming
     // even when Windows slows the page's timers down (the timer stays as a backstop).
     videoTrack = canvas.captureStream(0).getVideoTracks()[0];
-    const draw = () => { ctx.drawImage(video, src.x, src.y, src.w, src.h, 0, 0, canvas.width, canvas.height); if (videoTrack.requestFrame) videoTrack.requestFrame(); };
+    const draw = () => {
+      ctx.drawImage(video, src.x, src.y, src.w, src.h, 0, 0, canvas.width, canvas.height);
+      if (hide) { ctx.fillStyle = '#000'; ctx.fillRect(hide.x, hide.y, hide.w, hide.h); }
+      if (videoTrack.requestFrame) videoTrack.requestFrame();
+    };
     draw(); cropTimer = setInterval(draw, 1000 / (o.fps || 30));
     if (video.requestVideoFrameCallback) { const onFrame = () => { if (finishing) return; draw(); video.requestVideoFrameCallback(onFrame); }; video.requestVideoFrameCallback(onFrame); }
   }
@@ -161,14 +179,18 @@ async function finish() {
   still.send('recording:finished'); // After the recorder, so the bubble doesn't vanish in the last frames.
   clearInterval(cropTimer); clearTimeout(watchdog);
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); audioContext?.close();
-  if (cancelled) { await writes; return still.invoke('recording:cancel'); }
+  // Stopped before recording began (in the countdown) is the same as cancelling: there was nothing to capture.
+  if (cancelled || !start) { await writes; return still.invoke('recording:cancel'); }
   $('#time').textContent = 'Saving…';
-  const duration = start ? (performance.now() - start - pausedTotal) / 1000 : 0;
+  // Stopped while paused: the time since the pause isn't part of the video.
+  const duration = Math.max(0, ((paused ? pausedAt : performance.now()) - start - pausedTotal) / 1000);
   await writes; // The last second is usually still on its way.
   // No data is a failure to report, never something to drop quietly.
   if (!written) return still.invoke('recording:error', failure ? withWhy(failure) : still.platform === 'win32'
     ? withWhy('No video was captured by Windows’ own recorder.')
     : 'No video was captured. Try the WebM format in Settings → Screen Recording.', 'save');
+  // Still keeps what was written before the problem and says why the recording is shorter.
+  if (chunkFailed) return still.invoke('recording:error', withWhy(`Part of the recording couldn’t be written: ${failure}`), 'save');
   try {
     await still.invoke('recording:save', ext, duration);
   } catch (error) {
@@ -206,7 +228,10 @@ $('#restart').onclick = () => {
     start = performance.now(); pausedTotal = 0; if (paused) { paused = false; still.invoke('recording:pause', false).catch(() => {}); showPaused(); }
     return;
   }
-  if (!recorder) return; recorder.stop(); recorder.onstop = () => { discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; recorder.onstop = finish; if (paused) { paused = false; showPaused(); } }; };
+  // Only a running recording starts over. In the countdown, or once Stop has begun, the recorder's stop must still
+  // lead to saving: taking it over here would throw the recording away at the next Stop.
+  if (!recorder || recorder.state === 'inactive' || finishing || cancelled) return;
+  recorder.stop(); recorder.onstop = () => { recorder.onstop = finish; if (finishing) return; discardWritten(); recorder.start(1000); start = performance.now(); pausedTotal = 0; if (paused) { paused = false; showPaused(); } }; };
 still.on('hud:stop', () => stop());
 // Problems with the extras (the camera bubble, say) show on the bar itself, where they can't be missed.
 still.on('hud:note', (text) => toast(text));

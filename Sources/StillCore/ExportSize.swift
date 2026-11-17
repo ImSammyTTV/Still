@@ -17,8 +17,10 @@ public enum ExportSize {
     public static func plan(width sourceWidth: Int, height sourceHeight: Int, square: Bool, width: Int = 0) -> Plan {
         let side = min(sourceWidth, sourceHeight)
         let crop = square ? CGRect(x: (sourceWidth-side)/2, y: (sourceHeight-side)/2, width: side, height: side) : CGRect(x: 0, y: 0, width: sourceWidth, height: sourceHeight)
-        let w = max(1, min(maxSide, width > 0 ? width : Int(crop.width)))
-        let h = max(1, min(maxSide, Int((Double(w)*crop.height/crop.width).rounded())))
+        var w = max(1, min(maxSide, width > 0 ? width : Int(crop.width)))
+        var h = max(1, Int((Double(w)*crop.height/crop.width).rounded()))
+        // A very tall picture: both sides come down together, so it isn't squashed to fit.
+        if h > maxSide { w = max(1, Int((Double(w)*Double(maxSide)/Double(h)).rounded())); h = maxSide }
         return Plan(crop: crop, width: w, height: h)
     }
 

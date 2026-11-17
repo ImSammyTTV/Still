@@ -122,7 +122,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         recorder.onWarning = { [weak self] text in self?.library.toast(text) }
-        recorder.onError = { [weak self] text in DesktopCover.shared.endCapture(); self?.recordingHUD?.close(); self?.showError("Recording couldn’t start", text) }
+        recorder.onError = { [weak self] title, text in DesktopCover.shared.endCapture(); self?.recordingHUD?.close(); self?.showError(title, text) }
         recorder.onCancel = { [weak self] in DesktopCover.shared.endCapture(); self?.restoreOverlays() }
         recorder.$recording.sink { [weak self] active in
             RecordingAutomation.shared.update(recording: active) { [weak self] in self?.library.toast($0) }
@@ -167,6 +167,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in self?.selection.prewarm(); self?.checkSystemScreenshotShortcut() }
         Updater.shared.start()
         ClipboardHistory.shared.start()
+        EditorModel.sweepDragFolders()
         // After an update, ask macOS to re-read Still's right-click Services.
         if UserDefaults.standard.string(forKey: "servicesVersion") != Updater.shared.currentVersion {
             NSUpdateDynamicServices(); UserDefaults.standard.set(Updater.shared.currentVersion, forKey: "servicesVersion")
@@ -211,11 +212,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alert.addButton(withTitle: "Keep Editing"); alert.addButton(withTitle: "Quit Without Saving")
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
         }
+        // Quitting is certain now: an update chosen with Install and Restart is handed over to be swapped in.
+        guard Updater.shared.startPendingInstall() else { return .terminateCancel }
         for model in videoModels.values { model.close() }
         captureProcess?.interrupt()
         selection.close(); scrolling.cancel(); DesktopCover.shared.reset()
-        // History's index is written in the background; let the last write land before quitting.
-        library.finishWriting()
+        // History's index, saves and the clipboard history are written in the background; let them land before quitting.
+        library.finishWriting(); ClipboardHistory.shared.finishWriting()
         return .terminateNow
     }
     private func setupMenu() {
@@ -396,13 +399,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if mode == .area || mode == .text { showAllInOne(purpose: mode == .text ? .text : .screenshot, delay: delay); return }
         library.busy = true
         let restoreOnCancel = mainWindow?.isVisible == true
+        // Full Screen takes the display the pointer is on, as the capture overlay does, not always the main one.
+        let pointerScreen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main
         let previous = NSWorkspace.shared.frontmostApplication
         if previous?.bundleIdentifier != Bundle.main.bundleIdentifier { lastExternalApp = previous }
         hideForCapture(); lastExternalApp?.activate()
         DesktopCover.shared.beginCapture()
         Task {
-            guard await CaptureCountdown.run(seconds: delay) else { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays(); return }
+            guard await CaptureCountdown.run(seconds: delay) else { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays(); if restoreOnCancel { showMain() }; return }
             try? await Task.sleep(nanoseconds: 350_000_000)
+            if mode == .screen, let pointerScreen {
+                defer { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays() }
+                do { await completeScreenshot(try await ScreenCaptureAPI.image(screen: pointerScreen)) }
+                catch { showError("Capture failed", error.localizedDescription) }
+                return
+            }
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("Still-\(UUID()).png")
             defer {
                 library.busy = false; captureProcess = nil; try? FileManager.default.removeItem(at: file)
@@ -756,11 +767,14 @@ extension AppController {
         guard !library.busy, let saved = UserDefaults.standard.dictionary(forKey: "lastSelection") as? [String: Double],
               let screen = NSScreen.screens.first(where: { (selfScreenID($0)) == saved["screen"] }),
               let x = saved["x"], let y = saved["y"], let w = saved["w"], let h = saved["h"] else { showAllInOne(); return }
-        
+        // The display may have changed resolution since: keep the area on it, or choose again if nothing is left.
+        let rect = CGRect(x: x, y: y, width: w, height: h).intersection(CGRect(origin: .zero, size: screen.frame.size))
+        guard !rect.isNull, rect.width >= 1, rect.height >= 1 else { showAllInOne(); return }
+
         library.busy = true; hideForCapture(); DesktopCover.shared.beginCapture()
         Task {
             defer { library.busy = false; DesktopCover.shared.endCapture(); restoreOverlays() }
-            do { try await Task.sleep(nanoseconds: 180_000_000); await completeScreenshot(try await ScreenCaptureAPI.image(screen: screen, rect: CGRect(x: x, y: y, width: w, height: h))) }
+            do { try await Task.sleep(nanoseconds: 180_000_000); await completeScreenshot(try await ScreenCaptureAPI.image(screen: screen, rect: rect)) }
             catch { showError("Capture failed", error.localizedDescription) }
         }
     }
@@ -856,7 +870,13 @@ extension AppController {
             else if let screen, let rect { let updated = CGRect(origin: rect.origin, size: size).intersection(CGRect(origin: .zero, size: screen.frame.size)); self.startAreaRecording(screen: screen, rect: updated) }
             // No area chosen: record the whole display the setup panel is on. (The system picker
             // doesn't reliably appear for menu bar apps, which left recording stuck.)
-            else { self.recorder.recordArea(screen: target, rect: CGRect(origin: .zero, size: target.frame.size)) }
+            // A smaller Width x Height typed in the panel records that size, centred on the display.
+            else {
+                let bounds = CGRect(origin: .zero, size: target.frame.size)
+                let w = min(size.width, bounds.width), h = min(size.height, bounds.height)
+                let area = CGRect(x: (bounds.width-w)/2, y: (bounds.height-h)/2, width: w, height: h).integral.intersection(bounds)
+                self.recorder.recordArea(screen: target, rect: area.isNull || area.size == bounds.size ? bounds : area)
+            }
         }))
         recordingSetupPanel = panel
         if let rect {

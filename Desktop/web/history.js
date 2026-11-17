@@ -26,7 +26,7 @@ function showFolderMatches(grid) {
   const m = folderMatches, folderName = m.folder.split(/[\\/]/).filter(Boolean).pop() || m.folder;
   grid.replaceChildren(el('div', { class: 'similar-bar' }, [
     el('span', { html: icon('folder-open') }),
-    el('span', {}, `${m.found.length ? `${m.found.length} ${m.found.length === 1 ? 'picture' : 'pictures'} in “${folderName}” look like` : `Nothing in “${folderName}” looks like`} “${m.item.title}”${m.capped ? ' (the first 5,000 pictures were checked)' : ` (${m.scanned} checked)`}`),
+    el('span', {}, `${m.found.length ? `${m.found.length} ${m.found.length === 1 ? 'picture' : 'pictures'} in “${folderName}” look like` : `Nothing in “${folderName}” looks like`} “${m.item.title}”${m.capped ? ` (the folder is too big to check in full: the first ${m.scanned.toLocaleString()} pictures were checked)` : ` (${m.scanned} checked)`}`),
     el('button', { class: 'btn', onclick: () => { folderMatches = null; load(); } }, 'Show All')
   ]));
   for (const f of m.found) {
@@ -118,7 +118,7 @@ async function load() {
     const title = el('div', { class: 'title', title: 'Double-click to rename' }, item.title);
     title.addEventListener('dblclick', (e) => { e.stopPropagation(); title.contentEditable = 'true'; title.focus(); document.getSelection().selectAllChildren(title); });
     title.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); title.blur(); } if (e.key === 'Escape') { title.textContent = item.title; title.blur(); } });
-    title.addEventListener('blur', () => { title.contentEditable = 'false'; const next = title.textContent.trim(); if (next && next !== item.title) still.invoke('library:rename', item.id, next); else title.textContent = item.title; });
+    title.addEventListener('blur', () => { title.contentEditable = 'false'; const next = title.textContent.trim(); if (next && next !== item.title) still.invoke('library:rename', item.id, next).catch((error) => { title.textContent = item.title; toast(explain(error)); }); else title.textContent = item.title; });
     const tools = el('div', { class: 'tools' }, [
       el('button', { title: 'Copy', html: icon('copy'), onclick: (e) => { e.stopPropagation(); still.invoke('library:copy', item.id).then(() => toast(item.kind === 'recording' ? 'Copied recording' : 'Copied image')); } }),
       el('button', { title: 'Show in folder', html: icon('folder-open'), onclick: (e) => { e.stopPropagation(); still.invoke('library:reveal', item.id); } }),

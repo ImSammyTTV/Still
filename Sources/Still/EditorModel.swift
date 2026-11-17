@@ -80,6 +80,9 @@ final class EditorModel: ObservableObject {
     /// Counts edits, so a save running in the background knows whether more were made while it ran.
     private var edits = 0
     @Published private(set) var saving = false
+    /// Counts saves, so a background save that a newer one (saving as the window closes) has overtaken doesn't write
+    /// its older picture over the newer one.
+    private var saveGeneration = 0
     @Published var error: String?
     @Published var recognizedText: String?
     var showTextSheet: Bool {
@@ -205,15 +208,19 @@ final class EditorModel: ObservableObject {
         guard let state = redoStack.popLast() else { return }
         undoStack.append(currentSnapshot); apply(state)
     }
-    func crop(_ rect: CGRect) {
+    /// Crops to `rect`, scaled to the social media size picked for it unless `sized` is false. Says whether it worked.
+    @discardableResult
+    func crop(_ rect: CGRect, sized: Bool = true) -> Bool {
         do {
             let rendered = try ImageRenderer.render(source, marks: marks)
             var cropped = try ImageRenderer.crop(rendered, to: rect)
+            let size = sized ? cropSize : nil
             // A size crops and then scales to exactly its pixels, as one step that one undo takes back.
-            if let size = cropSize { cropped = try ImageRenderer.resize(cropped, width: size.width, height: size.height) }
+            if let size { cropped = try ImageRenderer.resize(cropped, width: size.width, height: size.height) }
             snapshot(); source = cropped; marks = []; selectedID = nil; dirty = true
-            if let size = cropSize { library.toast("\(size.title): \(SocialSizes.note(crop: rect, size: size))"); cropSize = nil; cropAspect = nil }
-        } catch { self.error = error.localizedDescription }
+            if let size { library.toast("\(size.title): \(SocialSizes.note(crop: rect, size: size))"); cropSize = nil; cropAspect = nil }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
     /// Locks the crop tool to a size (or back to any shape with nil).
     func chooseCropSize(_ size: SocialSizes.Size?) {
@@ -238,9 +245,16 @@ final class EditorModel: ObservableObject {
     @Published var watermarkOn = true { didSet { prepareDragFile() } }
     func document() throws -> ProjectDocument { try ProjectDocument(source: source, marks: marks, frame: frame, padding: padding, cornerRadius: cornerRadius, shadow: shadow, aspectRatio: aspectRatio, customBackground: customBackground, alignmentX: alignmentX, alignmentY: alignmentY) }
     var canvasLayout: (size: CGSize, origin: CGPoint) { ImageRenderer.canvasLayout(source: CGSize(width: source.width, height: source.height), framed: frame != .none || customBackground != nil, padding: Int(padding), aspect: aspectRatio, alignmentX: alignmentX, alignmentY: alignmentY) }
+    /// Trims the empty edges and centres the picture, as one step that a single undo takes back. It leaves out any
+    /// social media size picked for the next crop, and if the trim fails nothing else changes.
     func autoBalance() {
-        do { let image = try ImageRenderer.render(source, marks: marks); crop(ImageRenderer.contentBounds(image)); alignmentX = 0.5; alignmentY = 0.5 }
-        catch { self.error = error.localizedDescription }
+        do {
+            let image = try ImageRenderer.render(source, marks: marks)
+            guard crop(ImageRenderer.contentBounds(image), sized: false) else { return }
+            // The crop's undo step already holds the alignment from before, so this isn't a step of its own.
+            suppressChanges = true; alignmentX = 0.5; alignmentY = 0.5; suppressChanges = false
+            dirty = true
+        } catch { self.error = error.localizedDescription }
     }
     func restore(_ document: ProjectDocument) {
         guard let image = document.sourceImage() else { return }
@@ -259,27 +273,34 @@ final class EditorModel: ObservableObject {
         if !dirty, let current = item, library.items.contains(where: { $0.id == current.id }) { done?(); return }
         guard !saving else { return }
         saving = true
-        let job = renderSnapshot(), started = edits
+        saveGeneration &+= 1
+        let job = renderSnapshot(), started = edits, generation = saveGeneration
         Task {
             do {
                 let (png, project, width, height) = try await Task.detached(priority: .userInitiated) { () throws -> (Data, ProjectDocument, Int, Int) in
                     let image = try job.image()
                     return (try ImageRenderer.libraryData(image), try job.document(), image.width, image.height)
                 }.value
+                // Saved again as the window closed while this was drawn: that save has the newer edits, so this one
+                // writes nothing.
+                guard generation == saveGeneration else { return }
                 // The capture was deleted from history while this editor was open: save it as a new one.
                 if let current = item, !library.items.contains(where: { $0.id == current.id }) { item = nil }
                 if item == nil { item = try library.add(png: png, width: width, height: height, title: isSample ? "Sample annotation" : "Edited image") }
                 if let item { try await library.update(item, png: png, width: width, height: height, document: project) }
+                guard generation == saveGeneration else { return }
                 if edits == started { dirty = false }
                 saving = false
                 AppController.shared?.rekeyEditor(self)
                 library.toast("Changes saved to library")
                 done?()
-            } catch { saving = false; self.error = error.localizedDescription }
+            } catch { if generation == saveGeneration { saving = false; self.error = error.localizedDescription } }
         }
     }
     /// Saves before returning, for the "Save your edits?" prompt when the window closes.
     func saveNow() {
+        // A background save still under way drew an older picture: it stands down, and this one is the save that counts.
+        saveGeneration &+= 1; saving = false
         do {
             let image = try flattened()
             // The capture was deleted from history while this editor was open: save it as a new one.
@@ -363,19 +384,32 @@ final class EditorModel: ObservableObject {
         }
     }
     private func keepDragFile(_ file: DragFile) {
-        // A file already given to a drag stays: the app it was dropped on may still be reading it.
-        if let old = dragReady, !old.handedOut, old.url != file.url { EditorModel.discardDragFolder(old.url) }
+        // A file already given to a drag stays for a while: the app it was dropped on may still be reading it.
+        if let old = dragReady, old.url != file.url { EditorModel.discardDragFolder(old.url, after: old.handedOut ? Self.handedOutGrace : 0) }
         dragReady = file
     }
-    /// When the editor closes: the file kept ready goes, unless a drag took it.
+    /// When the editor closes: the file kept ready goes, after a while if a drag took it.
     func discardDragFile() {
         dragRefresh?.cancel(); dragRefresh = nil
-        if let ready = dragReady, !ready.handedOut { EditorModel.discardDragFolder(ready.url) }
+        if let ready = dragReady { EditorModel.discardDragFolder(ready.url, after: ready.handedOut ? Self.handedOutGrace : 0) }
         dragReady = nil
     }
-    private static func discardDragFolder(_ file: URL) {
+    /// How long a file given to a drag is kept, so the app it was dropped on has time to read it, before it goes.
+    private static let handedOutGrace: Double = 10*60
+    private static func discardDragFolder(_ file: URL, after delay: Double = 0) {
         let folder = file.deletingLastPathComponent()
-        DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: folder) }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now()+delay) { try? FileManager.default.removeItem(at: folder) }
+    }
+    /// At launch: drag files left behind when Still last quit before it could tidy them away, once they're an hour old.
+    nonisolated static func sweepDragFolders() {
+        DispatchQueue.global(qos: .utility).async {
+            let temporary = FileManager.default.temporaryDirectory, cutoff = Date().addingTimeInterval(-60*60)
+            let folders = (try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for folder in folders where folder.lastPathComponent.hasPrefix("Still-drag-") {
+                let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                if modified < cutoff { try? FileManager.default.removeItem(at: folder) }
+            }
+        }
     }
     /// The current edit as a PNG file named after the capture, for dragging into other apps, with a small preview to
     /// show under the pointer. Normally the file kept ready; only a drag within half a second of a change draws it here.
@@ -444,6 +478,9 @@ final class EditorModel: ObservableObject {
         Task {
             do {
                 let found = try await Task.detached(priority: .userInitiated) { try PrivateInfo.boxes(in: image) }.value
+                // Cropped, turned, resized or undone while Still was looking: the boxes were found on the old picture
+                // and would land in the wrong places on this one, leaving private details showing.
+                guard source === image else { library.toast("The picture changed while Still was looking. Try again."); isRecognizing = false; return }
                 let fresh = found.filter { box in !marks.contains { $0.tool == .redact && $0.rect.insetBy(dx: -1, dy: -1).contains(box) } }
                 if fresh.isEmpty { library.toast(found.isEmpty ? "No private details found" : "Everything private is already hidden") }
                 else {
@@ -465,6 +502,8 @@ final class EditorModel: ObservableObject {
         Task {
             do {
                 let lines = try await Task.detached(priority: .userInitiated) { try TextRecognition.lineBounds(image) }.value
+                // The lines were found on the picture as it was; a crop, turn, resize or undo since would misplace them.
+                guard source === image else { library.toast("The picture changed while Still was looking. Try again."); isRecognizing = false; return }
                 if lines.isEmpty { library.toast("No text found") }
                 else {
                     snapshot()

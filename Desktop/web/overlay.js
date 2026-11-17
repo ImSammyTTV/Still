@@ -74,7 +74,7 @@ function partsOf(win) {
   return win;
 }
 let partDepth = 0, lastPartStep = -1000;
-let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null, shift = false;
+let windowMode = false, spaceHeld = false, purpose = 'screenshot', aspect = 0, fixed = null;
 // The magnifier's zoom steps; the scroll wheel moves between them and the choice is remembered.
 const ZOOMS = G.MAGNIFIER_ZOOMS;
 let magnifierZoom = (() => { try { const z = Number(localStorage.getItem('stillMagnifierZoom')); return ZOOMS.includes(z) ? z : 8; } catch { return 8; } })();
@@ -112,6 +112,9 @@ function scaleWindows() {
   pixelScale = config.imageWidth / innerWidth;
   const css = (r) => ({ x: r.x / pixelScale, y: r.y / pixelScale, w: r.w / pixelScale, h: r.h / pixelScale });
   config.windows = (config.rawWindows || []).map((w) => ({ ...w, ...css(w), parts: (w.parts || []).map(css) }));
+  // Where the pointer was when the screen was taken, until the mouse says otherwise: a window that has just appeared
+  // hears nothing from a mouse that hasn't moved, and window selection needs to know where to draw its pointer.
+  if (config.pointer) pointer = { x: config.pointer.x / pixelScale, y: config.pointer.y / pixelScale };
 }
 addEventListener('resize', () => { if (config) { config.width = innerWidth; config.height = innerHeight; scaleWindows(); } });
 // A pre-warmed page waits hidden until a capture hands it its screen; the app falls back to a fresh page if it doesn't answer.
@@ -127,7 +130,7 @@ still.on('overlay:timer', (delay) => {
   if (timerDelay && adjusting && region && region.w > 2 && region.h > 2) finish(region);
   else if (timerDelay && here) toast(`Choose what to capture. It’s taken ${timerDelay} seconds later.`);
 });
-still.on('overlay:clear', () => { here = false; if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
+still.on('overlay:clear', () => { here = false; if (config) config.pointer = null; if (!anchor) { pointer = { x: -100, y: -100 }; hovered = null; draw(); } });
 
 function resize() {
   const dpr = devicePixelRatio || 1;
@@ -185,6 +188,7 @@ function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r
 
 function draw() {
   if (!config) return;
+  document.body.classList.toggle('pointer-known', pointer.x >= 0);
   ctx.clearRect(0, 0, innerWidth, innerHeight);
   if (windowMode) return drawWindowMode();
   ctx.fillStyle = 'rgba(0,0,0,.28)';
@@ -334,7 +338,9 @@ function leave() {
   pointer = { x: -100, y: -100 }; hovered = null; draw();
 }
 addEventListener('mousemove', (e) => {
-  if (onBar(e)) return leave();
+  if (config) config.pointer = null; // The mouse now says where the pointer is.
+  // A drag carries on over the bar: the area keeps following the pointer rather than freezing there.
+  if (!anchor && !grab && onBar(e)) return leave();
   pointer = point(e); square = e.shiftKey;
   if (!here) { here = true; still.send('overlay:pointer'); }
   follow();
@@ -343,7 +349,7 @@ addEventListener('mousemove', (e) => {
 
 addEventListener('mousedown', (e) => {
   if (e.button !== 0 || onBar(e) || !config) return;
-  pointer = point(e);
+  pointer = point(e); config.pointer = null;
   if (windowMode) {
     const next = partsOf(G.windowAt(config.windows, pointer));
     if (next !== hovered) partDepth = 0;
@@ -378,7 +384,19 @@ addEventListener('mouseup', (e) => {
 document.documentElement.addEventListener('mouseleave', leave);
 
 function stopMoving() { if (moving) { moving = false; moveFrom = null; document.body.classList.remove('moving-selection'); } }
-addEventListener('keyup', (e) => { if (e.code === 'Space') { stopMoving(); if (anchor) draw(); } if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
+addEventListener('keyup', (e) => { refreshSquare(e); if (e.code === 'Space') { stopMoving(); if (anchor) draw(); } if (e.code === 'Space' && spaceHeld) { spaceHeld = false; setWindowMode(false); } });
+// When the overlay loses the keyboard while Space is held (another app or the system takes it), the release never
+// arrives here, so it's taken as let go: holding Space to pick a window doesn't get stuck on.
+function dropSpace() { stopMoving(); if (spaceHeld) { spaceHeld = false; setWindowMode(false); } }
+addEventListener('blur', dropSpace);
+document.addEventListener('visibilitychange', () => { if (document.hidden) dropSpace(); });
+// Shift squares the area while it's dragged or resized: pressing or letting go of it shows at once, not only on the
+// next move of the mouse.
+function refreshSquare(e) {
+  if (e.key !== 'Shift' || square === e.shiftKey) return;
+  square = e.shiftKey;
+  if (grab || (anchor && !moving && !fixed)) { follow(); if (anchor) updateBar(); draw(); }
+}
 
 addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
 
@@ -404,7 +422,7 @@ addEventListener('keydown', (e) => {
   const action = StillCaptureInput.keyAction({ key: e.key, code: e.code, editingText: ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName), commandModifier: e.metaKey || e.ctrlKey || e.altKey, purpose });
   if (action === 'cancel') { e.preventDefault(); e.stopImmediatePropagation(); cancel(); return; }
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') applyDimensions(); return; }
-  shift = e.shiftKey;
+  refreshSquare(e);
   if (e.code === 'Space' && anchor) { e.preventDefault(); if (!moving) { moving = true; moveFrom = { ...pointer }; document.body.classList.add('moving-selection'); draw(); } return; }
   // Hold Space to pick a window; releasing it returns to area selection.
   if (action === 'window') { e.preventDefault(); if (!e.repeat && !anchor && !windowMode) { spaceHeld = true; setWindowMode(true); } return; }
@@ -417,10 +435,13 @@ addEventListener('keydown', (e) => {
     region = G.nudge(region, dx * step, dy * step, { resize: e.altKey, bounds: bounds() });
     updateBar(); draw(); return;
   }
+  // The letters below are the overlay's own keys only when pressed alone: Ctrl+C, Ctrl+W or Ctrl+F must not copy a
+  // colour, switch to window selection or capture the whole screen.
+  if (e.ctrlKey || e.metaKey || e.altKey) { updateBar(); return; }
   const key = e.key.toLowerCase();
   if (key === 'a') { setPurpose('screenshot'); setWindowMode(false); }
   else if (key === 'w') { if (!StillCaptureInput.allowsWindowSelection(purpose)) setPurpose('screenshot'); setWindowMode(true); }
-  else if (key === 'f') still.send('overlay:fullscreen', config.displayId);
+  else if (key === 'f') fullscreen();
   else if (key === 'o') { setWindowMode(false); setPurpose('text'); }
   else if (key === 'v') { setWindowMode(false); setPurpose('record'); }
   else if (key === 's' && config.canScroll) { setWindowMode(false); setPurpose('scroll'); }
@@ -439,6 +460,13 @@ function finish(rect, windowId) {
   still.send('overlay:done', { displayId: config.displayId, rect: r, px: { x: r.x * pixelScale, y: r.y * pixelScale, w: r.w * pixelScale, h: r.h * pixelScale }, purpose, windowId: windowId ?? null });
 }
 function cancel() { still.send('overlay:cancel'); }
+// The whole display. A plain screenshot is taken straight from the frozen screen; with the timer set, or for text,
+// a recording or a scrolling capture, it goes the usual way, so the countdown runs, the text is read or the
+// recording starts.
+function fullscreen() {
+  if (timerDelay > 0 || purpose !== 'screenshot') return finish({ x: 0, y: 0, w: config.width, h: config.height });
+  still.send('overlay:fullscreen', config.displayId);
+}
 
 function applyDimensions() {
   const w = Number($('#width').value), h = Number($('#height').value);
@@ -454,10 +482,7 @@ $('#bar').addEventListener('click', (e) => {
   const mode = button.dataset.mode;
   if (mode === 'area') { setPurpose('screenshot'); setWindowMode(false); }
   else if (mode === 'window') { if (!StillCaptureInput.allowsWindowSelection(purpose)) setPurpose('screenshot'); setWindowMode(!windowMode); }
-  else if (mode === 'fullscreen') {
-    if (purpose === 'record' || purpose === 'scroll') return finish({ x: 0, y: 0, w: config.width, h: config.height });
-    still.send('overlay:fullscreen', config.displayId);
-  }
+  else if (mode === 'fullscreen') return fullscreen();
   else if (mode === 'timer') popupMenu(button, [...[3, 5, 10].map((s) => ({ label: `${s} seconds`, icon: 'timer', action: () => still.send('overlay:timer', s) })), ...(timerDelay ? [{ label: 'Off', icon: 'x', action: () => still.send('overlay:timer', 0) }] : [])]);
   else if (mode === 'text') { setWindowMode(false); setPurpose(purpose === 'text' ? 'screenshot' : 'text'); }
   else if (mode === 'record') { setWindowMode(false); setPurpose(purpose === 'record' ? 'screenshot' : 'record'); }

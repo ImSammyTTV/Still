@@ -8,7 +8,10 @@ public enum CaptureNaming {
     public static let defaultPattern = "{type} {date} at {time}"
 
     public static func name(pattern: String, isVideo: Bool = false, date: Date = Date(), width: Int = 0, height: Int = 0, number: Int = 1, calendar: Calendar = .current) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        // Always the Gregorian date, in the calendar's time zone: a Mac set to a Buddhist, Japanese or Islamic calendar
+        // would otherwise name files with a different year than Windows and Linux, and out of order with them.
+        var gregorian = Calendar(identifier: .gregorian); gregorian.timeZone = calendar.timeZone
+        let parts = gregorian.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
         let two = { (value: Int?) in String(format: "%02d", value ?? 0) }
         let fill = { (text: String) in
             text.replacingOccurrences(of: "{date}", with: "\(parts.year ?? 0)-\(two(parts.month))-\(two(parts.day))")

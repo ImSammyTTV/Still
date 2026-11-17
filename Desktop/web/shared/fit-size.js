@@ -11,8 +11,10 @@
   function plan(source, { square = false, width = 0 } = {}) {
     const side = Math.min(source.w, source.h);
     const crop = square ? { x: Math.floor((source.w - side) / 2), y: Math.floor((source.h - side) / 2), w: side, h: side } : { x: 0, y: 0, w: source.w, h: source.h };
-    const w = Math.max(1, Math.min(MAX_SIDE, Math.round(width > 0 ? width : crop.w)));
-    const h = Math.max(1, Math.min(MAX_SIDE, Math.round(w * crop.h / crop.w)));
+    let w = Math.max(1, Math.min(MAX_SIDE, Math.round(width > 0 ? width : crop.w)));
+    let h = Math.max(1, Math.round(w * crop.h / crop.w));
+    // A very tall picture: both sides come down together, so it isn't squashed to fit.
+    if (h > MAX_SIDE) { w = Math.max(1, Math.round(w * MAX_SIDE / h)); h = MAX_SIDE; }
     return { crop, w, h };
   }
 

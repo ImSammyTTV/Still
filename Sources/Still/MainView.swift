@@ -107,7 +107,7 @@ struct MainView: View {
                 Button("Open Setup Assistant…") { UserDefaults.standard.set(false, forKey: "studioSetupComplete") }
                 Toggle("Launch at login", isOn: Binding(get: { launchAtLogin }, set: { do { try prefs.setLaunchAtLogin($0) } catch { loginError = error.localizedDescription }; launchAtLogin = SMAppService.mainApp.status == .enabled }))
                     .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
-                Toggle("Check for updates automatically", isOn: $autoUpdate)
+                Toggle("Check for updates automatically", isOn: $autoUpdate).onChange(of: autoUpdate) { _, on in if on { Updater.shared.scheduleChecks() } else { Updater.shared.stop() } }
                 Toggle("Show menu bar icon", isOn: $prefs.showMenuBar).onChange(of: prefs.showMenuBar) { _, value in AppController.shared.setMenuBarVisible(value) }
                 choice("Appearance", selection: $prefs.appearance) { Text("System Default").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.onChange(of: prefs.appearance) { _, _ in AppController.shared.applyAppearance() }
             }
@@ -299,11 +299,19 @@ final class ShortcutButton: NSButton {
     var recording = false
     var received: ((UInt32, UInt32, String) -> Void)?
     private var monitor: Any?
+    /// While recording, a click anywhere else or switching windows stops it, so keys typed in the search field or
+    /// another window afterwards reach it instead of being swallowed or saved as this shortcut.
+    private var clickMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
+    private var titleBefore = ""
     override func mouseDown(with event: NSEvent) {
+        stopRecording()
+        titleBefore = title
         recording = true; title = "Press shortcut…"; window?.makeFirstResponder(self)
-        if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.recording else { return event }
+            // A key typed in another window isn't meant for this: stop recording and let it through.
+            guard event.window === self.window else { self.stopRecording(); return event }
             if event.keyCode != 53 {
                 let flags = event.modifierFlags
                 guard flags.contains(.command) || flags.contains(.control) || flags.contains(.option) else { return nil }
@@ -314,11 +322,32 @@ final class ShortcutButton: NSButton {
                 if flags.contains(.command) { carbon |= UInt32(cmdKey); label += "⌘" }
                 label += (event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers)?.uppercased() ?? "Key \(event.keyCode)"
                 self.received?(UInt32(event.keyCode), carbon, label); self.title = label
+                self.stopRecording(recorded: true); return nil
             }
-            self.recording = false; if let monitor = self.monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }; return nil
+            self.stopRecording(); return nil
         }
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self, self.recording else { return event }
+            if event.window !== self.window || !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) { self.stopRecording() }
+            return event
+        }
+        if let window { resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.stopRecording() } } }
     }
-    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+    /// Stops listening for a shortcut. Unless one was just recorded, the button shows what it did before.
+    func stopRecording(recorded: Bool = false) {
+        if recording, !recorded { title = titleBefore }
+        recording = false
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor); self.clickMonitor = nil }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver); self.resignObserver = nil }
+    }
+    override func resignFirstResponder() -> Bool { stopRecording(); return super.resignFirstResponder() }
+    override func viewWillMove(toWindow newWindow: NSWindow?) { if newWindow == nil { stopRecording() }; super.viewWillMove(toWindow: newWindow) }
+    deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+    }
 }
 
 /// Settings → Clipboard: the history of what you copy.

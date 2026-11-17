@@ -33,6 +33,10 @@
 
   let scale = 1;
   win.scaleFactor().then((s) => { scale = s; });
+  // Moves and resizes of a pinned picture take turns, so each starts from where the last one left the window
+  // and a quick run of them (a held arrow key) doesn't lose steps.
+  let windowStep = Promise.resolve();
+  const inTurn = (fn) => (...args) => { const run = windowStep.then(() => fn(...args)); windowStep = run.catch(() => {}); return run; };
   const local = {
     'window:close': () => win.close(),
     'window:minimize': () => win.minimize(),
@@ -42,8 +46,8 @@
     'shortcut:label': (accelerator) => StillGeometry.shortcutLabel(accelerator, platform),
     'editor:ocr': (dataUrl) => StillOCR.recognize(dataUrl),
     'editor:ocrLines': (dataUrl) => StillOCR.lines(dataUrl),
-    'pin:move': async (dx, dy) => { const p = await win.outerPosition(); await win.setPosition(new T.dpi.PhysicalPosition(Math.round(p.x + dx * scale), Math.round(p.y + dy * scale))); },
-    'pin:resize': async (delta) => { const s = await win.innerSize(); const w = Math.max(80, Math.round(s.width * (1 + delta))); await win.setSize(new T.dpi.PhysicalSize(w, Math.round(w * s.height / s.width))); },
+    'pin:move': inTurn(async (dx, dy) => { const p = await win.outerPosition(); await win.setPosition(new T.dpi.PhysicalPosition(Math.round(p.x + dx * scale), Math.round(p.y + dy * scale))); }),
+    'pin:resize': inTurn(async (delta) => { const s = await win.innerSize(); const w = Math.max(80, Math.round(s.width * (1 + delta))); await win.setSize(new T.dpi.PhysicalSize(w, Math.round(w * s.height / s.width))); }),
     'pin:opacity': (value) => { document.body.style.opacity = value; },
     'pin:lock': (locked) => win.setIgnoreCursorEvents(locked)
   };

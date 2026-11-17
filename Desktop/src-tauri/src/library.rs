@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Every capture lives in its own folder: the original, the latest export and an editable project.
 #[derive(Clone, Serialize, Deserialize)]
@@ -24,7 +25,9 @@ pub struct Item {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub starred: bool,
 }
 
-pub struct Library { dir: PathBuf, pub items: Vec<Item>, /** Settings → Screenshots → File names. */ pub name_pattern: String, /** Settings → General → Keep history, in days; 0 keeps everything. */ pub keep_days: u32 }
+pub struct Library { dir: PathBuf, pub items: Vec<Item>, /** Settings → Screenshots → File names. */ pub name_pattern: String, /** Settings → General → Keep history, in days; 0 keeps everything. */ pub keep_days: u32,
+    /** Captures a new capture took with it (Keep history), for the app to close any window still showing them. */ pub pruned: Vec<String>,
+    /** An index that couldn't be read is still on disk and not yet kept aside: nothing is saved over it until it is. */ unkept: AtomicBool }
 
 /// A thumbnail lives in its capture's folder, so deleting the capture removes it too.
 const THUMBS: [&str; 2] = ["thumb.jpg", "thumb.png"];
@@ -62,24 +65,20 @@ impl Library {
     }
     pub fn open(dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
-        let index = dir.join("library.json");
-        let items: Vec<Item> = match fs::read_to_string(&index) {
-            Err(_) => Vec::new(),
-            Ok(text) => match serde_json::from_str(&text) {
-                Ok(items) => items,
-                // A damaged index is kept aside, never overwritten, and the list is rebuilt from the
-                // capture folders so nothing is orphaned.
-                Err(_) => {
-                    let _ = fs::rename(&index, dir.join(format!("library-damaged-{}.json", now_ms())));
-                    let lib = Library { items: rebuild(&dir), dir, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0 };
-                    let _ = lib.save();
-                    return lib;
-                }
-            },
+        let items: Option<Vec<Item>> = match read_index(&dir.join("library.json")) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+            Err(_) => None,
+            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
         };
         // Captures whose files have gone are dropped later, off the start (see `missing` and `forget`): checking every
         // file here held up Still's start with a long history.
-        Library { dir, items, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0 }
+        if let Some(items) = items { return Library { dir, items, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0, pruned: Vec::new(), unkept: AtomicBool::new(false) }; }
+        // A damaged or unreadable index is kept aside, never overwritten, and the list is rebuilt from the capture
+        // folders so nothing is orphaned. Saving keeps it aside first, and waits if it can't be yet (another program
+        // holding it), so the titles, stars and descriptions in it are never lost.
+        let lib = Library { items: rebuild(&dir), dir, name_pattern: DEFAULT_NAME.to_string(), keep_days: 0, pruned: Vec::new(), unkept: AtomicBool::new(true) };
+        let _ = lib.save();
+        lib
     }
     /// The ids of captures whose file is no longer on disk. Takes a copy of the list so it can run without the lock.
     pub fn missing(paths: &Library, items: &[Item]) -> Vec<String> { items.iter().filter(|i| !lib_file(&paths.dir, i).exists()).map(|i| i.id.clone()).collect() }
@@ -94,13 +93,17 @@ impl Library {
     /// Writes the index to a temporary file and renames it over the old one, so a crash or a full disk
     /// never leaves a half-written library.json.
     fn save(&self) -> Result<(), String> {
+        if self.unkept.load(Ordering::Relaxed) {
+            if !keep_aside(&self.dir) { return Err("History’s list couldn’t be read, and Still won’t write over it. Close any program using Still’s files and try again.".into()); }
+            self.unkept.store(false, Ordering::Relaxed);
+        }
         let text = serde_json::to_string_pretty(&self.items).map_err(|e| e.to_string())?;
         let temp = self.dir.join("library.json.tmp");
         fs::write(&temp, text).map_err(|e| e.to_string())?;
         fs::rename(&temp, self.dir.join("library.json")).map_err(|e| e.to_string())
     }
     /// The same folder without the list, for working out paths (and checking files on disk) outside the lock.
-    pub fn paths(&self) -> Library { Library { dir: self.dir.clone(), items: Vec::new(), name_pattern: String::new(), keep_days: 0 } }
+    pub fn paths(&self) -> Library { Library { dir: self.dir.clone(), items: Vec::new(), name_pattern: String::new(), keep_days: 0, pruned: Vec::new(), unkept: AtomicBool::new(false) } }
     pub fn folder(&self, item: &Item) -> PathBuf { self.dir.join(&item.id) }
     pub fn file(&self, item: &Item) -> PathBuf { lib_file(&self.dir, item) }
     pub fn original(&self, item: &Item) -> PathBuf { self.folder(item).join(&item.original_name) }
@@ -130,7 +133,8 @@ impl Library {
         if let Err(e) = written { let _ = fs::remove_dir_all(self.folder(&item)); return Err(e.to_string()); }
         self.items.insert(0, item.clone());
         if let Err(e) = self.save() { self.items.remove(0); let _ = fs::remove_dir_all(self.folder(&item)); return Err(e); }
-        self.prune(item.created);
+        let gone = self.prune(item.created);
+        self.pruned.extend(gone);
         Ok(item)
     }
     /// Like `add`, for a file already on disk (a recording): it's moved into the library rather than read into memory
@@ -150,7 +154,8 @@ impl Library {
         let _ = fs::remove_file(source);
         self.items.insert(0, item.clone());
         if let Err(e) = self.save() { self.items.remove(0); let _ = fs::rename(&target, source); let _ = fs::remove_dir_all(self.folder(&item)); return Err(e); }
-        self.prune(item.created);
+        let gone = self.prune(item.created);
+        self.pruned.extend(gone);
         Ok(item)
     }
     /// Removes captures older than `keep_days` that aren't starred, and answers which went. Runs after every new
@@ -164,21 +169,30 @@ impl Library {
         old
     }
     pub fn get(&self, id: &str) -> Option<Item> { self.items.iter().find(|i| i.id == id).cloned() }
-    pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Item)) -> Option<Item> {
-        let item = self.items.iter_mut().find(|i| i.id == id)?;
-        f(item);
-        let out = item.clone();
-        let _ = self.save();
-        Some(out)
+    /// Changes a capture and saves the list. When the list can't be saved the change is undone and the error comes
+    /// back, so History never shows a rename or star that would be gone after a restart. None if the capture's gone.
+    pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Item)) -> Result<Option<Item>, String> {
+        let Some(at) = self.items.iter().position(|i| i.id == id) else { return Ok(None) };
+        let before = self.items[at].clone();
+        f(&mut self.items[at]);
+        let out = self.items[at].clone();
+        if let Err(e) = self.save() { self.items[at] = before; return Err(e); }
+        Ok(Some(out))
     }
     pub fn replace_file(&mut self, id: &str, bytes: &[u8], ext: &str) -> Result<Item, String> {
         let item = self.get(id).ok_or("That capture no longer exists.")?;
         let name = format!("capture.{ext}");
-        // Write the new file before removing the old one.
-        fs::write(self.folder(&item).join(&name), bytes).map_err(|e| e.to_string())?;
-        if name != item.file_name { let _ = fs::remove_file(self.file(&item)); }
+        // The new file is written beside the old one and renamed into place, so a full disk or a crash mid-write
+        // never leaves the capture empty or half written.
+        let (temp, target) = (self.folder(&item).join("edit.tmp"), self.folder(&item).join(&name));
+        fs::write(&temp, bytes).and_then(|_| fs::rename(&temp, &target)).map_err(|e| { let _ = fs::remove_file(&temp); e.to_string() })?;
         self.remove_thumbs(&item);
-        self.update(id, |i| { i.file_name = name.clone(); i.modified = Some(now_ms()); }).ok_or_else(|| "That capture no longer exists.".to_string())
+        let updated = self.update(id, |i| { i.file_name = name.clone(); i.modified = Some(now_ms()); });
+        if name != item.file_name {
+            // The old file goes only once the list points at the new one; if the list couldn't be saved, it stays.
+            match &updated { Ok(Some(_)) => { let _ = fs::remove_file(self.file(&item)); } _ => { let _ = fs::remove_file(&target); } }
+        }
+        updated?.ok_or_else(|| "That capture no longer exists.".to_string())
     }
     pub fn project(&self, id: &str) -> Option<Value> {
         let item = self.get(id)?;
@@ -186,7 +200,9 @@ impl Library {
     }
     pub fn save_project(&self, id: &str, project: &Value) -> Result<(), String> {
         let item = self.get(id).ok_or("That capture no longer exists.")?;
-        fs::write(self.folder(&item).join("project.json"), project.to_string()).map_err(|e| e.to_string())
+        // Written beside the old one and renamed into place: a crash mid-save mustn't lose the editor's work.
+        let (temp, file) = (self.folder(&item).join("project.json.tmp"), self.folder(&item).join("project.json"));
+        fs::write(&temp, project.to_string()).and_then(|_| fs::rename(&temp, &file)).map_err(|e| { let _ = fs::remove_file(&temp); e.to_string() })
     }
     pub fn remove(&mut self, id: &str) {
         if let Some(item) = self.get(id) { let _ = fs::remove_dir_all(self.folder(&item)); }
@@ -203,6 +219,26 @@ impl Library {
 /// Screenshots too big to show as they are. A size of 0 means it isn't known, as with a recovered capture.
 pub fn wants_thumb(item: &Item) -> bool { item.kind != "recording" && (item.width == 0 || item.width.max(item.height) > crate::capture::THUMB_MAX) }
 fn lib_file(dir: &Path, item: &Item) -> PathBuf { dir.join(&item.id).join(&item.file_name) }
+
+/// Reads the index, asking again a few times when another program has it open for a moment (a virus scan, say).
+fn read_index(index: &Path) -> std::io::Result<Vec<u8>> {
+    let mut tries = 0;
+    loop {
+        match fs::read(index) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound && tries < 3 => { tries += 1; std::thread::sleep(std::time::Duration::from_millis(200)); }
+            done => return done,
+        }
+    }
+}
+
+/// Puts an index Still can't use beside the list as library-damaged-<time>.json (moved, or copied when it can't be
+/// moved). True once nothing is left to write over.
+fn keep_aside(dir: &Path) -> bool {
+    let index = dir.join("library.json");
+    if matches!(fs::symlink_metadata(&index), Err(e) if e.kind() == std::io::ErrorKind::NotFound) { return true; }
+    let kept = dir.join(format!("library-damaged-{}.json", now_ms()));
+    fs::rename(&index, &kept).is_ok() || fs::copy(&index, &kept).is_ok()
+}
 
 /// The captures on disk, newest first, for when library.json can't be read.
 fn rebuild(dir: &Path) -> Vec<Item> {
@@ -255,7 +291,7 @@ mod tests {
         let mut lib = Library::open(dir.clone());
         let a = lib.add(b"a", "screenshot", "png", Some("Keep".into()), 1, 1).unwrap();
         lib.add(b"b", "screenshot", "png", Some("Other".into()), 1, 1).unwrap();
-        lib.update(&a.id, |i| i.starred = true);
+        lib.update(&a.id, |i| i.starred = true).unwrap();
         assert_eq!(lib.search("", "starred").iter().map(|i| i.title.clone()).collect::<Vec<_>>(), vec!["Keep"]);
         let lib = Library::open(dir.clone());
         assert_eq!(lib.search("", "starred").len(), 1);
@@ -269,8 +305,8 @@ mod tests {
         let old = lib.add(b"a", "screenshot", "png", Some("Old".into()), 1, 1).unwrap();
         let kept = lib.add(b"b", "screenshot", "png", Some("Old but starred".into()), 1, 1).unwrap();
         let day = 86_400_000;
-        lib.update(&old.id, |i| i.created -= 10 * day);
-        lib.update(&kept.id, |i| { i.created -= 10 * day; i.starred = true; });
+        lib.update(&old.id, |i| i.created -= 10 * day).unwrap();
+        lib.update(&kept.id, |i| { i.created -= 10 * day; i.starred = true; }).unwrap();
         assert!(lib.prune(now_ms()).is_empty(), "keeps everything by default");
         lib.keep_days = 7;
         let fresh = lib.add(b"c", "screenshot", "png", Some("New".into()), 1, 1).unwrap();
@@ -347,7 +383,7 @@ mod tests {
     fn search_filters_kind_title_and_text() {
         let mut lib = Library::open(std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4())));
         let a = lib.add(b"a", "screenshot", "png", Some("Invoice".into()), 1, 1).unwrap();
-        lib.update(&a.id, |i| i.text = "total due".into());
+        lib.update(&a.id, |i| i.text = "total due".into()).unwrap();
         lib.add(b"b", "recording", "mp4", Some("Demo".into()), 0, 0).unwrap();
         assert_eq!(lib.search("due", "all").len(), 1);
         assert_eq!(lib.search("", "recording")[0].title, "Demo");
@@ -366,6 +402,45 @@ mod tests {
         assert!(fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("library-damaged-")));
         // The rebuilt list is saved, so it's still there next time.
         assert_eq!(Library::open(dir.clone()).items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn an_unreadable_index_is_kept_aside_too() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let item = lib.add(b"png", "screenshot", "png", None, 1, 1).unwrap();
+        // Something that is there but can't be read as a file stands in for one another program holds.
+        fs::remove_file(dir.join("library.json")).unwrap();
+        fs::create_dir(dir.join("library.json")).unwrap();
+        fs::write(dir.join("library.json").join("inside"), b"kept").unwrap();
+        let mut again = Library::open(dir.clone());
+        assert_eq!(again.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(), vec![item.id]);
+        assert!(fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("library-damaged-")));
+        again.add(b"new", "screenshot", "png", None, 1, 1).unwrap();
+        assert_eq!(Library::open(dir.clone()).items.len(), 2);
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn edits_and_projects_leave_no_temporary_files() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let item = lib.add(b"original", "screenshot", "png", None, 1, 1).unwrap();
+        lib.replace_file(&item.id, b"edited", "png").unwrap();
+        lib.save_project(&item.id, &serde_json::json!({ "marks": [] })).unwrap();
+        let names: Vec<String> = fs::read_dir(lib.folder(&item)).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert!(names.iter().all(|n| !n.ends_with(".tmp")), "{names:?}");
+        assert_eq!(fs::read(lib.file(&item)).unwrap(), b"edited");
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn captures_a_new_capture_prunes_are_handed_on() {
+        let dir = std::env::temp_dir().join(format!("still-lib-{}", uuid::Uuid::new_v4()));
+        let mut lib = Library::open(dir.clone());
+        let old = lib.add(b"a", "screenshot", "png", None, 1, 1).unwrap();
+        lib.update(&old.id, |i| i.created -= 10 * 86_400_000).unwrap();
+        lib.keep_days = 7;
+        lib.add(b"b", "screenshot", "png", None, 1, 1).unwrap();
+        assert_eq!(std::mem::take(&mut lib.pruned), vec![old.id]);
         let _ = fs::remove_dir_all(dir);
     }
 

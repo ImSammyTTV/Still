@@ -20,15 +20,33 @@
   const dragRect = (anchor, point, { aspect = 0, square = false, bounds } = {}) => {
     const dx = point.x - anchor.x, dy = point.y - anchor.y;
     let w = Math.abs(dx), h = Math.abs(dy);
-    if (square) h = w;
-    else if (aspect > 0) h = w / aspect;
+    const ratio = square ? 1 : aspect;
+    if (ratio > 0) {
+      // A locked shape stops growing where it meets the edge of the screen, instead of being cut off there and
+      // losing its shape.
+      if (bounds) {
+        const roomX = dx >= 0 ? bounds.x + bounds.w - anchor.x : anchor.x - bounds.x;
+        const roomY = dy >= 0 ? bounds.y + bounds.h - anchor.y : anchor.y - bounds.y;
+        w = Math.max(0, Math.min(w, roomX, roomY * ratio));
+      }
+      h = w / ratio;
+    }
     const rect = { x: dx >= 0 ? anchor.x : anchor.x - w, y: dy >= 0 ? anchor.y : anchor.y - h, w, h };
     return bounds ? intersect(rect, bounds) : rect;
   };
 
   // Arrow keys move the selection; with resize they grow it from the bottom-right corner.
   const nudge = (r, dx, dy, { resize = false, bounds } = {}) => {
-    let next = resize ? { ...r, w: Math.max(1, r.w + dx), h: Math.max(1, r.h + dy) } : { ...r, x: r.x + dx, y: r.y + dy };
+    if (resize) {
+      // The top-left corner stays put: at the edge of the screen the selection stops growing instead of sliding back.
+      const next = { ...r, w: Math.max(1, r.w + dx), h: Math.max(1, r.h + dy) };
+      if (bounds) {
+        next.w = Math.max(1, Math.min(next.w, bounds.x + bounds.w - r.x));
+        next.h = Math.max(1, Math.min(next.h, bounds.y + bounds.h - r.y));
+      }
+      return next;
+    }
+    let next = { ...r, x: r.x + dx, y: r.y + dy };
     if (bounds) {
       next.w = Math.min(next.w, bounds.w); next.h = Math.min(next.h, bounds.h);
       next.x = Math.min(Math.max(bounds.x, next.x), bounds.x + bounds.w - next.w);
@@ -67,8 +85,12 @@
     if (bounds) { x0 = Math.max(bounds.x, x0); y0 = Math.max(bounds.y, y0); x1 = Math.min(bounds.x + bounds.w, x1); y1 = Math.min(bounds.y + bounds.h, y1); }
     let r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     if (aspect > 0) {
-      // Width leads unless only the top or bottom edge moved; the opposite side stays put.
-      if (handle === 'n' || handle === 's') r.w = r.h * aspect; else r.h = r.w / aspect;
+      // Width leads unless only the top or bottom edge moved; the opposite side stays put. At the edge of the screen
+      // the shape stops growing, rather than being cut off on one side and losing its shape.
+      const roomX = !bounds ? Infinity : handle.includes('w') ? x1 - bounds.x : bounds.x + bounds.w - x0;
+      const roomY = !bounds ? Infinity : handle.includes('n') ? y1 - bounds.y : bounds.y + bounds.h - y0;
+      if (handle === 'n' || handle === 's') { r.h = Math.min(r.h, roomY, roomX / aspect); r.w = r.h * aspect; }
+      else { r.w = Math.min(r.w, roomX, roomY * aspect); r.h = r.w / aspect; }
       if (handle.includes('w')) r.x = x1 - r.w;
       if (handle.includes('n')) r.y = y1 - r.h;
       if (bounds) r = intersect(r, bounds);

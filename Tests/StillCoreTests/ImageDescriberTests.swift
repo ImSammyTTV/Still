@@ -27,6 +27,8 @@ final class ImageDescriberTests: XCTestCase {
         let parts = ((b["contents"] as? [[String: Any]])?.first?["parts"] as? [[String: Any]]) ?? []
         XCTAssertEqual(parts.first?["text"] as? String, ImageDescriber.prompt)
         XCTAssertEqual((parts.last?["inline_data"] as? [String: Any])?["mime_type"] as? String, "image/png")
+        // Thinking counts against the limit, so it leaves room for the description after it.
+        XCTAssertGreaterThanOrEqual((b["generationConfig"] as? [String: Any])?["maxOutputTokens"] as? Int ?? 0, 2048)
     }
     func testClaudeAnswersAreReadAndItsErrorsArePlain() {
         let ok: [String: Any] = ["type": "message", "stop_reason": "end_turn", "content": [["type": "thinking", "thinking": ""], ["type": "text", "text": " A dark settings window.\n"]]]

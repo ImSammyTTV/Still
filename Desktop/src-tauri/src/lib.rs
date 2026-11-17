@@ -114,9 +114,25 @@ fn clear_private_temp() {
 
 fn setting(app: &AppHandle, path: &str) -> Value { st(app).settings.lock().unwrap().get(path).clone() }
 fn notify(app: &AppHandle, title: &str, body: &str) { let _ = app.notification().builder().title(title).body(body).show(); }
-fn broadcast(app: &AppHandle, event: &str, payload: Value) { let _ = app.emit(event, payload); }
+fn broadcast(app: &AppHandle, event: &str, payload: Value) {
+    // A new capture can take old ones with it (Settings → General → Keep history): their windows close rather than
+    // stay open on files that are gone.
+    if event == "library:changed" { let gone = st(app).library.try_lock().map(|mut l| std::mem::take(&mut l.pruned)).unwrap_or_default(); close_removed(app, &gone); }
+    let _ = app.emit(event, payload);
+}
 fn platform() -> &'static str { if cfg!(windows) { "win32" } else if cfg!(target_os = "macos") { "darwin" } else { "linux" } }
-fn is_wayland() -> bool { cfg!(target_os = "linux") && std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false) && std::env::var("DISPLAY").is_err() }
+/// Whether the desktop is a Wayland session. Most of them run X11 apps too (DISPLAY is set), but capture still goes
+/// through the desktop's picker and global shortcuts only fire while an X11 app is in front, so the hints apply.
+fn is_wayland() -> bool {
+    let set = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
+    cfg!(target_os = "linux") && (std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false) || set("WAYLAND_DISPLAY"))
+}
+/// Whether Still's own windows are on Wayland itself (see `run`), where the desktop, not Still, decides where each
+/// window goes and whether it stays on top.
+fn wayland_windows() -> bool {
+    let set = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
+    cfg!(target_os = "linux") && set("WAYLAND_DISPLAY") && match std::env::var("GDK_BACKEND") { Ok(b) => !b.trim_start().starts_with("x11"), Err(_) => !set("DISPLAY") }
+}
 
 // ---- Windows ----------------------------------------------------------------------------------
 
@@ -146,14 +162,22 @@ fn take_focus(win: &WebviewWindow) {
 /// While an overlay is open, Escape cancels the capture even if the overlay never got keyboard focus.
 /// The shortcut lives only as long as the selection: end_selection removes it.
 fn watch_escape(app: &AppHandle) {
+    WATCHING_ESCAPE.store(true, std::sync::atomic::Ordering::SeqCst);
     let _ = app.global_shortcut().on_shortcut("Escape", |app, _shortcut, event| {
         if event.state != ShortcutState::Pressed { return; }
         let app = app.clone();
         // Off the handler's thread, so removing the shortcut inside end_selection never waits on the handler itself.
         std::thread::spawn(move || {
-            if st(&app).session.lock().unwrap().busy { end_selection(&app); } else { let _ = app.global_shortcut().unregister("Escape"); }
+            if st(&app).session.lock().unwrap().busy { end_selection(&app); } else { unwatch_escape(&app); }
         });
     });
+}
+/// Whether Escape is held for an open selection, so shortcuts registered again meanwhile (Settings closing, a
+/// shortcut being recorded) don't take away the way out of the capture.
+static WATCHING_ESCAPE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn unwatch_escape(app: &AppHandle) {
+    WATCHING_ESCAPE.store(false, std::sync::atomic::Ordering::SeqCst);
+    let _ = app.global_shortcut().unregister("Escape");
 }
 
 fn focus_or<F: FnOnce() -> Option<WebviewWindow>>(app: &AppHandle, label: &str, make: F) -> Option<WebviewWindow> {
@@ -178,14 +202,31 @@ fn open_editor_with(app: &AppHandle, id: Option<&str>, recognize: bool, sheet: &
     let label = format!("editor-{}", id.unwrap_or("demo"));
     let title = id.and_then(|i| st(app).library.lock().unwrap().get(i)).map(|i| i.title).unwrap_or_else(|| "Still — Annotate".into());
     close_preview(app, id.unwrap_or(""));
-    // Fit the editor inside the work area of the screen the pointer is on.
-    let (w, h) = app.cursor_position().ok().and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())
+    // Fit the editor inside the work area of the screen the pointer is on, and open it there.
+    let monitor = pointer_monitor(app);
+    let (w, h) = monitor.as_ref()
         .map(|m| { let a = m.work_area(); let s = m.scale_factor(); ((a.size.width as f64 / s - 40.0).min(1180.0), (a.size.height as f64 / s - 40.0).min(800.0)) })
         .unwrap_or((1180.0, 800.0));
     // Already open: the sheet goes up in that window.
     if !sheet.is_empty() { if let Some(w) = app.get_webview_window(&label) { let _ = w.emit("editor:sheet", sheet); } }
-    focus_or(app, &label, || glass(builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" }, "sheet": sheet })))
-        .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false).center().build().ok());
+    focus_or(app, &label, || place_on(glass(builder(app, &label, "editor.html", json!({ "id": id.unwrap_or(""), "demo": if id.is_none() { "1" } else { "0" }, "recognize": if recognize { "1" } else { "0" }, "sheet": sheet })))
+        .title(title).inner_size(w, h).min_inner_size(w.min(900.0), h.min(520.0)).decorations(false), monitor.as_ref(), w, h));
+}
+/// The screen the pointer is on, or the main screen when that can't be told.
+fn pointer_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    app.cursor_position().ok().and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())
+}
+/// Builds a window and centres it on `monitor` before it shows. Centring it in the builder used the main screen
+/// instead, so a window sized for a bigger second screen opened on the main one with its top edge off screen.
+fn place_on(builder: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>, monitor: Option<&tauri::Monitor>, w: f64, h: f64) -> Option<WebviewWindow> {
+    let Some(m) = monitor else { return builder.center().build().ok() };
+    let win = builder.build().ok()?;
+    let (a, s) = (m.work_area(), m.scale_factor());
+    let (pw, ph) = ((w * s) as i32, (h * s) as i32);
+    let _ = win.set_position(PhysicalPosition::new(a.position.x + (a.size.width as i32 - pw).max(0) / 2, a.position.y + (a.size.height as i32 - ph).max(0) / 2));
+    // Moving to a screen with a different scale can change the window's size; this keeps it as asked.
+    let _ = win.set_size(tauri::LogicalSize::new(w, h));
+    Some(win)
 }
 
 /// Recordings open here rather than in the image editor.
@@ -193,7 +234,14 @@ fn open_video(app: &AppHandle, id: &str) {
     let label = format!("video-{id}");
     let title = st(app).library.lock().unwrap().get(id).map(|i| i.title).unwrap_or_else(|| "Still — Video Editor".into());
     close_preview(app, id);
-    focus_or(app, &label, || glass(builder(app, &label, "video.html", json!({ "id": id }))).title(title).inner_size(960.0, 700.0).min_inner_size(720.0, 560.0).decorations(false).center().build().ok());
+    let monitor = pointer_monitor(app);
+    let (w, h) = monitor.as_ref().map(|m| { let a = m.work_area(); let s = m.scale_factor(); ((a.size.width as f64 / s - 40.0).min(960.0), (a.size.height as f64 / s - 40.0).min(700.0)) }).unwrap_or((960.0, 700.0));
+    // Exporting an edited video records it again, which WebKitGTK only allows with media capture switched on.
+    focus_or(app, &label, || {
+        let win = place_on(glass(builder(app, &label, "video.html", json!({ "id": id }))).title(title).inner_size(w, h).min_inner_size(w.min(720.0), h.min(560.0)).decorations(false), monitor.as_ref(), w, h)?;
+        media_on(&win);
+        Some(win)
+    });
 }
 
 // ---- Floating Preview -------------------------------------------------------------------------------
@@ -248,6 +296,13 @@ fn close_preview(app: &AppHandle, id: &str) {
     let labels: Vec<String> = st(app).session.lock().unwrap().previews.iter().filter(|(_, i)| i == id).map(|(l, _)| l.clone()).collect();
     for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.close(); } }
 }
+/// Closes every window showing these captures (Floating Previews, the editor, the video editor): they've been removed.
+fn close_removed(app: &AppHandle, ids: &[String]) {
+    for id in ids {
+        close_preview(app, id);
+        for label in [format!("editor-{id}"), format!("video-{id}")] { if let Some(w) = app.get_webview_window(&label) { let _ = w.close(); } }
+    }
+}
 
 /// Returns whether there was anything to hide or show.
 fn hide_floating(app: &AppHandle, hidden: bool) -> bool {
@@ -268,6 +323,8 @@ fn place_overlay(win: &WebviewWindow, g: &Grab) {
     let (w, h) = g.image.dimensions();
     let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
     let _ = win.set_size(PhysicalSize::new(w, h));
+    // Wayland ignores both and doesn't keep the window above the panels: filling the screen is the one way to cover it.
+    if wayland_windows() { let _ = win.set_fullscreen(true); }
 }
 
 /// Starting a webview is the slowest part of opening the overlay, so one page per display is loaded ahead of time and
@@ -296,7 +353,12 @@ fn warm_overlays(app: &AppHandle) {
 /// Gives a waiting page this display. A page can't be trusted just because it loaded earlier, so it has to answer;
 /// if it doesn't, the capture goes on with a fresh page rather than leaving a blank window over the screen.
 fn warm_overlay(app: &AppHandle, g: &Grab, init: &Value) -> Option<(String, WebviewWindow)> {
-    let label = { let mut s = st(app).session.lock().unwrap(); let label = s.warm.pop()?; s.handing = Some(label.clone()); label };
+    // A page that has gone meanwhile is passed over, so a good one waiting under it is still used.
+    let label = loop {
+        let label = st(app).session.lock().unwrap().warm.pop()?;
+        if app.get_webview_window(&label).is_some() { break label; }
+    };
+    st(app).session.lock().unwrap().handing = Some(label.clone());
     let win = app.get_webview_window(&label);
     if let Some(win) = &win {
         place_overlay(win, g);
@@ -336,7 +398,11 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         // Escape works from the moment the first overlay can appear, not only once they all have.
         watch_escape(&app);
         let factor = grabs.first().map(|g| g.factor).unwrap_or(1.0);
-        let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+        let found = app.cursor_position().ok();
+        let cursor = found.unwrap_or(PhysicalPosition::new(0.0, 0.0));
+        // Where the pointer is, for the page: a new window hears nothing of the mouse until it moves, so without this
+        // window selection would hide the pointer with nothing drawn in its place. Wayland doesn't say where it is.
+        let pointer_known = found.is_some() && !is_wayland();
         let last = setting(&app, "lastSelection");
         let remember = setting(&app, "rememberSelection").as_bool().unwrap_or(false);
         let temp = private_temp();
@@ -367,12 +433,14 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 "imageParts": parts, "imageWidth": w, "imageHeight": h, "windows": mine,
                 "crosshair": setting(&app, "crosshair"), "magnifier": setting(&app, "magnifier"), "adjust": setting(&app, "adjustAreaBeforeCapture").as_bool().unwrap_or(false),
                 "last": if remember && last["displayId"] == json!(g.id) { last["rect"].clone() } else { Value::Null },
+                "pointer": if under_cursor && pointer_known { json!({ "x": cursor.x - g.x as f64, "y": cursor.y - g.y as f64 }) } else { Value::Null },
                 "primary": under_cursor || (i == 0 && !grabs.iter().any(|o| { let (ow, oh) = o.image.dimensions(); cursor.x >= o.x as f64 && cursor.x < (o.x + ow as i32) as f64 && cursor.y >= o.y as f64 && cursor.y < (o.y + oh as i32) as f64 }))
             });
             let (label, built) = match warm_overlay(&app, g, &init) {
                 Some((label, win)) => (label, Ok(win)),
                 None => {
-                    let label = format!("overlay-{i}");
+                    // Named for this capture, so a cancelled one still closing its windows never closes this one's.
+                    let label = format!("overlay-{generation}-{i}");
                     if let Some(old) = app.get_webview_window(&label) { let _ = old.destroy(); }
                     let built = overlay_window(&app, &label, json!({ "init": init })).build();
                     if let Ok(win) = &built { place_overlay(win, g); }
@@ -380,11 +448,19 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                 }
             };
             if built.is_ok() {
-                // Shown by overlay_drawn once its page has the picture on it.
-                let mut s = st(&app).session.lock().unwrap();
-                s.unshown.push(label.clone());
-                if under_cursor { s.focus_overlay = Some(label.clone()); }
+                // Shown by overlay_drawn once its page has the picture on it. Once this capture has been cancelled
+                // (and perhaps a new one started) its windows are only closed below, never handed to the new one.
+                let current = {
+                    let mut s = st(&app).session.lock().unwrap();
+                    let current = s.generation == generation && s.busy;
+                    if current {
+                        s.unshown.push(label.clone());
+                        if under_cursor { s.focus_overlay = Some(label.clone()); }
+                    }
+                    current
+                };
                 labels.push(label);
+                if !current { break; }
             }
         }
         let cancelled = {
@@ -397,6 +473,13 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
         // stay on screen, or a frozen picture would sit over everything with nothing left to close it.
         if cancelled {
             for l in labels { if let Some(w) = app.get_webview_window(&l) { let _ = w.destroy(); } }
+            return;
+        }
+        // Not one overlay could be opened: say so and let go of the capture, rather than leave it waiting invisibly
+        // and refusing every new one.
+        if labels.is_empty() {
+            end_selection(&app);
+            notify(&app, "Capture failed", "The capture overlay couldn’t be opened.");
             return;
         }
         // A page that never says it has drawn (a picture that fails to load) is shown anyway, so the capture isn't stuck invisible.
@@ -461,7 +544,7 @@ fn countdown(app: &AppHandle, seconds: u64) -> bool {
 async fn countdown_cancel() { COUNTDOWN_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst); }
 
 fn end_selection(app: &AppHandle) {
-    let _ = app.global_shortcut().unregister("Escape");
+    unwatch_escape(app);
     let labels = { let mut s = st(app).session.lock().unwrap(); s.busy = false; s.generation += 1; s.grabs.clear(); s.unshown.clear(); s.focus_overlay = None; std::mem::take(&mut s.overlays) };
     // The overlay's frozen pictures of every screen aren't needed once the selection is over.
     // Only the files that are there: trying every possible name was 256 file calls each time.
@@ -573,7 +656,8 @@ fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
     let ((bytes, ext), copied, thumb) = std::thread::scope(|scope| {
         let copied = scope.spawn(|| if setting(app, "afterCapture.copy").as_bool().unwrap_or(true) { copy_image(app, &image) } else { Ok(()) });
         let thumb = scope.spawn(|| if w.max(h) > capture::THUMB_MAX { Some(capture::thumbnail(&image)) } else { None });
-        (encode(app, &image), copied.join().unwrap_or(Ok(())), thumb.join().unwrap_or(None))
+        // History keeps the lossless PNG; Settings → Image format applies to files saved from it (export_item).
+        ((capture::png(&image), "png"), copied.join().unwrap_or(Ok(())), thumb.join().unwrap_or(None))
     });
     if let Err(e) = copied { notify(app, "Couldn’t copy the screenshot", &e); }
     let item = {
@@ -591,20 +675,31 @@ fn complete_image(app: &AppHandle, image: RgbaImage, text: bool) {
 
 /// OCR runs in a hidden page (the engine is WebAssembly); it reports back through `ocr_result`.
 fn recognize_file(app: &AppHandle, image: &RgbaImage) {
-    let file = private_temp().join(format!("still-ocr-{}.png", uuid::Uuid::new_v4().simple()));
-    let _ = std::fs::write(&file, capture::png(image));
-    let label = format!("ocr-{}", uuid::Uuid::new_v4().simple());
+    // The page and its picture share a name, so each run removes only its own picture (see ocr_file).
+    let key = uuid::Uuid::new_v4().simple().to_string();
+    let label = format!("ocr-{key}");
+    let file = ocr_file(&label);
+    if let Err(e) = std::fs::write(&file, capture::png(image)) { let _ = std::fs::remove_file(&file); notify(app, "Text recognition couldn’t start", &e.to_string()); return; }
     let (found, scan) = std::sync::mpsc::channel();
     let picture = image.clone();
     std::thread::spawn(move || { let _ = found.send(qr::read(&picture)); });
     st(app).session.lock().unwrap().qr.insert(label.clone(), scan);
-    let _ = builder(app, &label, "ocr.html", json!({ "file": file })).title("Still OCR").inner_size(200.0, 100.0).skip_taskbar(true).build();
+    if let Err(e) = builder(app, &label, "ocr.html", json!({ "file": file })).title("Still OCR").inner_size(200.0, 100.0).skip_taskbar(true).build() {
+        st(app).session.lock().unwrap().qr.remove(&label);
+        let _ = std::fs::remove_file(&file);
+        notify(app, "Text recognition couldn’t start", &e.to_string());
+    }
 }
+/// The picture one Capture Text page reads, by that page's window label.
+fn ocr_file(label: &str) -> PathBuf { private_temp().join(format!("still-{label}.png")) }
 
 fn export_folder(app: &AppHandle) -> PathBuf {
     let custom = st(app).settings.lock().unwrap().str("exportFolder");
+    // A folder chosen in Settings is used as it is and never made again: when it's gone, it's most likely on a drive
+    // that isn't connected, and making it again would quietly put saves on this computer instead (export_item says so).
+    if !custom.is_empty() { return PathBuf::from(custom); }
     // Unless a folder was chosen in Settings, saves go to Documents/Still.
-    let folder = if custom.is_empty() { app.path().document_dir().or_else(|_| app.path().home_dir()).map(|d| d.join("Still")).unwrap_or_else(|_| std::env::temp_dir()) } else { PathBuf::from(custom) };
+    let folder = app.path().document_dir().or_else(|_| app.path().home_dir()).map(|d| d.join("Still")).unwrap_or_else(|_| std::env::temp_dir());
     let _ = std::fs::create_dir_all(&folder);
     folder
 }
@@ -621,8 +716,19 @@ fn export_item(app: &AppHandle, id: &str, target: Option<PathBuf>) -> Result<Pat
     let src = lib.file(&item);
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
     drop(lib);
-    let file = target.unwrap_or_else(|| unique_path(&export_folder(app), &item.title, &ext));
-    std::fs::copy(src, &file).map_err(|e| format!("Couldn’t save to {}: {e}", file.display()))?;
+    // History keeps screenshots lossless; a JPEG is made only for the file saved from it (Settings → Image format,
+    // or a name ending in .jpg).
+    let is_jpg = |p: &Path| p.extension().map_or(false, |e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
+    let jpeg = item.kind != "recording" && ext.eq_ignore_ascii_case("png")
+        && target.as_deref().map_or_else(|| setting(app, "imageFormat").as_str() == Some("jpg"), is_jpg);
+    let file = target.unwrap_or_else(|| unique_path(&export_folder(app), &item.title, if jpeg { "jpg" } else { &ext }));
+    if !file.parent().map_or(false, |d| d.is_dir()) {
+        return Err(format!("The folder {} isn’t available. If it’s on a drive, connect it, or choose another in Settings → General → Export location.", file.parent().unwrap_or(&file).display()));
+    }
+    if jpeg {
+        let image = std::fs::read(&src).ok().and_then(|b| capture::decode(&b)).ok_or("Couldn’t read the capture.")?;
+        std::fs::write(&file, capture::jpeg(&image, setting(app, "jpegQuality").as_u64().unwrap_or(90) as u8)).map_err(|e| format!("Couldn’t save to {}: {e}", file.display()))?;
+    } else { std::fs::copy(src, &file).map_err(|e| format!("Couldn’t save to {}: {e}", file.display()))?; }
     Ok(file)
 }
 
@@ -635,9 +741,24 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let native = native_engine(&rec);
     let mut rec = rec;
     if cfg!(windows) { rec["engine"] = json!(if native.is_ok() { "auto" } else { "webview" }); }
-    let params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
+    let mut params = json!({ "rect": { "x": x, "y": y, "w": w, "h": h }, "imageWidth": iw, "imageHeight": ih, "selectedWindow": selected_window, "options": rec,
         "stopShortcut": setting(app, "shortcuts")["record"], "native": native.is_ok(), "nativeWhy": native.err() });
     let scale = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    let mut hud_spot = (grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32);
+    // Only Windows can keep the controls out of the video. On Linux they go just outside the recorded area, and when
+    // the area leaves no room (the whole screen) the recording blacks out their spot instead of showing them.
+    if cfg!(target_os = "linux") {
+        let display = marks::Area { x: grab.x as f64, y: grab.y as f64, w: iw as f64, h: ih as f64 };
+        let screen = app.monitor_from_point(grab.x as f64 + 1.0, grab.y as f64 + 1.0).ok().flatten()
+            .map(|m| { let a = m.work_area(); marks::Area { x: a.position.x as f64, y: a.position.y as f64, w: a.size.width as f64, h: a.size.height as f64 } })
+            .unwrap_or(display);
+        match marks::hud_outside(marks::Area { x: grab.x as f64 + x, y: grab.y as f64 + y, w, h }, screen, 300.0 * scale, 52.0 * scale, 8.0 * scale) {
+            Some(spot) => hud_spot = spot,
+            // Where Wayland places the window itself, its spot isn't known, so there's nothing to black out.
+            None if !wayland_windows() => params["hudMask"] = json!({ "x": hud_spot.0 - grab.x, "y": hud_spot.1 - grab.y, "w": 300.0 * scale, "h": 52.0 * scale }),
+            None => {}
+        }
+    }
     {
         let mut s = st(app).session.lock().unwrap();
         s.recording = Some(params.clone());
@@ -646,11 +767,14 @@ fn start_recording(app: &AppHandle, grab: &Grab, x: f64, y: f64, w: f64, h: f64,
     let _ = std::fs::remove_file(recording_part(app)); // Never let a previous recording's leftovers lead this one.
     let built = builder(app, "hud", "hud.html", params).title("Recording").inner_size(300.0, 52.0).decorations(false).transparent(true).shadow(false)
         .always_on_top(true).skip_taskbar(true).resizable(false).content_protected(true).on_permission_request(hud_access).build();
+    // Without its controls the recording could neither run nor be stopped, and every capture would be refused as
+    // busy: undo it and say why.
+    if let Err(e) = &built { stop_recording_state(app); notify(app, "Recording couldn’t start", &format!("The recording controls couldn’t open: {e}")); return; }
     if let Ok(hud) = built {
         media_on(&hud);
         let icons = desktop::hide(app);
         st(app).session.lock().unwrap().icons = icons;
-        let _ = hud.set_position(PhysicalPosition::new(grab.x + (iw as f64 / 2.0 - 150.0 * scale) as i32, grab.y + ih as i32 - (90.0 * scale) as i32));
+        let _ = hud.set_position(PhysicalPosition::new(hud_spot.0, hud_spot.1));
         let _ = hud.show(); let _ = hud.set_focus();
     }
     build_tray_menu(app);
@@ -670,13 +794,21 @@ fn window_gone(app: &AppHandle, label: &str) {
         }
         // Never keep watching the keyboard with nothing on screen to show for it.
         "marks" => { let listener = { let mut s = st(app).session.lock().unwrap(); s.marks = None; s.listener.take() }; drop(listener); }
-        _ if label.starts_with("video-") => { st(app).session.lock().unwrap().export_targets.remove(label); }
+        _ if label.starts_with("video-") => { st(app).session.lock().unwrap().export_targets.remove(label); let _ = std::fs::remove_file(export_part_path(label)); }
+        // A Capture Text page that closed without reporting back leaves nothing behind.
+        _ if label.starts_with("ocr-") => { st(app).session.lock().unwrap().qr.remove(label); let _ = std::fs::remove_file(ocr_file(label)); }
         "scroll" => scroll::stop(app, false),
         // A page that was only waiting, or that never answered, isn't part of the selection on screen.
         _ if label.starts_with("overlay-warm-") && !st(app).session.lock().unwrap().overlays.iter().any(|l| l == label) => {}
         _ if label.starts_with("overlay-") => {
-            let still_open = st(app).session.lock().unwrap().overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some());
-            if !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
+            // Only a window of the selection on screen ends it: one left over from a cancelled capture, closing while
+            // the next is being built, must not cancel that one.
+            let (mine, still_open) = {
+                let s = st(app).session.lock().unwrap();
+                let mine = s.overlays.iter().any(|l| l == label) || label.starts_with(&format!("overlay-{}-", s.generation));
+                (mine, s.overlays.iter().any(|l| l != label && app.get_webview_window(l).is_some()))
+            };
+            if mine && !still_open && st(app).session.lock().unwrap().busy { end_selection(app); }
         }
         _ => {}
     }
@@ -705,8 +837,9 @@ fn stop_recording_state(app: &AppHandle) {
 // ---- Camera bubble, clicks and keys -------------------------------------------------------------
 //
 // These are ordinary windows floating over the screen, so the screen capture records them where they overlap
-// the selection. The HUD is the only window kept out of the video (content_protected), so neither of these
-// may be protected, and the keys only ever exist on screen and in that video.
+// the selection. The HUD is the only window kept out of the video (content_protected on Windows; on Linux it sits
+// outside the selection or is blacked out, see `start_recording`), so neither of these may be protected, and the
+// keys only ever exist on screen and in that video.
 
 /// WebKitGTK has no permission prompt of its own: it says no to everything Still doesn't answer, and it ships
 /// with media capture switched off (see `media_on`). The user asked for the recording, so say yes here.
@@ -746,7 +879,15 @@ fn open_marks(app: &AppHandle, place: Recorded) {
     let options = marks::Options { area: place.area, clicks: setting(app, "recording.clicks").as_bool().unwrap_or(false), keys: setting(app, "recording.keys").as_bool().unwrap_or(false),
         shortcuts_only: setting(app, "recording.keysShortcutsOnly").as_bool().unwrap_or(true) };
     if !options.clicks && !options.keys { return; }
-    if !marks::available() { notify(app, "Clicks and keys are off", "Wayland doesn’t let apps see clicks or keys in other windows. Sign in to an X11 session to show them."); return; }
+    if !marks::available() {
+        // Once per run: the setting may have been turned on in an X11 session, and Settings can't switch it off here.
+        static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            notify(app, "Clicks and keys are off", if is_wayland() { "Wayland doesn’t let apps see clicks or keys in other windows. Sign in to an X11 session to show them." }
+                else { "This desktop doesn’t let apps see clicks or keys in other windows. They work in an X11 session." });
+        }
+        return;
+    }
     let (w, h) = (place.area.w, place.area.h);
     let built = builder(app, "marks", "marks.html", json!({})).title("Clicks and Keys").inner_size(w / place.scale, h / place.scale).decorations(false).transparent(true).shadow(false).resizable(false)
         .always_on_top(true).skip_taskbar(true).focusable(false).focused(false).visible_on_all_workspaces(true).build();
@@ -836,6 +977,8 @@ fn register_shortcuts(app: &AppHandle) {
         });
         if ok.is_err() { failed.push(action_key(accel, &shortcuts)); }
     }
+    // Clearing every shortcut above also took Escape from a capture that is open right now.
+    if WATCHING_ESCAPE.load(std::sync::atomic::Ordering::SeqCst) { watch_escape(app); }
     st(app).session.lock().unwrap().failed_shortcuts = failed.clone();
     broadcast(app, "shortcuts:status", json!(failed));
 }
@@ -859,10 +1002,12 @@ fn show_recording_time(app: &AppHandle, seconds: u64, paused: bool) {
 }
 
 /// The tray shows a plain ripple glyph, like other menu bar and tray icons: white on a dark taskbar or
-/// panel, black on a light Windows taskbar.
+/// panel, black on a light Windows taskbar. Linux panels can be light or dark and don't say which, so there the
+/// white glyph has a dark rim that shows it on either.
 fn tray_icon() -> tauri::image::Image<'static> {
     let light = cfg!(windows) && windows_light_taskbar();
-    let bytes: &'static [u8] = if light { include_bytes!("../icons/tray-black.png") } else { include_bytes!("../icons/tray-white.png") };
+    let bytes: &'static [u8] = if light { include_bytes!("../icons/tray-black.png") }
+        else if cfg!(target_os = "linux") { include_bytes!("../icons/tray-linux.png") } else { include_bytes!("../icons/tray-white.png") };
     tauri::image::Image::from_bytes(bytes).expect("tray icon")
 }
 /// Windows stores the taskbar's theme in SystemUsesLightTheme (1 = light).
@@ -947,7 +1092,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "settings" => open_settings(app, None),
-        "quit" => app.exit(0),
+        "quit" => { let app = app.clone(); std::thread::spawn(move || { save_recording_before_exit(&app); app.exit(0); }); }
         "open-image" => import_image(app),
         "unlock-pins" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") { let _ = w.set_ignore_cursor_events(false); } },
         "close-overlays" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") || l.starts_with("quick-") { let _ = w.close(); } },
@@ -1014,10 +1159,21 @@ fn set_update(app: &AppHandle, status: Value) {
 
 fn check_update(app: &AppHandle, manual: bool) {
     use tauri_plugin_updater::UpdaterExt;
+    // Never over a check that's running or an update on its way in: that put "Update to …" back in the tray and
+    // could start the same download twice.
+    {
+        let mut s = st(app).session.lock().unwrap();
+        if matches!(s.update["state"].as_str(), Some("checking" | "downloading" | "installing")) { return; }
+        s.update = json!({ "state": "checking" });
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        set_update(&app, json!({ "state": "checking" }));
+        // Shown only while still checking: an install started in the meantime keeps its "downloading".
+        let status = st(&app).session.lock().unwrap().update.clone();
+        if status["state"] == "checking" { set_update(&app, status); }
         let result = match app.updater() { Ok(u) => u.check().await.map_err(|e| e.to_string()), Err(e) => Err(e.to_string()) };
+        // An update that started downloading meanwhile keeps its place in the tray and the card.
+        if matches!(st(&app).session.lock().unwrap().update["state"].as_str(), Some("downloading" | "installing")) { return; }
         match result {
             Ok(Some(update)) => {
                 let version = update.version.clone();
@@ -1053,7 +1209,14 @@ fn show_update_prompt(app: &AppHandle, version: &str) {
 }
 
 fn install_update(app: &AppHandle) {
-    let Some(update) = st(app).session.lock().unwrap().pending_update.clone() else { return };
+    // One download at a time, however the request came.
+    let update = {
+        let mut s = st(app).session.lock().unwrap();
+        if matches!(s.update["state"].as_str(), Some("downloading" | "installing")) { return; }
+        let Some(update) = s.pending_update.clone() else { return };
+        s.update = json!({ "state": "downloading", "version": update.version });
+        update
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         set_update(&app, json!({ "state": "downloading", "version": update.version }));
@@ -1075,7 +1238,16 @@ fn install_update(app: &AppHandle) {
         // Still reopens by itself a few seconds after it closes.
         let (finish_app, finish_version) = (app.clone(), update.version.clone());
         let on_finish = move || set_update(&finish_app, json!({ "state": "installing", "version": finish_version }));
-        match update.download_and_install(on_chunk, on_finish).await {
+        // Installing ends Still, so a recording still running is stopped and saved before the installer starts.
+        let installed = match update.download(on_chunk, on_finish).await {
+            Ok(bytes) => {
+                let saving = app.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || save_recording_before_exit(&saving)).await;
+                update.install(bytes)
+            }
+            Err(e) => Err(e),
+        };
+        match installed {
             Ok(()) => app.restart(),
             Err(e) => { set_update(&app, json!({ "state": "error", "error": e.to_string() })); notify(&app, "Update failed", &e.to_string()); }
         }
@@ -1116,7 +1288,7 @@ fn apply_name_pattern(app: &AppHandle) {
 fn apply_history_days(app: &AppHandle) {
     let days = setting(app, "historyDays").as_u64().unwrap_or(0).min(3650) as u32;
     let removed = { let mut lib = st(app).library.lock().unwrap(); lib.keep_days = days; lib.prune(library::now_ms()) };
-    for id in &removed { close_preview(app, id); }
+    close_removed(app, &removed);
     if !removed.is_empty() { broadcast(app, "library:changed", Value::Null); }
 }
 fn after_settings(app: &AppHandle, patch: &Value) {
@@ -1126,6 +1298,8 @@ fn after_settings(app: &AppHandle, patch: &Value) {
     if patch.get("launchAtLogin").is_some() { apply_login_item(app); }
     if patch.get("quickAccess").is_some() { layout_previews(app); }
     if patch.get("claude").is_some() { apply_connector(app); }
+    // Turned on: check now rather than at the next check, up to six hours away.
+    if patch.get("autoUpdate") == Some(&Value::Bool(true)) { check_update(app, false); }
     build_tray_menu(app);
     let values = st(app).settings.lock().unwrap().values.clone();
     broadcast(app, "settings:changed", values);
@@ -1139,7 +1313,13 @@ async fn settings_choose_folder(app: AppHandle) -> Option<String> {
     Some(path)
 }
 #[tauri::command]
-async fn shortcuts_pause(app: AppHandle, paused: bool) { if paused { let _ = app.global_shortcut().unregister_all(); } else { register_shortcuts(&app); } }
+async fn shortcuts_pause(app: AppHandle, paused: bool) {
+    if paused {
+        let _ = app.global_shortcut().unregister_all();
+        // Recording a shortcut never takes Escape from a capture that is open.
+        if WATCHING_ESCAPE.load(std::sync::atomic::Ordering::SeqCst) { watch_escape(&app); }
+    } else { register_shortcuts(&app); }
+}
 
 #[tauri::command]
 async fn overlay_done(app: AppHandle, payload: Value) { let a = app.clone(); std::thread::spawn(move || finish_selection(&a, payload)); }
@@ -1148,9 +1328,14 @@ async fn overlay_cancel(app: AppHandle) { end_selection(&app); }
 #[tauri::command]
 async fn overlay_fullscreen(app: AppHandle, display_id: u32) { blocking(move || overlay_fullscreen_now(app, display_id)).await }
 fn overlay_fullscreen_now(app: AppHandle, display_id: u32) {
-    let grab = { let mut s = st(&app).session.lock().unwrap(); std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id) };
+    let (grab, text) = { let mut s = st(&app).session.lock().unwrap(); (std::mem::take(&mut s.grabs).into_iter().find(|g| g.id == display_id), s.purpose == "text") };
     end_selection(&app);
-    if let Some(g) = grab { complete_image(&app, g.image, false); }
+    if let Some(g) = grab {
+        // The whole display is the area Capture Previous Area repeats, as with any other.
+        let (w, h) = g.image.dimensions();
+        previous::remember(&app, &json!({ "px": { "x": 0, "y": 0, "w": w, "h": h } }), &g);
+        complete_image(&app, g.image, text);
+    }
 }
 #[tauri::command]
 async fn overlay_timer(app: AppHandle, delay: u64) {
@@ -1161,8 +1346,13 @@ async fn overlay_timer(app: AppHandle, delay: u64) {
         broadcast(&app, "overlay:timer", json!(delay.min(60)));
         return;
     }
-    // A recording or scrolling capture starts again after the countdown, as before.
-    if delay == 0 { return; }
+    // A recording or scrolling capture starts again after the countdown, as before. Off still clears a timer set
+    // before switching to one, so the bar stops showing it and it doesn't come back with Screenshot.
+    if delay == 0 {
+        st(&app).session.lock().unwrap().timer = 0;
+        broadcast(&app, "overlay:timer", json!(0));
+        return;
+    }
     end_selection(&app);
     start_selection(&app, &purpose, delay, false);
 }
@@ -1176,9 +1366,11 @@ async fn overlay_window_mode(app: AppHandle, on: bool) { broadcast(&app, "overla
 /// A waiting page reports in twice: once when it has loaded, and again when it has been given a screen.
 #[tauri::command]
 async fn overlay_ready(app: AppHandle, window: tauri::Window) {
-    let mut s = st(&app).session.lock().unwrap();
     let label = window.label().to_string();
-    if s.handing.as_deref() == Some(label.as_str()) { s.handing = None; } else { s.warm.push(label); }
+    // An answer that came too late, after its page was given up and closed, doesn't put that page back in line.
+    let alive = app.get_webview_window(&label).is_some();
+    let mut s = st(&app).session.lock().unwrap();
+    if s.handing.as_deref() == Some(label.as_str()) { s.handing = None; } else if alive && !s.warm.contains(&label) { s.warm.push(label); }
 }
 /// A colour picked in the capture overlay: copied as #RRGGBB and kept at the front of the recent colours that the
 /// editor offers.
@@ -1244,10 +1436,18 @@ async fn library_get(app: AppHandle, id: String) -> Value {
     match lib.get(&id) { Some(item) => { let mut v = item_json(&lib, &item); v["project"] = lib.project(&id).unwrap_or(Value::Null); v } None => Value::Null }
 }
 #[tauri::command]
-async fn library_rename(app: AppHandle, id: String, title: String) { st(&app).library.lock().unwrap().update(&id, |i| i.title = title); broadcast(&app, "library:changed", Value::Null); }
+async fn library_rename(app: AppHandle, id: String, title: String) -> Result<(), String> {
+    st(&app).library.lock().unwrap().update(&id, |i| i.title = title).map_err(|e| format!("Couldn’t save History: {e}"))?;
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(())
+}
 /// Stars a capture in History, or takes the star off.
 #[tauri::command]
-async fn library_star(app: AppHandle, id: String, starred: bool) { st(&app).library.lock().unwrap().update(&id, |i| i.starred = starred); broadcast(&app, "library:changed", Value::Null); }
+async fn library_star(app: AppHandle, id: String, starred: bool) -> Result<(), String> {
+    st(&app).library.lock().unwrap().update(&id, |i| i.starred = starred).map_err(|e| format!("Couldn’t save History: {e}"))?;
+    broadcast(&app, "library:changed", Value::Null);
+    Ok(())
+}
 #[tauri::command]
 async fn library_delete(app: AppHandle, id: String) -> Result<(), String> {
     close_preview(&app, &id);
@@ -1283,6 +1483,8 @@ async fn library_save_as(app: AppHandle, id: String) -> Result<Option<String>, S
 fn library_save_as_now(app: AppHandle, id: String) -> Result<Option<String>, String> {
     let item = st(&app).library.lock().unwrap().get(&id).ok_or("That capture no longer exists.")?;
     let ext = Path::new(&item.file_name).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "png".into());
+    // Suggests the format Settings asks for; export_item makes the JPEG from History's lossless copy.
+    let ext = if ext == "png" && item.kind != "recording" && setting(&app, "imageFormat").as_str() == Some("jpg") { "jpg".to_string() } else { ext };
     let Some(target) = app.dialog().file().set_directory(export_folder(&app)).set_file_name(format!("{}.{ext}", item.title)).blocking_save_file().and_then(|f| f.into_path().ok()) else { return Ok(None) };
     export_item(&app, &id, Some(target)).map(|p| Some(p.to_string_lossy().to_string()))
 }
@@ -1328,6 +1530,8 @@ async fn library_similar(app: AppHandle, id: String) -> Result<Vec<Value>, Strin
 /// capture, closest first. Only the files found are remembered, so History can open or show only those.
 static FOLDER_MATCHES: std::sync::OnceLock<Mutex<Vec<PathBuf>>> = std::sync::OnceLock::new();
 const FOLDER_SCAN_LIMIT: usize = 5000;
+/// Files and folders looked at in all, so a huge folder with few pictures (a whole drive, say) still finishes.
+const FOLDER_ENTRY_LIMIT: usize = 200_000;
 #[tauri::command]
 async fn library_similar_in_folder(app: AppHandle, id: String) -> Result<Value, String> {
     let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be compared.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
@@ -1338,20 +1542,26 @@ async fn library_similar_in_folder(app: AppHandle, id: String) -> Result<Value, 
         let target = std::fs::read(&file).ok().and_then(|b| capture::decode(&b)).map(|i| similar::fingerprint(&i)).ok_or("Couldn’t read this screenshot.")?;
         let mut files = Vec::new();
         let mut stack = vec![scan];
+        let mut seen = 0;
         while let Some(dir) = stack.pop() {
             let Ok(entries) = std::fs::read_dir(&dir) else { continue };
             for entry in entries.flatten() {
+                seen += 1;
+                if seen >= FOLDER_ENTRY_LIMIT { break; }
                 let path = entry.path();
                 let hidden = path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.'));
                 if hidden { continue; }
-                if path.is_dir() { stack.push(path); continue; }
+                // Links to folders aren't followed: one pointing back up the tree would be walked over and over.
+                let Ok(kind) = entry.file_type() else { continue };
+                if kind.is_dir() { stack.push(path); continue; }
+                if kind.is_symlink() && !path.is_file() { continue; }
                 let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
                 if matches!(ext.as_str(), "png" | "jpg" | "jpeg") { files.push(path); }
                 if files.len() >= FOLDER_SCAN_LIMIT { break; }
             }
-            if files.len() >= FOLDER_SCAN_LIMIT { break; }
+            if files.len() >= FOLDER_SCAN_LIMIT || seen >= FOLDER_ENTRY_LIMIT { break; }
         }
-        let capped = files.len() >= FOLDER_SCAN_LIMIT;
+        let capped = files.len() >= FOLDER_SCAN_LIMIT || seen >= FOLDER_ENTRY_LIMIT;
         let prints: Vec<(String, u64)> = files.iter().filter_map(|f| {
             // Big photos are slow to decode in full; anything over 40 MB is passed over.
             if std::fs::metadata(f).map(|m| m.len() > 40_000_000).unwrap_or(true) { return None; }
@@ -1402,7 +1612,7 @@ async fn library_describe(app: AppHandle, id: String) -> Result<String, String> 
     let bytes = std::fs::read(&file).map_err(|e| format!("Couldn’t read the screenshot: {e}"))?;
     let mime = if file.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) { "image/jpeg" } else { "image/png" };
     let text = describe_bytes(&app, mime, &bytes).await?;
-    st(&app).library.lock().unwrap().update(&id, |i| i.description = text.clone());
+    st(&app).library.lock().unwrap().update(&id, |i| i.description = text.clone()).map_err(|e| format!("Couldn’t save History: {e}"))?;
     broadcast(&app, "library:changed", Value::Null);
     Ok(text)
 }
@@ -1513,10 +1723,18 @@ async fn connector_call(app: &AppHandle, name: &str, args: &Value) -> Value {
         _ => mcp::text_result(&format!("Still has no tool called {name}."), true),
     }
 }
+/// Where Still can be started from later. A Linux AppImage runs from a temporary folder that's gone once it quits, so
+/// Claude is given the AppImage itself instead.
+fn stable_exe() -> std::io::Result<PathBuf> {
+    #[cfg(target_os = "linux")] {
+        if let Some(image) = std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|p| p.is_file()) { return Ok(image); }
+    }
+    std::env::current_exe()
+}
 /// For Settings: the line to paste into Claude's settings, with this computer's path to Still.
 #[tauri::command]
 async fn connector_info() -> Value {
-    let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let exe = stable_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     json!({ "command": exe, "args": ["--mcp"],
         "desktop": serde_json::to_string_pretty(&json!({ "mcpServers": { "still": { "command": exe, "args": ["--mcp"] } } })).unwrap_or_default(),
         "code": format!("claude mcp add --scope user still -- \"{exe}\" --mcp") })
@@ -1528,7 +1746,7 @@ async fn connector_add_to_claude(app: AppHandle) -> Result<bool, String> {
     let patch = json!({ "claude": { "connector": true } });
     st(&app).settings.lock().unwrap().update(&patch);
     after_settings(&app, &patch);
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().to_string();
+    let exe = stable_exe().map_err(|e| e.to_string())?.to_string_lossy().to_string();
     let bytes = mcpb::bundle(&app.package_info().version.to_string(), &exe, platform(), include_bytes!("../../web/icon.png"))?;
     let file = app.path().app_data_dir().map_err(|e| e.to_string())?.join("Still.mcpb");
     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
@@ -1637,15 +1855,16 @@ async fn editor_save_raw(app: AppHandle, request: tauri::ipc::Request<'_>) -> Re
     blocking(move || editor_save_bytes(app, id, bytes, project)).await
 }
 fn editor_save_bytes(app: AppHandle, id: String, bytes: Vec<u8>, project: Value) -> Result<String, String> {
-    // The page's PNG is already lossless, so unless JPEG is wanted it can go straight to disk.
-    let (encoded, ext, (w, h)) = match capture::png_size(&bytes).filter(|_| setting(&app, "imageFormat").as_str() != Some("jpg")) {
+    // The page's PNG is already lossless and goes straight to disk: History keeps edits lossless too, and
+    // Settings → Image format applies to the files saved from it.
+    let (encoded, ext, (w, h)) = match capture::png_size(&bytes) {
         Some(size) => (bytes, "png", size),
-        None => { let image = capture::decode(&bytes).ok_or("Bad image")?; let (encoded, ext) = encode(&app, &image); (encoded, ext, image.dimensions()) }
+        None => { let image = capture::decode(&bytes).ok_or("Bad image")?; (capture::png(&image), "png", image.dimensions()) }
     };
     let mut lib = st(&app).library.lock().unwrap();
     // An editor whose capture was deleted mustn't quietly re-create it on autosave.
     if !id.is_empty() && lib.get(&id).is_none() { return Err("That capture no longer exists.".into()); }
-    let id = if !id.is_empty() { lib.replace_file(&id, &encoded, ext)?; lib.update(&id, |i| { i.width = w; i.height = h; }); id }
+    let id = if !id.is_empty() { lib.replace_file(&id, &encoded, ext)?; lib.update(&id, |i| { i.width = w; i.height = h; })?; id }
         else { lib.add(&encoded, "screenshot", ext, None, w, h)?.id };
     lib.save_project(&id, &project)?;
     let item = lib.get(&id).filter(library::wants_thumb);
@@ -1813,10 +2032,12 @@ async fn capture_action(app: AppHandle, action: String) { run_action(&app, &acti
 #[tauri::command]
 async fn ocr_result(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) { blocking(move || ocr_result_now(app, window, text, error)).await }
 fn ocr_result_now(app: AppHandle, window: tauri::Window, text: String, error: Option<String>) {
-    let _ = window.close();
-    if let Ok(entries) = std::fs::read_dir(private_temp()) { for e in entries.flatten() { if e.file_name().to_string_lossy().starts_with("still-ocr-") { let _ = std::fs::remove_file(e.path()); } } }
-    // A large, noisy picture can keep the QR scan busy for many seconds. The text shouldn't wait for that.
+    // The QR scan is taken before the window goes: closing it clears whatever is left of this run.
     let scan = st(&app).session.lock().unwrap().qr.remove(window.label());
+    let _ = window.close();
+    // Only this run's picture: another Capture Text can still be reading its own.
+    let _ = std::fs::remove_file(ocr_file(window.label()));
+    // A large, noisy picture can keep the QR scan busy for many seconds. The text shouldn't wait for that.
     let codes = scan.and_then(|s| s.recv_timeout(Duration::from_secs(2)).ok()).unwrap_or_default();
     if let Some(dir) = st(&app).session.lock().unwrap().selftest.clone() { let _ = std::fs::write(dir.join("ocr.txt"), &text); return; }
     // A failed OCR run still has the QR codes to give.
@@ -1869,7 +2090,16 @@ fn native_part() -> PathBuf { private_temp().join(format!("still-native-{}.mp4",
 /// Starts Still's own recorder on the area chosen for this recording.
 #[tauri::command]
 async fn recording_begin(app: AppHandle) -> Result<(), String> { blocking(move || recording_begin_now(app)).await }
+/// Still's own recorder is starting, which can take several seconds (sound devices, the encoder). A stop that arrives
+/// meanwhile waits for it rather than deciding the controls have stopped answering.
+static NATIVE_STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn recording_begin_now(app: AppHandle) -> Result<(), String> {
+    NATIVE_STARTING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let started = start_native(app);
+    NATIVE_STARTING.store(false, std::sync::atomic::Ordering::SeqCst);
+    started
+}
+fn start_native(app: AppHandle) -> Result<(), String> {
     let (params, place) = { let s = st(&app).session.lock().unwrap(); (s.recording.clone(), s.recorded) };
     let (Some(params), Some(place)) = (params, place) else { return Err("There is no recording to start.".into()) };
     let rect = &params["rect"];
@@ -1887,9 +2117,15 @@ fn recording_begin_now(app: AppHandle) -> Result<(), String> {
     };
     let separate = !options.cursor && params["options"]["cursorEffects"].as_bool().unwrap_or(false);
     let handle = record::start(options)?;
-    st(&app).session.lock().unwrap().cursor_separate = separate;
-    if !handle.warnings.is_empty() { notify(&app, "Recording without some sound", &handle.warnings.join(" ")); }
-    st(&app).session.lock().unwrap().recorder = Some(Arc::new(handle));
+    let warnings = handle.warnings.join(" ");
+    {
+        let mut s = st(&app).session.lock().unwrap();
+        // Stopped or cancelled while the recorder was starting: it must not go on recording with no controls.
+        if s.recording.is_none() { drop(s); handle.cancel(); return Err("The recording was stopped before it started.".into()); }
+        s.cursor_separate = separate;
+        s.recorder = Some(Arc::new(handle));
+    }
+    if !warnings.is_empty() { notify(&app, "Recording without some sound", &warnings); }
     Ok(())
 }
 #[tauri::command]
@@ -1909,12 +2145,19 @@ async fn recording_restart(app: AppHandle) {
 
 /// Ends a recording made by Still's own recorder and puts it in the library.
 fn finish_native(app: &AppHandle) -> Result<(), String> {
+    let _saving = Saving::begin();
     let Some(recorder) = st(app).session.lock().unwrap().recorder.take() else { return Ok(()) }; // Already finished.
     let finished = recorder.stop();
+    // Nothing worth keeping came of it: make sure the recorder lets go of the file, which it then deletes.
+    if finished.is_err() { recorder.cancel(); }
     let saved = finished.and_then(|f| {
         if std::fs::metadata(&f.path).map(|m| m.len()).unwrap_or(0) == 0 { let _ = std::fs::remove_file(&f.path); return Err("The recording’s file couldn’t be read.".into()); }
         eprintln!("[recording] {} frames, {} dropped, hardware encoder: {}", f.frames, f.dropped, f.hardware);
-        store_recording(app, &f.path, "mp4", f.duration)
+        store_recording(app, &f.path, "mp4", f.duration)?;
+        // The recorder ran into a problem partway (a full disk, say): what it recorded until then is saved, and the
+        // user hears why the recording ends early.
+        if let Some(problem) = &f.problem { notify(app, "Recording stopped early", &format!("Recording ran into a problem ({problem}), so Still saved the video it had recorded until then.")); }
+        Ok(())
     });
     if let Err(e) = &saved { stop_recording_state(app); notify(app, "Recording couldn’t be saved", e); }
     saved
@@ -1956,7 +2199,12 @@ fn append_recording(app: &AppHandle, bytes: &[u8], ext: &str) -> Result<(), Stri
         s.recording_ext = if ext == "mp4" { "mp4".into() } else { "webm".into() };
     }
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(recording_part(&app)).map_err(|e| e.to_string())?;
-    std::io::Write::write_all(&mut file, bytes).map_err(|e| e.to_string())
+    let before = file.metadata().map(|m| m.len()).ok();
+    std::io::Write::write_all(&mut file, bytes).map_err(|e| {
+        // A second only partly written (a full disk, say) is cut off again, so what was saved before it still plays.
+        if let Some(len) = before { let _ = file.set_len(len); }
+        e.to_string()
+    })
 }
 /// Restart throws the recording away and begins again.
 #[tauri::command]
@@ -1989,6 +2237,7 @@ fn salvage_recording(app: &AppHandle) -> bool {
 /// Puts a finished recording in the library and does what the After Recording settings ask.
 /// The file is moved into the library (see Library::add_file); if that fails it's moved to the Desktop instead.
 fn store_recording(app: &AppHandle, file: &std::path::Path, ext: &str, duration: f64) -> Result<(), String> {
+    let _saving = Saving::begin();
     let (trail, separate) = { let mut s = st(app).session.lock().unwrap(); (s.trail.take().map(marks::Trail::finish), std::mem::take(&mut s.cursor_separate)) };
     stop_recording_state(app);
     let added = st(app).library.lock().unwrap().add_file(file, "recording", ext, None, 0, 0);
@@ -2003,7 +2252,7 @@ fn store_recording(app: &AppHandle, file: &std::path::Path, ext: &str, duration:
             };
         }
     };
-    st(app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
+    let _ = st(app).library.lock().unwrap().update(&item.id, |i| i.duration = duration);
     // The video editor reads the path and clicks from here, and keeps its own settings beside them.
     let mut project = trail.filter(|t| t["pointer"].as_array().is_some_and(|p| !p.is_empty())).unwrap_or(Value::Null);
     if separate { if project.is_null() { project = json!({}); } project["cursor"] = json!("separate"); }
@@ -2027,12 +2276,51 @@ fn request_stop(app: &AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(8));
         if st(&app).session.lock().unwrap().recording.is_none() { return; }
-        if !salvage_recording(&app) { notify(&app, "Recording stopped", "The recording controls stopped responding before any video was captured."); }
+        stop_unanswered(&app);
     });
+}
+/// Ends a recording the controls didn't end when asked. Still's own recorder may only have been starting, or the
+/// video already on its way into the library: either is let finish first, so neither is mistaken for silence.
+fn stop_unanswered(app: &AppHandle) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while (NATIVE_STARTING.load(std::sync::atomic::Ordering::SeqCst) || SAVING.load(std::sync::atomic::Ordering::SeqCst) > 0) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if st(app).session.lock().unwrap().recorder.is_some() { let _ = finish_native(app); return; }
+    if st(app).session.lock().unwrap().recording.is_none() { return; }
+    if !salvage_recording(app) { notify(app, "Recording stopped", "The recording controls stopped responding before any video was captured."); }
+}
+
+/// Recordings being finished or moved into the library right now. Until then the video is in Still's temporary
+/// folder, which is emptied when Still quits, so quitting waits for them.
+static SAVING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+struct Saving;
+impl Saving { fn begin() -> Self { SAVING.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Saving } }
+impl Drop for Saving { fn drop(&mut self) { SAVING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }
+
+/// Quitting or installing an update mid-recording stops and saves the recording first, rather than emptying the
+/// temporary folder with the video still in it. Returns once it is saved, or once saving has had its chance.
+fn save_recording_before_exit(app: &AppHandle) {
+    let (recording, native) = { let s = st(app).session.lock().unwrap(); (s.recording.is_some(), s.recorder.is_some()) };
+    if native { let _ = finish_native(app); }
+    else if recording {
+        let _ = app.emit_to("hud", "hud:stop", ());
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while st(app).session.lock().unwrap().recording.is_some() && std::time::Instant::now() < deadline { std::thread::sleep(Duration::from_millis(100)); }
+        stop_unanswered(app);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while SAVING.load(std::sync::atomic::Ordering::SeqCst) > 0 && std::time::Instant::now() < deadline { std::thread::sleep(Duration::from_millis(100)); }
 }
 
 #[tauri::command]
-async fn recording_tick(app: AppHandle, seconds: u64, paused: bool) { show_recording_time(&app, seconds, paused); }
+async fn recording_tick(app: AppHandle, seconds: u64, paused: bool) {
+    show_recording_time(&app, seconds, paused);
+    // Still's own recorder stopped by itself (a full disk, say): end the recording now and keep what it recorded,
+    // rather than letting the clock run on with nothing being recorded.
+    let failed = st(&app).session.lock().unwrap().recorder.as_ref().is_some_and(|r| r.failed());
+    if failed { std::thread::spawn(move || { let _ = finish_native(&app); }); }
+}
 
 // ---- Video editor -------------------------------------------------------------------------------
 
@@ -2074,7 +2362,8 @@ async fn video_export_save(app: AppHandle, window: tauri::Window, request: tauri
     video::save_bytes(&private_temp(), bytes, &target)?;
     Ok(target.to_string_lossy().to_string())
 }
-fn export_part_file(window: &tauri::Window) -> PathBuf { private_temp().join(format!("still-export-{}-{}.part", std::process::id(), window.label())) }
+fn export_part_file(window: &tauri::Window) -> PathBuf { export_part_path(window.label()) }
+fn export_part_path(label: &str) -> PathBuf { private_temp().join(format!("still-export-{}-{label}.part", std::process::id())) }
 /// One piece of an export on its way to disk; the first piece starts the file again.
 #[tauri::command]
 async fn video_export_part(window: tauri::Window, request: tauri::ipc::Request<'_>) -> Result<(), String> {
@@ -2082,8 +2371,10 @@ async fn video_export_part(window: tauri::Window, request: tauri::ipc::Request<'
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected part of the exported file".into()) };
     let first = request.headers().get("x-first").map(|v| v.as_bytes() == b"1").unwrap_or(false);
     let file = export_part_file(&window);
-    let mut out = std::fs::OpenOptions::new().create(true).write(true).append(!first).truncate(first).open(&file).map_err(|e| format!("Couldn’t write the export: {e}"))?;
-    out.write_all(bytes).map_err(|e| format!("Couldn’t write the export: {e}"))
+    // A piece that can't be written ends the export, so what came before it goes too: it would only take up room on
+    // a disk that's most likely full.
+    let written = std::fs::OpenOptions::new().create(true).write(true).append(!first).truncate(first).open(&file).and_then(|mut out| out.write_all(bytes));
+    written.map_err(|e| { let _ = std::fs::remove_file(&file); format!("Couldn’t write the export: {e}") })
 }
 /// A picture made in the video editor (a frame, or a storyboard of frames): added to History, copied, and opened in
 /// the image editor when asked.
@@ -2110,7 +2401,12 @@ fn video_music_choose_now(app: AppHandle, window: tauri::Window) -> Result<Optio
     let ext = picked.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).filter(|e| e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric())).unwrap_or_else(|| "mp3".into());
     let folder = source.parent().ok_or("This recording has no folder.")?;
     let target = folder.join(format!("music.{ext}"));
-    std::fs::copy(&picked, &target).map_err(|e| format!("Couldn’t copy the music: {e}"))?;
+    // The copy already beside the recording stays as it is (copying a file onto itself empties it). Anything else
+    // is copied under a temporary name and renamed into place, so a failed copy never empties the music there.
+    if !(target.exists() && video::is_same_file(&picked, &target)) {
+        let temp = folder.join(format!("music-{}.part", std::process::id()));
+        std::fs::copy(&picked, &temp).and_then(|_| std::fs::rename(&temp, &target)).map_err(|e| { let _ = std::fs::remove_file(&temp); format!("Couldn’t copy the music: {e}") })?;
+    }
     let name = picked.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Music".into());
     Ok(Some(json!({ "name": name, "path": target.to_string_lossy() })))
 }
@@ -2304,6 +2600,13 @@ fn run_args(app: &AppHandle, args: &[String]) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if desktop::watch() { return; }
+    // Wayland doesn't let an app place its own windows or keep them above others, and the capture overlays (one over
+    // each display) and the recording controls need both. When the desktop runs X11 apps too, Still's windows go that
+    // way instead. A backend chosen with GDK_BACKEND is left alone.
+    #[cfg(target_os = "linux")] {
+        let set = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
+        if std::env::var_os("GDK_BACKEND").is_none() && set("WAYLAND_DISPLAY") && set("DISPLAY") { gdk::set_allowed_backends("x11"); }
+    }
     tauri::Builder::default()
         .on_window_event(|window, event| if let tauri::WindowEvent::Destroyed = event { window_gone(window.app_handle(), window.label()); })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| { if !run_args(app, &args) { open_settings(app, None); } }))
@@ -2356,9 +2659,10 @@ pub fn run() {
                 std::thread::spawn({ let h = handle.clone(); move || { std::thread::sleep(Duration::from_secs(2)); self_test(h, dir) } });
                 return Ok(());
             }
-            if setting(&handle, "autoUpdate").as_bool().unwrap_or(true) {
+            // "Check for updates automatically" is read each time, so turning it off or on works without a restart.
+            {
                 let h = handle.clone();
-                std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(10)); check_update(&h, false); std::thread::sleep(Duration::from_secs(6 * 3600)); });
+                std::thread::spawn(move || loop { std::thread::sleep(Duration::from_secs(10)); if setting(&h, "autoUpdate").as_bool().unwrap_or(true) { check_update(&h, false); } std::thread::sleep(Duration::from_secs(6 * 3600)); });
             }
             if run_args(&handle, &args) {}
             else if args.iter().any(|a| a == "--editor-demo") { open_editor(&handle, None, false); }

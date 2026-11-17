@@ -11,6 +11,12 @@ test('plans a centred square and keeps the shape when only the width is given', 
   assert.deepStrictEqual(F.plan({ w: 800, h: 1200 }, { square: true }), { crop: { x: 0, y: 200, w: 800, h: 800 }, w: 800, h: 800 });
 });
 
+test('a very tall picture keeps its shape when it is brought under the largest side', () => {
+  assert.deepStrictEqual(F.plan({ w: 1200, h: 10000 }), { crop: { x: 0, y: 0, w: 1200, h: 10000 }, w: 960, h: 8000 });
+  assert.deepStrictEqual(F.plan({ w: 1000, h: 10000 }, { width: 2000 }), { crop: { x: 0, y: 0, w: 1000, h: 10000 }, w: 800, h: 8000 });
+  assert.deepStrictEqual(F.plan({ w: 20000, h: 1000 }), { crop: { x: 0, y: 0, w: 20000, h: 1000 }, w: 8000, h: 400 });
+});
+
 test('no limit: full size at the top quality', async () => {
   const r = await F.fit(fake(100, 100), {});
   assert.deepStrictEqual([r.scale, r.quality, r.fits], [1, 0.92, true]);

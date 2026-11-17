@@ -45,7 +45,8 @@ import StillCore
         processing = true
         defer { processing = false; if finishing { complete() } }
         do {
-            let image = try await ScreenCaptureAPI.image(screen: display, rect: rect, filter: filter)
+            // Never the cursor: it would be stamped into every strip added to the long image.
+            let image = try await ScreenCaptureAPI.image(screen: display, rect: rect, filter: filter, showsCursor: false)
             let added = try await Task.detached(priority: .userInitiated) { try stitcher.append(image) }.value
             // Only the size is shown while capturing; the finished picture is drawn once, at Done.
             if added { let size = stitcher.resultSize; frames = stitcher.frameCount; dimensions = "\(size.width) × \(size.height)"; message = "Capturing… scroll slowly, then click Done." }
