@@ -14,11 +14,18 @@ fn http() -> Result<reqwest::Client, String> {
     reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).build().map_err(|e| e.to_string())
 }
 
+/// Room for the answer. Flash models think before answering and the thinking counts against this limit, so a busy
+/// screenshot could use it all up and leave no description; the prompt keeps the answer itself short.
+pub const MAX_OUTPUT_TOKENS: u32 = 2048;
+
 /// The request body for one picture (PNG or JPEG bytes, base64-encoded).
 pub fn body(mime: &str, base64: &str) -> Value {
     json!({ "contents": [{ "parts": [{ "text": PROMPT }, { "inline_data": { "mime_type": mime, "data": base64 } }] }],
-        "generationConfig": { "temperature": 0.2, "maxOutputTokens": 300 } })
+        "generationConfig": { "temperature": 0.2, "maxOutputTokens": MAX_OUTPUT_TOKENS } })
 }
+
+/// An answer that ran out of room before any description came (all of it went on thinking).
+pub fn ran_out(response: &Value) -> bool { response["candidates"][0]["finishReason"] == "MAX_TOKENS" && text_of(response).is_err() }
 
 /// The description in a response: its text parts joined, trimmed. Errors say what went wrong in plain words.
 pub fn text_of(response: &Value) -> Result<String, String> {
@@ -85,6 +92,11 @@ pub async fn describe(key: &str, mime: &str, base64: &str) -> Result<String, Str
         let model = pick_model(&list).ok_or("This Gemini key has no Flash model to describe pictures with.")?;
         let (_, response) = call(&client, key, &model, &request).await?;
         return text_of(&response);
+    }
+    // Out of room with nothing written: the lighter model, which doesn't think first, is asked instead.
+    if status == 200 && ran_out(&response) {
+        let (lite_status, lite_response) = call(&client, key, LITE_MODEL, &request).await?;
+        if lite_status == 200 { response = lite_response; }
     }
     text_of(&response)
 }
@@ -203,5 +215,15 @@ mod tests {
         let b = body("image/png", "AAAA");
         assert_eq!(b["contents"][0]["parts"][1]["inline_data"]["mime_type"], "image/png");
         assert_eq!(b["contents"][0]["parts"][0]["text"], PROMPT);
+        // Thinking counts against the limit, so it leaves room for the description after it.
+        assert!(b["generationConfig"]["maxOutputTokens"].as_u64().unwrap() >= 2048);
+    }
+    #[test]
+    fn an_answer_that_ran_out_of_room_is_noticed() {
+        let empty = json!({ "candidates": [{ "content": { "parts": [] }, "finishReason": "MAX_TOKENS" }] });
+        assert!(ran_out(&empty));
+        assert!(text_of(&empty).unwrap_err().contains("MAX_TOKENS"));
+        let cut = json!({ "candidates": [{ "content": { "parts": [{ "text": "A settings page" }] }, "finishReason": "MAX_TOKENS" }] });
+        assert!(!ran_out(&cut), "a cut-off description is still a description");
     }
 }

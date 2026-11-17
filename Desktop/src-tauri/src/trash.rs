@@ -34,8 +34,19 @@ pub fn move_to_trash(file: &Path) -> Result<(), String> {
     while files.join(&target).exists() || info.join(format!("{target}.trashinfo")).exists() { n += 1; target = format!("{stem} {n}{ext}"); }
     let when = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
     let path: String = file.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() || "/-_.~".contains(c) { c.to_string() } else { c.to_string().bytes().map(|b| format!("%{b:02X}")).collect() }).collect();
-    std::fs::write(info.join(format!("{target}.trashinfo")), format!("[Trash Info]\nPath={path}\nDeletionDate={when}\n")).map_err(|e| e.to_string())?;
-    std::fs::rename(file, files.join(&target)).or_else(|_| std::fs::copy(file, files.join(&target)).map(|_| ()).and_then(|_| std::fs::remove_file(file))).map_err(|e| e.to_string())
+    // The info file comes first and claims the name; if the move then fails, it goes again, along with any part of
+    // a copy, so the Trash never lists something that isn't there or holds a second copy of a capture kept in History.
+    let (info_file, dest) = (info.join(format!("{target}.trashinfo")), files.join(&target));
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&info_file).map_err(|e| e.to_string())?;
+        if let Err(e) = f.write_all(format!("[Trash Info]\nPath={path}\nDeletionDate={when}\n").as_bytes()) { drop(f); let _ = std::fs::remove_file(&info_file); return Err(e.to_string()); }
+    }
+    let moved = std::fs::rename(file, &dest).or_else(|_| {
+        std::fs::copy(file, &dest).map(|_| ()).and_then(|_| std::fs::remove_file(file)).map_err(|e| { let _ = std::fs::remove_file(&dest); e })
+    });
+    if let Err(e) = moved { let _ = std::fs::remove_file(&info_file); return Err(e.to_string()); }
+    Ok(())
 }
 
 #[cfg(test)]

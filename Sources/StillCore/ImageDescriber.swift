@@ -11,10 +11,13 @@ public enum ImageDescriber {
 
     public struct Failure: LocalizedError { public let message: String; public init(message: String) { self.message = message }; public var errorDescription: String? { message } }
 
+    /// Room for the answer. Flash models think before answering and the thinking counts against this limit, so a busy
+    /// screenshot could use it all up and leave no description; the prompt keeps the answer itself short.
+    public static let maxOutputTokens = 2048
     /// The request body for one picture (PNG or JPEG data).
     public static func body(mime: String, data: Data) -> [String: Any] {
         ["contents": [["parts": [["text": prompt], ["inline_data": ["mime_type": mime, "data": data.base64EncodedString()]]]]],
-         "generationConfig": ["temperature": 0.2, "maxOutputTokens": 300]]
+         "generationConfig": ["temperature": 0.2, "maxOutputTokens": maxOutputTokens]]
     }
     /// The description in a response: its text parts joined and trimmed, or why there isn't one, in plain words.
     public static func text(of response: [String: Any]) -> Result<String, Failure> {
