@@ -272,9 +272,25 @@ const pages = {
     el('span', { style: 'color:var(--text-2)' }, `Version ${prefs.version} for ${prefs.platform === 'win32' ? 'Windows' : 'Linux'}`),
     el('span', { style: 'color:var(--text-2);max-width:380px' }, 'Captures and text recognition stay on your computer.'),
     updateBox(),
-    el('button', { class: 'btn', onclick: () => still.send('open:history') }, 'Open Capture History')
+    el('button', { class: 'btn', onclick: () => still.send('open:history') }, 'Open Capture History'),
+    reportBox()
   ])]
 };
+
+// Report a Problem: saves a plain-text report (version, system, displays, settings without keys, recent log) and
+// opens the page to describe what went wrong. Nothing is sent: the user looks the file over and attaches it.
+function reportBox() {
+  const button = el('button', { class: 'btn', onclick: async () => {
+    button.disabled = true;
+    try { const name = await still.invoke('report:problem'); toast(`Saved “${name}”. Attach it to your report.`); }
+    catch (error) { toast(explain(error)); }
+    finally { button.disabled = false; }
+  } }, 'Report a Problem…');
+  return el('div', { style: 'display:grid;gap:6px;justify-items:center;margin-top:var(--space-3)' }, [
+    button,
+    el('span', { class: 'hint', style: 'max-width:380px;margin:0' }, 'Saves a report to your Desktop and opens a page to describe the problem. The report stays on your computer until you attach it.')
+  ]);
+}
 
 let updateStatus = { state: 'idle' };
 function updateText(status) {

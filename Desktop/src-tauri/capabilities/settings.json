@@ -21,6 +21,7 @@
     "allow-ai-set-key",
     "allow-connector-info",
     "allow-connector-add-to-claude",
-    "allow-library-list"
+    "allow-library-list",
+    "allow-report-problem"
   ]
 }

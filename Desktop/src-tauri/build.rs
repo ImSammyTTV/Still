@@ -11,5 +11,6 @@ fn main() {
         "recording_listen", "recording_finished", "camera_failed", "recording_cancel", "recording_error", "recording_chunk", "recording_reset", "recording_save", "recording_begin", "recording_stop", "recording_pause", "recording_restart", "recording_tick", "video_export_target", "video_export_save", "video_export_part", "editor_save_raw", "picture_raw", "recording_chunk_raw",
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",
         "library_combine", "library_star", "video_music_choose", "video_image_save", "countdown_cancel", "library_similar", "library_similar_in_folder", "library_folder_match", "library_search_web", "library_describe", "library_send_to_claude", "connector_info", "connector_add_to_claude", "ai_get", "ai_set_key", "scroll_stop", "scroll_auto",
+        "report_problem",
     ]))).expect("failed to run tauri-build");
 }

@@ -100,6 +100,11 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     space on the disk", not a long technical error.
 24. **Recording with no sound.** Use Tighten Pauses on a recording made without a microphone. It should simply say
     the recording has no sound.
+25. **Report a Problem (Windows, Linux).** Settings → About → Report a Problem… (or the tray menu). A file named
+    "Still problem report …" appears on the Desktop and the file manager shows it, and a browser page opens with the
+    title "Problem: " and the questions filled in. Open the file: it lists Still's version, the system, each display
+    with its scale, your settings with no keys, folder or watermark text in them, and recent log lines (a failed
+    capture or recording you just had should be there).
 
 ## Claude
 

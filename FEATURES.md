@@ -111,6 +111,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Settings: appearance, sounds, export folder, after-capture actions, start at login | ☑️ | ☑️ |
 | Setup assistant for the first capture; leaves Settings once finished, reopens from General | ☑️ | ☑️ |
 | Automatic updates | ☑️ check, download, verify, relaunch | ☑️ signed updates, install card, About button |
+| Report a Problem: saves a plain-text report (version, system, displays, settings without keys, recent log) and opens a prefilled issue page; a small log of failures is kept on the computer | — | ☑️ Settings → About and the tray menu |
 | `still://` actions (Mac) / `still --capture=…`, `--open=`, `--text=`, `--pin=` (Windows & Linux) | ☑️ | ✅ capture actions · ☑️ image files |
 | Right-click Services for images: Open in Still, Copy Text from Image, Pin Image | ☑️ | ☑️ Windows: Open in Still, Copy Text with Still and Pin with Still on PNG and JPEG files · Linux: Still under Open With |
 
