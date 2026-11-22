@@ -4,6 +4,20 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.61 — 2026-11-22
+
+- **Clipboard History on Windows and Linux.** Press Ctrl+Shift+V (or choose Clipboard History in the tray) to see what
+  you've copied: text, pictures and files. Type to search, use the arrow keys or 1–9, and press Enter to put it back on
+  the clipboard. Turn on "Paste automatically" in Settings → Clipboard to paste it straight into the app you were using
+  (on Linux this needs an X11 session). Settings → Clipboard also sets how many items to keep and clears the history.
+  Copies that password managers mark as private are never saved.
+- **Report a Problem** (Mac, Windows, Linux). In the menu bar or tray menu, or Settings → About. Still saves a
+  plain-text report to your Desktop with its version, your system and displays, your settings (without keys, folders
+  or watermark text) and its recent log, then opens a page to describe what happened. Nothing is sent until you attach
+  the file.
+- Still now keeps a small log of what went wrong (failed captures and recordings, update problems, crashes) on your
+  computer, so a report shows what led up to a problem. It never includes screenshots, clipboard contents or keys.
+
 ## v1.2.60 — 2026-11-17
 
 A big bug-fixing release: more than 100 fixes across Mac, Windows and Linux.
