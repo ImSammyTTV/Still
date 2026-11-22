@@ -1,4 +1,5 @@
 mod capture;
+mod clipboard;
 mod combine;
 mod desktop;
 mod library;
@@ -937,9 +938,10 @@ fn end_recording_extras(app: &AppHandle) {
 
 // ---- Tray, shortcuts ----------------------------------------------------------------------------
 
-const ACTIONS: [(&str, &str); 10] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Full Screen"),
+const ACTIONS: [(&str, &str); 11] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Full Screen"),
     ("previous", "Capture Previous Area"), ("scrolling", "Scrolling Capture"),
-    ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture")];
+    ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture"),
+    ("clipboard", "Clipboard History")];
 
 fn run_action(app: &AppHandle, action: &str) {
     match action {
@@ -958,6 +960,7 @@ fn run_action(app: &AppHandle, action: &str) {
             else { start_selection(app, "record", 0, false) }
         }
         "history" => open_history(app),
+        "clipboard" => clipboard::open_picker(app),
         "restore" => { let item = st(app).library.lock().unwrap().items.iter().find(|i| i.kind != "recording").cloned(); if let Some(i) = item { show_preview(app, &i, false); } }
         _ => {}
     }
@@ -1039,7 +1042,7 @@ fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
         "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
         "update" => include_bytes!("../icons/menu/update.png"), "settings" => include_bytes!("../icons/menu/settings.png"),
         "quit" => include_bytes!("../icons/menu/quit.png"), "stop" => include_bytes!("../icons/menu/stop.png"),
-        "report" => include_bytes!("../icons/menu/report.png"), _ => return None,
+        "report" => include_bytes!("../icons/menu/report.png"), "clipboard" => include_bytes!("../icons/menu/clipboard.png"), _ => return None,
     };
     tauri::image::Image::from_bytes(bytes).ok()
 }
@@ -1085,6 +1088,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&item("open-image", "Open Image…", "open", None, true)?)
         .item(&item("history", "Capture History", "history", accel("history"), true)?)
         .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
+        .item(&item("clipboard", "Clipboard History", "clipboard", accel("clipboard"), true)?)
         .item(&item("unlock-pins", "Unlock Pinned Screenshots", "unlock", None, true)?)
         .item(&item("close-overlays", "Close All Overlays", "close", None, true)?)
         .separator().item(&update_item)
@@ -2655,6 +2659,7 @@ pub fn run() {
                 })
                 .build(app)?;
             register_shortcuts(&handle);
+            clipboard::start(&handle);
             apply_login_item(&handle);
             std::thread::spawn({ let h = handle.clone(); move || {
                 // Captures whose files were moved or deleted while Still was closed leave History now, off the start.
@@ -2693,13 +2698,14 @@ pub fn run() {
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, editor_save_raw, picture_raw, recording_chunk_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
             scroll::scroll_stop, scroll::scroll_auto,
-            diag::report_problem
+            diag::report_problem,
+            clipboard::clipboard_list, clipboard::clipboard_choose, clipboard::clipboard_remove, clipboard::clipboard_clear
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")
         .run(|_app, event| match event {
             tauri::RunEvent::ExitRequested { api, code, .. } => if code.is_none() { api.prevent_exit(); },
-            tauri::RunEvent::Exit => clear_private_temp(),
+            tauri::RunEvent::Exit => { clear_private_temp(); clipboard::finish_writing(); }
             _ => {}
         });
 }

@@ -36,7 +36,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 |---|---|---|
 | Floating Preview with action bar (copy, save, edit, pin, share, close) | ✅ | ✅ |
 | Copies to the clipboard automatically | ✅ | ✅ |
-| Clipboard History (⇧⌘V): text, images and files you copy, with how many to remember and how many the menu shows (the rest in an Older submenu) | ☑️ | — |
+| Clipboard History (⇧⌘V, Ctrl+Shift+V on Windows and Linux): text, images and files you copy, with how many to remember, search, number keys and Paste automatically. The Mac lists them in a menu (the rest in an Older submenu); Windows and Linux in a small window by the pointer | ☑️ | ☑️ automatic pasting on Windows and X11 |
 | Closes on its own after 15 s, pauses while hovered | ✅ | ☑️ |
 | Drag the capture into another app | ☑️ | ☑️ |
 | File name pattern with {type} {date} {time} {n} {width} {height} and a live preview | ☑️ | ☑️ |

@@ -93,6 +93,12 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     Right-click one in History and choose Find Similar: the other two show, the different one doesn't.
 22. **Search the Web for This Image** on a screenshot of a product or landmark. The search page opens; paste (Ctrl+V or
     ⌘V) and the results are for that picture.
+- **Clipboard History (Windows, Linux).** Copy some text, a picture from a web page and a file in Explorer or the
+  file manager, then press Ctrl+Shift+V. A small list opens by the pointer, newest first, with the picture's
+  thumbnail. Type to search, press 2 to put the second item back and paste it with Ctrl+V. Turn on Settings →
+  Clipboard → Paste automatically and choose one with Enter: it's pasted into the app you were in (Windows, and X11
+  on Linux). Copy a password from a password manager: it never shows in the list. Delete removes the highlighted
+  item, and Clear History empties the list.
 
 ## Things going wrong
 

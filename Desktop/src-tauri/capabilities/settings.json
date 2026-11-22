@@ -11,6 +11,8 @@
     "allow-settings-reset",
     "allow-settings-choose-folder",
     "allow-shortcuts-pause",
+    "allow-clipboard-list",
+    "allow-clipboard-clear",
     "allow-capture-action",
     "allow-open-demo",
     "allow-open-history-cmd",

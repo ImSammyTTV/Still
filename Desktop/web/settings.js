@@ -1,15 +1,18 @@
 const PAGES = [
   ['Setup', 'sparkles', '#8e8e93'],
   ['General', 'settings', '#8e8e93'], ['Shortcuts', 'command', '#5e5ce6'], ['Floating Preview', 'panel-bottom', '#30b0c7'],
-  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['AI', 'scan-text', '#5ac8fa'], ['Claude', 'sparkles', '#d97757'], ['About', 'info', '#0a84ff']
+  ['Screenshots', 'camera', '#34c759'], ['Screen Recording', 'video', '#ff3b30'], ['Annotate', 'pencil', '#ff9f0a'], ['Clipboard', 'copy', '#00c7be'], ['AI', 'scan-text', '#5ac8fa'], ['Claude', 'sparkles', '#d97757'], ['About', 'info', '#0a84ff']
 ];
 const SHORTCUTS = [
   ['allInOne', 'Capture Bar'], ['area', 'Capture Area'], ['window', 'Capture Window'], ['fullscreen', 'Capture Full Screen'],
   ['previous', 'Capture Previous Area'], ['scrolling', 'Scrolling Capture'],
-  ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture']
+  ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture'],
+  ['clipboard', 'Clipboard History']
 ];
 let prefs, current = 'General', recordingKey = null, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' }, connector = null;
 let searchBox = null;
+// Clipboard History's state for its page: how many items are saved, and whether pasting for you can work here.
+let clipboardState = { items: [], canPaste: true };
 
 // Setup is a one-time guide: once finished it leaves the sidebar, and General offers to bring it back.
 const setupDone = () => { try { return localStorage.getItem('stillSetupComplete') === '1'; } catch { return true; } };
@@ -237,6 +240,22 @@ const pages = {
           : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`)
     ];
   },
+  // Clipboard History: what you copy, kept on this computer so any of it can be put back (see clipboard.js).
+  Clipboard: () => {
+    const keys = prefs.shortcuts.clipboard ? StillGeometry.shortcutLabel(prefs.shortcuts.clipboard, prefs.platform) : '';
+    const saved = (clipboardState.items || []).length, canPaste = !!clipboardState.canPaste;
+    return [
+      group('Clipboard History', [
+        toggle('Keep a history of what I copy', 'clipboard.enabled'),
+        select('Remember', 'clipboard.limit', [[25, 'Last 25 items'], [50, 'Last 50 items'], [100, 'Last 100 items'], [200, 'Last 200 items']], true),
+        toggle('Paste automatically after choosing an item', 'clipboard.pasteAutomatically', { off: !canPaste })
+      ], `${keys ? `Press ${keys} anywhere (change it in Shortcuts)` : 'Set a shortcut for it in Shortcuts'} or open Clipboard History in the tray menu. Pick an item, or press 1–9 and 0 for the newest ten. Type to search.${canPaste ? '' : ' On Wayland, Still can’t paste into other apps: choosing an item copies it, ready for Ctrl+V.'}`),
+      group('Privacy', [
+        row(el('span', { style: 'color:var(--text-2)' }, `${saved} item${saved === 1 ? '' : 's'} saved`),
+          el('button', { class: 'btn', disabled: !saved, onclick: () => still.invoke('clipboard:clear').catch((error) => toast(explain(error))) }, 'Clear History'))
+      ], 'Text, images (up to 10 MB) and files are kept on this computer only. Copies that apps mark as private, such as passwords from password managers, are never saved.')
+    ];
+  },
   // Still for Claude: lets Claude (the desktop app or Claude Code) take screenshots and look through History.
   Claude: () => {
     const on = !!(prefs.claude && prefs.claude.connector);
@@ -356,15 +375,20 @@ still.on('library:changed', async () => {
   setSetupDone(true); still.send('window:close');
 });
 
+const loadClipboard = async () => { clipboardState = await still.invoke('clipboard:list').catch(() => clipboardState); };
+still.on('clipboard:changed', async () => { await loadClipboard(); if (prefs && current === 'Clipboard' && !recordingKey) render(); });
 still.on('settings:page', (page) => { if (pages[page]) { current = page; render(); } });
 still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = failed; if (current === 'Shortcuts' && !recordingKey) render(); } });
 
 (async () => {
   prefs = await applyTheme();
   if (!setupDone()) { current = 'Setup'; capturesAtStart = await captureCount(); }
+  // Opened at a page (Clipboard History's settings button, say): the page event can arrive before this listens.
+  if (pages[params.get('page')]) current = params.get('page');
   updateStatus = await still.invoke('update:status');
   aiState = await still.invoke('ai:get').catch(() => ({ hasKey: false }));
   connector = await still.invoke('connector:info').catch(() => null);
+  await loadClipboard();
   const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings', 'aria-label': 'Search settings categories', autocomplete: 'off' });
   const empty = el('p', { class: 'nav-empty', hidden: true, role: 'status' }, 'No matching settings');
   searchBox = search;

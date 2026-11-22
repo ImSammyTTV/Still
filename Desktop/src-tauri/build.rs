@@ -12,5 +12,6 @@ fn main() {
         "video_export_copy", "video_project_save", "update_status", "update_check", "update_install",
         "library_combine", "library_star", "video_music_choose", "video_image_save", "countdown_cancel", "library_similar", "library_similar_in_folder", "library_folder_match", "library_search_web", "library_describe", "library_send_to_claude", "connector_info", "connector_add_to_claude", "ai_get", "ai_set_key", "scroll_stop", "scroll_auto",
         "report_problem",
+        "clipboard_list", "clipboard_choose", "clipboard_remove", "clipboard_clear",
     ]))).expect("failed to run tauri-build");
 }
