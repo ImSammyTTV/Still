@@ -44,6 +44,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppController.shared = self
+        DiagnosticLog.logLaunch()
         NSApp.servicesProvider = self
         NSApp.setActivationPolicy(.accessory)
         applyAppearance()
@@ -147,7 +148,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }.store(in: &subscriptions)
         selection.onCancel = { [weak self] in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.restoreOverlays(); self?.returnFocus() }
-        selection.onError = { [weak self] error in self?.library.busy = false; DesktopCover.shared.endCapture(); self?.showError("Capture failed", error.localizedDescription) }
+        selection.onError = { [weak self] error in DiagnosticLog.log("Capture error (\((error as NSError).domain) \((error as NSError).code)): \(error.localizedDescription)"); self?.library.busy = false; DesktopCover.shared.endCapture(); self?.showError("Capture failed", error.localizedDescription) }
         selection.onWindowSelected = { [weak self] id, screen, rect in
             guard let self else { return }
             self.library.busy = false; DesktopCover.shared.endCapture()
@@ -226,6 +227,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let app = NSMenuItem(); let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Still", action: #selector(about), keyEquivalent: "")
         appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Report a Problem…", action: #selector(reportProblem), keyEquivalent: "")
         appMenu.addItem(withTitle: "Settings…", action: #selector(settings), keyEquivalent: ",")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Still", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -255,8 +257,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = Studio.menuBarIcon()
         menu = NSMenu()
-        // The same items, in the same order, as the Windows and Linux tray menu. Each tag is its shortcut's id, so
-        // decorateMenu can show the keys.
+        // The same items, in the same order, as the Windows and Linux tray menu (Report a Problem is Mac-only for
+        // now). Each tag is its shortcut's id, so decorateMenu can show the keys.
         menu.addItem(withTitle: "Capture Bar", action: #selector(allInOne), keyEquivalent: "")
         menu.addItem(.separator())
         for (id, title, action) in [(1, "Capture Area", #selector(captureArea)), (2, "Capture Window", #selector(captureWindow)), (3, "Capture Full Screen", #selector(captureScreen)), (6, "Capture Previous Area", #selector(capturePrevious)), (7, "Scrolling Capture", #selector(scrollingCapture))] {
@@ -278,6 +280,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: "Toggle Desktop Icons", action: #selector(toggleDesktop), keyEquivalent: "").tag = 11
         menu.addItem(.separator())
         menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        menu.addItem(withTitle: "Report a Problem…", action: #selector(reportProblem), keyEquivalent: "")
         menu.addItem(withTitle: "Settings…", action: #selector(settings), keyEquivalent: "")
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Still", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
@@ -358,6 +361,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func clearClipboardHistory() { ClipboardHistory.shared.clear() }
 
     @objc func checkForUpdates() { Updater.shared.check(manual: true) }
+    @objc func reportProblem() { ProblemReporter.report() }
     @objc func about() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Still", .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "", .credits: NSAttributedString(string: "A personal capture studio for your Mac.\nBuilt with Swift, AppKit & SwiftUI.\nAll captures and text recognition stay on your Mac.")])
     }
@@ -671,6 +675,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func showError(_ title: String, _ text: String) {
         // An alert opened under the full-screen capture overlay can't be seen or clicked, so wait until it's gone.
         if selection.isActive { DispatchQueue.main.asyncAfter(deadline: .now()+0.5) { [weak self] in MainActor.assumeIsolated { self?.showError(title, text) } }; return }
+        // Every error Still shows goes in the log too, so a problem report can say what went wrong and when.
+        DiagnosticLog.log("Error shown: \(title): \(text)")
         showMain(); let alert = NSAlert(); alert.messageText = title; alert.informativeText = text; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     private func hideForCapture() {
@@ -694,7 +700,7 @@ extension AppController {
         let symbols = ["Capture Bar": "rectangle.dashed", "Capture Area": "viewfinder", "Capture Window": "macwindow", "Capture Full Screen": "display",
                        "Record Screen": "record.circle", "Timed Capture": "timer", "Capture Text": "text.viewfinder", "Open Image…": "photo", "Capture Previous Area": "arrow.counterclockwise",
                        "Scrolling Capture": "arrow.down.to.line.compact", "Capture History": "clock.arrow.circlepath", "Restore Last Capture": "arrow.uturn.backward",
-                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Clipboard History": "doc.on.clipboard", "Check for Updates…": "arrow.down.circle", "Quit Still": "power"]
+                       "Hide / Show Overlays": "eye.slash", "Toggle Desktop Icons": "menubar.dock.rectangle", "Unlock Pinned Screenshots": "pin.slash", "Settings…": "gearshape", "Clipboard History": "doc.on.clipboard", "Check for Updates…": "arrow.down.circle", "Report a Problem…": "exclamationmark.bubble", "Quit Still": "power"]
         let shortcuts = Shortcut.load()
         for item in menu.items where !item.isSeparatorItem {
             if let symbol = symbols[item.title] { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); Self.keepImageVisible(item) }

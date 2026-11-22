@@ -105,6 +105,10 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     title "Problem: " and the questions filled in. Open the file: it lists Still's version, the system, each display
     with its scale, your settings with no keys, folder or watermark text in them, and recent log lines (a failed
     capture or recording you just had should be there).
+26. **Report a Problem (Mac).** Make something fail (turn off Wi-Fi, then choose Check for Updates…), then choose
+    Report a Problem… from the menu bar menu. A "Still problem report" text file appears on the Desktop,
+    selected in Finder, and a new issue page opens with "Problem: " as its title and a short form. The report lists
+    the error, your displays and settings, with no keys, watermark text or user name in it.
 
 ## Claude
 
