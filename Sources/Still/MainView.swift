@@ -268,6 +268,10 @@ struct MainView: View {
             Text("Still").font(.system(size: 25, weight: .bold)); Text("Native capture for your Mac").foregroundStyle(.secondary)
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")").font(.system(size: 11)).foregroundStyle(.secondary)
             Button("Open Feature Coverage") { if let path = Bundle.main.resourceURL?.appendingPathComponent("Documentation/FEATURES.md") { NSWorkspace.shared.open(path) } }
+            VStack(spacing: 4) {
+                Button("Report a Problem…") { ProblemReporter.report() }
+                Text("Saves a report to your Desktop and opens a form to describe what happened. The report stays on your Mac until you attach it.").font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320).fixedSize(horizontal: false, vertical: true)
+            }
             Button("Quit Still") { NSApp.terminate(nil) }
         }.frame(maxWidth: .infinity).padding(.top, 55)
     }

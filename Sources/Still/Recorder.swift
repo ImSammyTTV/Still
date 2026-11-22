@@ -263,6 +263,7 @@ import StillCore
         let capturedCamera = camera
         // Say what actually went wrong: a recording that ran for a while didn't fail to start.
         let title = stopping || finalizing ? "Recording couldn’t be finished" : recording || pausing || paused || !segments.isEmpty ? "Recording stopped unexpectedly" : "Recording couldn’t start"
+        DiagnosticLog.log("Recorder: \(title) (\((error as NSError).domain) \((error as NSError).code)): \(error.localizedDescription)")
         reset()
         Task {
             try? await old?.stopCapture()

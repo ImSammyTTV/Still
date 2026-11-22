@@ -65,7 +65,7 @@ A selected segment on chrome still uses `--accent` with `--accent-text`: a dark 
 
 ### Category tiles
 
-Settings categories use the system's category colours behind a white glyph, the way System Settings does. They are data in `settings.js`, not theme tokens: Setup and General `#8E8E93`, Shortcuts `#5E5CE6`, Floating Preview `#30B0C7`, Screenshots `#34C759`, Recording `#FF3B30`, Annotate `#FF9F0A`, AI `#5AC8FA`, About `#0A84FF`.
+Settings categories use the system's category colours behind a white glyph, the way System Settings does. They are data in `settings.js`, not theme tokens: Setup and General `#8E8E93`, Shortcuts `#5E5CE6`, Floating Preview `#30B0C7`, Screenshots `#34C759`, Recording `#FF3B30`, Annotate `#FF9F0A`, Clipboard `#00C7BE`, AI `#5AC8FA`, About `#0A84FF`.
 
 ### Content palettes
 

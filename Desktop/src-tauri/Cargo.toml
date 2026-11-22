@@ -1,6 +1,6 @@
 [package]
 name = "still"
-version = "1.2.60"
+version = "1.2.61"
 description = "Capture, annotate and record your screen"
 authors = ["ImSammyTTV"]
 edition = "2021"
@@ -16,6 +16,8 @@ tauri-build = { version = "=2.7.2", features = [] }
 tauri = { version = "=2.12.3", features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-global-shortcut = "=2.4.1"
 tauri-plugin-clipboard-manager = "=2.4.2"
+# Clipboard History reads and writes the clipboard itself (src/clipboard.rs). The version the clipboard plugin already uses.
+arboard = "=3.7.0"
 tauri-plugin-dialog = "=2.8.2"
 tauri-plugin-notification = "=2.6.0"
 tauri-plugin-autostart = "=2.7.0"

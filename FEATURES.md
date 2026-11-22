@@ -36,7 +36,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 |---|---|---|
 | Floating Preview with action bar (copy, save, edit, pin, share, close) | ✅ | ✅ |
 | Copies to the clipboard automatically | ✅ | ✅ |
-| Clipboard History (⇧⌘V): text, images and files you copy, with how many to remember and how many the menu shows (the rest in an Older submenu) | ☑️ | — |
+| Clipboard History (⇧⌘V, Ctrl+Shift+V on Windows and Linux): text, images and files you copy, with how many to remember, search, number keys and Paste automatically. The Mac lists them in a menu (the rest in an Older submenu); Windows and Linux in a small window by the pointer | ☑️ | ☑️ automatic pasting on Windows and X11 |
 | Closes on its own after 15 s, pauses while hovered | ✅ | ☑️ |
 | Drag the capture into another app | ☑️ | ☑️ |
 | File name pattern with {type} {date} {time} {n} {width} {height} and a live preview | ☑️ | ☑️ |
@@ -111,6 +111,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Settings: appearance, sounds, export folder, after-capture actions, start at login | ☑️ | ☑️ |
 | Setup assistant for the first capture; leaves Settings once finished, reopens from General | ☑️ | ☑️ |
 | Automatic updates | ☑️ check, download, verify, relaunch | ☑️ signed updates, install card, About button |
+| Report a Problem: a plain-text report on the Desktop (version, system, displays, settings without keys, recent log) and a new issue page with a short form; a small log of errors is kept on the computer | ☑️ menu bar menu and Settings → About | ☑️ Settings → About and the tray menu |
 | `still://` actions (Mac) / `still --capture=…`, `--open=`, `--text=`, `--pin=` (Windows & Linux) | ☑️ | ✅ capture actions · ☑️ image files |
 | Right-click Services for images: Open in Still, Copy Text from Image, Pin Image | ☑️ | ☑️ Windows: Open in Still, Copy Text with Still and Pin with Still on PNG and JPEG files · Linux: Still under Open With |
 

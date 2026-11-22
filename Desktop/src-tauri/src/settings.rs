@@ -28,6 +28,8 @@ pub fn defaults() -> Value {
         "annotate": { "color": "#FF453A", "stroke": 4, "font": 28 },
         "ai": { "provider": "gemini" },
         "claude": { "connector": false },
+        // Clipboard History is on by default, as on the Mac. Pasting for you after choosing is off until asked for.
+        "clipboard": { "enabled": true, "limit": 100, "pasteAutomatically": false },
         "shortcuts": {
             "area": "CommandOrControl+Shift+4",
             "allInOne": "CommandOrControl+Shift+5",
@@ -38,7 +40,8 @@ pub fn defaults() -> Value {
             "previous": "",
             "scrolling": "",
             "history": "",
-            "restore": ""
+            "restore": "",
+            "clipboard": "CommandOrControl+Shift+V"
         }
     })
 }
@@ -140,5 +143,11 @@ mod tests {
         let values = defaults();
         for key in ["camera", "clicks", "keys"] { assert_eq!(values["recording"][key], json!(false), "{key}"); }
         assert_eq!(values["recording"]["keysShortcutsOnly"], json!(true));
+    }
+    #[test]
+    fn clipboard_history_starts_on_with_paste_off_as_on_the_mac() {
+        let values = defaults();
+        assert_eq!(values["clipboard"], json!({ "enabled": true, "limit": 100, "pasteAutomatically": false }));
+        assert_eq!(values["shortcuts"]["clipboard"], json!("CommandOrControl+Shift+V"));
     }
 }

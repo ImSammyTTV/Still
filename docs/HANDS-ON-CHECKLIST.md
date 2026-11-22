@@ -93,6 +93,12 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     Right-click one in History and choose Find Similar: the other two show, the different one doesn't.
 22. **Search the Web for This Image** on a screenshot of a product or landmark. The search page opens; paste (Ctrl+V or
     ⌘V) and the results are for that picture.
+- **Clipboard History (Windows, Linux).** Copy some text, a picture from a web page and a file in Explorer or the
+  file manager, then press Ctrl+Shift+V. A small list opens by the pointer, newest first, with the picture's
+  thumbnail. Type to search, press 2 to put the second item back and paste it with Ctrl+V. Turn on Settings →
+  Clipboard → Paste automatically and choose one with Enter: it's pasted into the app you were in (Windows, and X11
+  on Linux). Copy a password from a password manager: it never shows in the list. Delete removes the highlighted
+  item, and Clear History empties the list.
 
 ## Things going wrong
 
@@ -100,6 +106,15 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
     space on the disk", not a long technical error.
 24. **Recording with no sound.** Use Tighten Pauses on a recording made without a microphone. It should simply say
     the recording has no sound.
+25. **Report a Problem (Windows, Linux).** Settings → About → Report a Problem… (or the tray menu). A file named
+    "Still problem report …" appears on the Desktop and the file manager shows it, and a browser page opens with the
+    title "Problem: " and the questions filled in. Open the file: it lists Still's version, the system, each display
+    with its scale, your settings with no keys, folder or watermark text in them, and recent log lines (a failed
+    capture or recording you just had should be there).
+26. **Report a Problem (Mac).** Make something fail (turn off Wi-Fi, then choose Check for Updates…), then choose
+    Report a Problem… from the menu bar menu. A "Still problem report" text file appears on the Desktop,
+    selected in Finder, and a new issue page opens with "Problem: " as its title and a short form. The report lists
+    the error, your displays and settings, with no keys, watermark text or user name in it.
 
 ## Claude
 

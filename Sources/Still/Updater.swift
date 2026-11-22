@@ -39,6 +39,7 @@ import CryptoKit
         let file = failedInstallFile
         guard let reason = try? String(contentsOf: file, encoding: .utf8) else { return }
         try? FileManager.default.removeItem(at: file)
+        DiagnosticLog.log("Update didn’t install: \(reason.trimmingCharacters(in: .whitespacesAndNewlines))")
         let text = reason.hasPrefix("copy")
             ? "Still couldn’t copy the new version into place. Check that there’s free disk space and that you can change the folder Still is in, then try again."
             : "Still couldn’t swap in the new version, so it kept the one you have. Check that you can change the folder Still is in, then try again."
@@ -61,13 +62,13 @@ import CryptoKit
                 let report = reportCheck
                 switch result {
                 case .upToDate: if report { info("You’re up to date", "Still \(currentVersion) is the latest version.") }
-                case .failed(let reason): if report { info("Couldn’t check for updates", reason) }
+                case .failed(let reason): DiagnosticLog.log("Update check failed: \(reason)"); if report { info("Couldn’t check for updates", reason) }
                 case .available(let release):
                     let skipped = UserDefaults.standard.string(forKey: "skippedVersion")
                     if !report, skipped == release.version { return }
                     offer(release)
                 }
-            } catch { if reportCheck { info("Couldn’t check for updates", error.localizedDescription) } }
+            } catch { DiagnosticLog.log("Update check failed: \(error.localizedDescription)"); if reportCheck { info("Couldn’t check for updates", error.localizedDescription) } }
         }
     }
 
@@ -124,6 +125,7 @@ import CryptoKit
         // Replacing Still needs permission to change the folder it's in; find out now, not after quitting.
         let folder = Bundle.main.bundleURL.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: folder.path) else {
+            DiagnosticLog.log("Update to \(release.version) not installed: Still’s folder can’t be changed")
             info("Can’t update Still", "You don’t have permission to replace Still in \(folder.path). Ask an administrator to install the update, or move Still to a folder you can change.")
             return
         }
@@ -151,7 +153,7 @@ import CryptoKit
                     pendingInstall = nil; try? FileManager.default.removeItem(at: work)
                     AppController.shared.library.toast("The update wasn’t installed because Still didn’t quit. Choose Check for Updates to try again.")
                 }
-            } catch { info("Update failed", error.localizedDescription) }
+            } catch { DiagnosticLog.log("Update to \(release.version) failed: \(error.localizedDescription)"); info("Update failed", error.localizedDescription) }
         }
     }
     /// Called as Still quits for good: starts the script that swaps in the verified update and reopens Still. Returns
@@ -173,7 +175,7 @@ import CryptoKit
         let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script, "still-update", String(ProcessInfo.processInfo.processIdentifier), app.path, Bundle.main.bundlePath, work.path, failedInstallFile.path]
         do { try process.run(); return true }
-        catch { try? FileManager.default.removeItem(at: work); info("Update failed", error.localizedDescription); return false }
+        catch { DiagnosticLog.log("Update couldn’t start installing: \(error.localizedDescription)"); try? FileManager.default.removeItem(at: work); info("Update failed", error.localizedDescription); return false }
     }
 
     /// Checks the download against its published checksum, unpacks it and checks its signature. Returns the new app and

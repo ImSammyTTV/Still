@@ -1,4 +1,5 @@
 mod capture;
+mod clipboard;
 mod combine;
 mod desktop;
 mod library;
@@ -14,6 +15,7 @@ mod describe;
 mod trash;
 mod mcp;
 mod video;
+mod diag;
 
 use capture::Grab;
 use image::RgbaImage;
@@ -113,7 +115,8 @@ fn clear_private_temp() {
 }
 
 fn setting(app: &AppHandle, path: &str) -> Value { st(app).settings.lock().unwrap().get(path).clone() }
-fn notify(app: &AppHandle, title: &str, body: &str) { let _ = app.notification().builder().title(title).body(body).show(); }
+// Every notice also goes in the problem log (see diag), so a report shows what the user was told and when.
+fn notify(app: &AppHandle, title: &str, body: &str) { diag::notice(title, body); let _ = app.notification().builder().title(title).body(body).show(); }
 fn broadcast(app: &AppHandle, event: &str, payload: Value) {
     // A new capture can take old ones with it (Settings → General → Keep history): their windows close rather than
     // stay open on files that are gone.
@@ -341,9 +344,9 @@ fn warm_overlays(app: &AppHandle) {
         for m in app.available_monitors().unwrap_or_default().iter().skip(waiting) {
             if st(&app).session.lock().unwrap().busy { break; }
             let label = format!("overlay-warm-{}", uuid::Uuid::new_v4().simple());
-            if let Ok(win) = overlay_window(&app, &label, json!({})).build() {
-                let _ = win.set_position(*m.position());
-                let _ = win.set_size(*m.size());
+            match overlay_window(&app, &label, json!({})).build() {
+                Ok(win) => { let _ = win.set_position(*m.position()); let _ = win.set_size(*m.size()); }
+                Err(e) => diag::log("error", &format!("A capture overlay couldn’t be prepared ahead of time: {e}")),
             }
         }
         WARMING.store(false, Relaxed);
@@ -444,6 +447,7 @@ fn start_selection(app: &AppHandle, purpose: &str, delay: u64, window_mode: bool
                     if let Some(old) = app.get_webview_window(&label) { let _ = old.destroy(); }
                     let built = overlay_window(&app, &label, json!({ "init": init })).build();
                     if let Ok(win) = &built { place_overlay(win, g); }
+                    if let Err(e) = &built { diag::log("error", &format!("The capture overlay for display {} couldn’t be opened: {e}", i + 1)); }
                     (label, built)
                 }
             };
@@ -934,9 +938,10 @@ fn end_recording_extras(app: &AppHandle) {
 
 // ---- Tray, shortcuts ----------------------------------------------------------------------------
 
-const ACTIONS: [(&str, &str); 10] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Full Screen"),
+const ACTIONS: [(&str, &str); 11] = [("allInOne", "Capture Bar"), ("area", "Capture Area"), ("window", "Capture Window"), ("fullscreen", "Capture Full Screen"),
     ("previous", "Capture Previous Area"), ("scrolling", "Scrolling Capture"),
-    ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture")];
+    ("text", "Capture Text (OCR)"), ("record", "Record Screen"), ("history", "Open Capture History"), ("restore", "Restore Last Capture"),
+    ("clipboard", "Clipboard History")];
 
 fn run_action(app: &AppHandle, action: &str) {
     match action {
@@ -955,6 +960,7 @@ fn run_action(app: &AppHandle, action: &str) {
             else { start_selection(app, "record", 0, false) }
         }
         "history" => open_history(app),
+        "clipboard" => clipboard::open_picker(app),
         "restore" => { let item = st(app).library.lock().unwrap().items.iter().find(|i| i.kind != "recording").cloned(); if let Some(i) = item { show_preview(app, &i, false); } }
         _ => {}
     }
@@ -1035,7 +1041,8 @@ fn menu_icon(name: &str) -> Option<tauri::image::Image<'static>> {
         "history" => include_bytes!("../icons/menu/history.png"), "restore" => include_bytes!("../icons/menu/restore.png"),
         "unlock" => include_bytes!("../icons/menu/unlock.png"), "close" => include_bytes!("../icons/menu/close.png"),
         "update" => include_bytes!("../icons/menu/update.png"), "settings" => include_bytes!("../icons/menu/settings.png"),
-        "quit" => include_bytes!("../icons/menu/quit.png"), "stop" => include_bytes!("../icons/menu/stop.png"), _ => return None,
+        "quit" => include_bytes!("../icons/menu/quit.png"), "stop" => include_bytes!("../icons/menu/stop.png"),
+        "report" => include_bytes!("../icons/menu/report.png"), "clipboard" => include_bytes!("../icons/menu/clipboard.png"), _ => return None,
     };
     tauri::image::Image::from_bytes(bytes).ok()
 }
@@ -1081,9 +1088,11 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&item("open-image", "Open Image…", "open", None, true)?)
         .item(&item("history", "Capture History", "history", accel("history"), true)?)
         .item(&item("restore", "Restore Last Capture", "restore", accel("restore"), true)?)
+        .item(&item("clipboard", "Clipboard History", "clipboard", accel("clipboard"), true)?)
         .item(&item("unlock-pins", "Unlock Pinned Screenshots", "unlock", None, true)?)
         .item(&item("close-overlays", "Close All Overlays", "close", None, true)?)
         .separator().item(&update_item)
+        .item(&item("report-problem", "Report a Problem…", "report", None, true)?)
         .item(&item("settings", "Settings…", "settings", None, true)?)
         .item(&item("quit", "Quit Still", "quit", None, true)?)
         .build()
@@ -1098,6 +1107,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "close-overlays" => for (l, w) in app.webview_windows() { if l.starts_with("pin-") || l.starts_with("quick-") { let _ = w.close(); } },
         "update-check" => check_update(app, true),
         "update-install" => install_update(app),
+        "report-problem" => diag::report_from_menu(app),
         t if t.starts_with("timer-") => start_selection(app, "screenshot", t[6..].parse().unwrap_or(5), false),
         action => run_action(app, action),
     }
@@ -1182,7 +1192,7 @@ fn check_update(app: &AppHandle, manual: bool) {
                 show_update_prompt(&app, &version);
             }
             Ok(None) => { set_update(&app, json!({ "state": "current" })); if manual { notify(&app, "Still", &format!("You’re up to date (version {}).", app.package_info().version)); } }
-            Err(e) => { set_update(&app, json!({ "state": "error", "error": e })); if manual { notify(&app, "Couldn’t check for updates", &e); } }
+            Err(e) => { if !manual { diag::log("error", &format!("Checking for updates failed: {e}")); } set_update(&app, json!({ "state": "error", "error": e })); if manual { notify(&app, "Couldn’t check for updates", &e); } }
         }
     });
 }
@@ -2153,6 +2163,7 @@ fn finish_native(app: &AppHandle) -> Result<(), String> {
     let saved = finished.and_then(|f| {
         if std::fs::metadata(&f.path).map(|m| m.len()).unwrap_or(0) == 0 { let _ = std::fs::remove_file(&f.path); return Err("The recording’s file couldn’t be read.".into()); }
         eprintln!("[recording] {} frames, {} dropped, hardware encoder: {}", f.frames, f.dropped, f.hardware);
+        diag::log("info", &format!("Recording finished: {:.1} s, {} frames, {} dropped, hardware encoder: {}", f.duration, f.frames, f.dropped, f.hardware));
         store_recording(app, &f.path, "mp4", f.duration)?;
         // The recorder ran into a problem partway (a full disk, say): what it recorded until then is saved, and the
         // user hears why the recording ends early.
@@ -2164,6 +2175,7 @@ fn finish_native(app: &AppHandle) -> Result<(), String> {
 }
 #[tauri::command]
 async fn recording_error(app: AppHandle, message: String, stage: Option<String>) {
+    diag::log("error", &format!("Recording problem ({}): {message}", stage.as_deref().unwrap_or("start")));
     if stage.as_deref() == Some("save") {
         // Whatever reached the disk before the problem is still a recording worth keeping.
         if salvage_recording(&app) { notify(&app, "Recording saved", &format!("Saving ran into a problem ({message}), so Still kept the video it had already written.")); }
@@ -2624,11 +2636,14 @@ pub fn run() {
             let handle = app.handle().clone();
             let config = app.path().app_config_dir()?;
             let data = app.path().app_data_dir()?;
+            diag::init(data.join("logs"));
+            diag::install_panic_hook();
             app.manage(State {
                 settings: Mutex::new(Settings::load(config)),
                 library: Mutex::new(Library::open(data.join("Library"))),
                 session: Mutex::new(Session { update: json!({ "state": "idle" }), ..Default::default() }),
             });
+            diag::log_start(&handle);
             apply_name_pattern(&handle);
             apply_history_days(&handle);
             apply_connector(&handle);
@@ -2644,6 +2659,7 @@ pub fn run() {
                 })
                 .build(app)?;
             register_shortcuts(&handle);
+            clipboard::start(&handle);
             apply_login_item(&handle);
             std::thread::spawn({ let h = handle.clone(); move || {
                 // Captures whose files were moved or deleted while Still was closed leave History now, off the start.
@@ -2681,13 +2697,15 @@ pub fn run() {
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
             recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, editor_save_raw, picture_raw, recording_chunk_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
-            scroll::scroll_stop, scroll::scroll_auto
+            scroll::scroll_stop, scroll::scroll_auto,
+            diag::report_problem,
+            clipboard::clipboard_list, clipboard::clipboard_choose, clipboard::clipboard_remove, clipboard::clipboard_clear
         ])
         .build(tauri::generate_context!())
         .expect("error while building Still")
         .run(|_app, event| match event {
             tauri::RunEvent::ExitRequested { api, code, .. } => if code.is_none() { api.prevent_exit(); },
-            tauri::RunEvent::Exit => clear_private_temp(),
+            tauri::RunEvent::Exit => { clear_private_temp(); clipboard::finish_writing(); }
             _ => {}
         });
 }
