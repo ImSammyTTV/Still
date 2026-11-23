@@ -42,6 +42,36 @@ final class ImageDescriberTests: XCTestCase {
         XCTAssertEqual((content.first?["source"] as? [String: Any])?["media_type"] as? String, "image/png")
         XCTAssertEqual(content.last?["text"] as? String, ImageDescriber.prompt)
     }
+    func testChatGPTAnswersAreReadAndItsErrorsArePlain() {
+        let ok: [String: Any] = ["choices": [["message": ["role": "assistant", "content": " A dark settings window.\n"]]]]
+        XCTAssertEqual(try ImageDescriber.openAIText(status: 200, ok).get(), "A dark settings window.")
+        let parts: [String: Any] = ["choices": [["message": ["content": [["type": "text", "text": "A settings page "], ["type": "text", "text": "with a sidebar."]]]]]]
+        XCTAssertEqual(try ImageDescriber.openAIText(status: 200, parts).get(), "A settings page with a sidebar.")
+        XCTAssertThrowsError(try ImageDescriber.openAIText(status: 200, ["choices": [["message": ["refusal": "I can’t help with that."]]]]).get()) { XCTAssertTrue($0.localizedDescription.contains("couldn’t describe")) }
+        XCTAssertThrowsError(try ImageDescriber.openAIText(status: 200, ["choices": [["message": ["content": ""]]]]).get()) { XCTAssertTrue($0.localizedDescription.contains("couldn’t describe")) }
+        XCTAssertThrowsError(try ImageDescriber.openAIText(status: 401, ["error": ["message": "Incorrect API key provided", "code": "invalid_api_key"]]).get()) { XCTAssertTrue($0.localizedDescription.contains("isn’t valid")) }
+        let empty: [String: Any] = ["error": ["message": "You exceeded your current quota", "type": "insufficient_quota", "code": "insufficient_quota"]]
+        XCTAssertThrowsError(try ImageDescriber.openAIText(status: 429, empty).get()) { XCTAssertTrue($0.localizedDescription.contains("no credit")) }
+        XCTAssertFalse(ImageDescriber.openAIBusy(status: 429, empty))
+        let limit: [String: Any] = ["error": ["message": "Rate limit reached", "code": "rate_limit_exceeded"]]
+        XCTAssertThrowsError(try ImageDescriber.openAIText(status: 429, limit).get()) { XCTAssertTrue($0.localizedDescription.contains("busy")) }
+        XCTAssertTrue(ImageDescriber.openAIBusy(status: 429, limit) && ImageDescriber.openAIBusy(status: 503, [:]))
+        XCTAssertFalse(ImageDescriber.openAIBusy(status: 401, [:]) || ImageDescriber.openAIBusy(status: 200, [:]))
+        // An account that can't use the first model is asked again with the older one.
+        XCTAssertTrue(ImageDescriber.openAIModelMissing(status: 404, [:]))
+        XCTAssertTrue(ImageDescriber.openAIModelMissing(status: 400, ["error": ["message": "The model does not exist", "code": "model_not_found"]]))
+        XCTAssertFalse(ImageDescriber.openAIModelMissing(status: 401, [:]))
+    }
+    func testTheChatGPTRequestCarriesThePromptAndThePictureOnly() {
+        let b = ImageDescriber.openAIBody(mime: "image/png", data: Data([0, 0, 0]))
+        XCTAssertEqual(b["model"] as? String, ImageDescriber.openAIModel)
+        XCTAssertEqual(ImageDescriber.openAIBody(model: ImageDescriber.openAIFallbackModel, mime: "image/png", data: Data())["model"] as? String, "gpt-4o-mini")
+        // Models differ in which settings they accept, so none are sent.
+        XCTAssertEqual(Set(b.keys), ["model", "messages"])
+        let content = ((b["messages"] as? [[String: Any]])?.first?["content"] as? [[String: Any]]) ?? []
+        XCTAssertEqual(content.first?["text"] as? String, ImageDescriber.prompt)
+        XCTAssertEqual((content.last?["image_url"] as? [String: Any])?["url"] as? String, "data:image/png;base64,AAAA")
+    }
     func testBusyAnswersAreAskedAgain() {
         XCTAssertTrue(ImageDescriber.busy(503) && ImageDescriber.busy(429) && ImageDescriber.busy(500))
         XCTAssertFalse(ImageDescriber.busy(200) || ImageDescriber.busy(400) || ImageDescriber.busy(403) || ImageDescriber.busy(404))

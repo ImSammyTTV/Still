@@ -384,8 +384,8 @@ final class Library: ObservableObject {
             return (ranked, files.count, files.count >= 5000)
         }.value
     }
-    /// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search
-    /// and copied to the clipboard.
+    /// Describe Image: the service Settings picked writes a short description (with the user's own key), kept with the
+    /// capture for search and copied to the clipboard.
     @MainActor func describe(_ item: CaptureItem) {
         guard GeminiKey.value != nil else { toast("Add a key in Settings → AI first"); AppController.shared.showMain(); page = "AI"; return }
         toast("Describing…")
@@ -410,9 +410,12 @@ final class Library: ObservableObject {
         }.value
         guard prepared.loaded else { throw ImageDescriber.Failure(message: "Only screenshots can be described.") }
         guard let data = prepared.data else { throw ImageDescriber.Failure(message: "Couldn’t read this screenshot.") }
-        let text = Preferences.shared.describeProvider == "claude"
-            ? try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
-            : try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
+        let text: String
+        switch Preferences.shared.describeProvider {
+        case "claude": text = try await ImageDescriber.describeWithClaude(key: key, mime: "image/png", data: data)
+        case "openai": text = try await ImageDescriber.describeWithOpenAI(key: key, mime: "image/png", data: data)
+        default: text = try await ImageDescriber.describe(key: key, mime: "image/png", data: data)
+        }
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].imageDescription = text; try? persist() }
         return text
     }

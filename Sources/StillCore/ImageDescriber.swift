@@ -1,7 +1,8 @@
 import Foundation
 
 /// Describe Image: a short description of a screenshot, from Google's Gemini API with the user's own free key (from
-/// Google AI Studio), or from Claude with the user's own Anthropic API key. Only the picture asked about is sent, and only then. Follows Desktop/src-tauri/src/describe.rs
+/// Google AI Studio), from Claude with the user's own Anthropic API key, or from ChatGPT with the user's own OpenAI API
+/// key. Only the picture asked about is sent, and only then. Follows Desktop/src-tauri/src/describe.rs
 /// and shares its test cases.
 public enum ImageDescriber {
     static let base = "https://generativelanguage.googleapis.com/v1beta"
@@ -145,5 +146,82 @@ public enum ImageDescriber {
     public static func checkClaude(key: String) async throws {
         let (status, response) = try await json(claudeRequest("models?limit=1", key: key))
         guard status == 200 else { _ = try claudeText(status: status, response).get(); return }
+    }
+
+    // ---- ChatGPT (OpenAI) -----------------------------------------------------------------------------
+    static let openAIURL = "https://api.openai.com/v1"
+    /// Tried first. Some accounts can't use it yet, so the older small model is asked instead (once).
+    public static let openAIModel = "gpt-5-mini"
+    public static let openAIFallbackModel = "gpt-4o-mini"
+
+    /// The Chat Completions request for one picture: the prompt, then the image as a data URL. No token, temperature
+    /// or reasoning settings, because OpenAI's models don't all accept the same ones.
+    public static func openAIBody(model: String = openAIModel, mime: String, data: Data) -> [String: Any] {
+        ["model": model, "messages": [["role": "user", "content": [
+            ["type": "text", "text": prompt],
+            ["type": "image_url", "image_url": ["url": "data:\(mime);base64,\(data.base64EncodedString())"]]]]]]
+    }
+    static func openAIErrorCode(_ response: [String: Any]) -> String {
+        let error = response["error"] as? [String: Any]
+        return (error?["code"] as? String) ?? (error?["type"] as? String) ?? ""
+    }
+    /// The account can't use the first model, so the fallback one is worth asking.
+    public static func openAIModelMissing(status: Int, _ response: [String: Any]) -> Bool {
+        status == 404 || openAIErrorCode(response) == "model_not_found"
+    }
+    /// Busy right now and worth asking again after a moment. An empty account isn't: asking again won't help.
+    public static func openAIBusy(status: Int, _ response: [String: Any]) -> Bool {
+        [429, 500, 502, 503].contains(status) && openAIErrorCode(response) != "insufficient_quota"
+    }
+    /// Why OpenAI turned a request (or a key) away, in plain words.
+    public static func openAIFailure(status: Int, _ response: [String: Any]) -> Failure {
+        let message = (response["error"] as? [String: Any])?["message"] as? String ?? ""
+        switch status {
+        case 401: return Failure(message: "That OpenAI API key isn’t valid. Copy it again from platform.openai.com (API keys).")
+        case 429 where openAIErrorCode(response) == "insufficient_quota":
+            return Failure(message: "Your OpenAI account has no credit left. Add billing at platform.openai.com, then try again.")
+        case 429, 500, 502, 503: return Failure(message: "OpenAI is busy right now, so ChatGPT couldn’t describe this. Try again in a minute.")
+        default: return Failure(message: message.isEmpty ? "ChatGPT answered with an error (\(status))." : "ChatGPT: \(message)")
+        }
+    }
+    /// The description in a Chat Completions response (text, or a list of parts with text), or why there isn't one.
+    public static func openAIText(status: Int, _ response: [String: Any]) -> Result<String, Failure> {
+        if status >= 400 || response["error"] is [String: Any] { return .failure(openAIFailure(status: status, response)) }
+        let message = (response["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
+        let declined = Failure(message: "ChatGPT couldn’t describe this picture.")
+        if let refusal = message?["refusal"] as? String, !refusal.isEmpty { return .failure(declined) }
+        var text = message?["content"] as? String ?? ""
+        if let parts = message?["content"] as? [[String: Any]] { text = parts.compactMap { $0["text"] as? String }.joined() }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? .failure(declined) : .success(text)
+    }
+    private static func openAIRequest(_ path: String, key: String, body: [String: Any]? = nil) -> URLRequest {
+        var r = URLRequest(url: URL(string: "\(openAIURL)/\(path)")!, timeoutInterval: 60)
+        r.setValue("Bearer \(key.trimmingCharacters(in: .whitespaces))", forHTTPHeaderField: "Authorization")
+        if let body { r.httpMethod = "POST"; r.setValue("application/json", forHTTPHeaderField: "Content-Type"); r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
+        return r
+    }
+    public static func describeWithOpenAI(key: String, mime: String, data: Data) async throws -> String {
+        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure(message: "Add an OpenAI API key in Settings → AI first.") }
+        do {
+            var model = openAIModel
+            var (status, response) = try await json(openAIRequest("chat/completions", key: key, body: openAIBody(model: model, mime: mime, data: data)))
+            if openAIModelMissing(status: status, response) {
+                model = openAIFallbackModel
+                (status, response) = try await json(openAIRequest("chat/completions", key: key, body: openAIBody(model: model, mime: mime, data: data)))
+            }
+            // Like Gemini: a busy answer usually clears in moments, so wait and ask once more.
+            if openAIBusy(status: status, response) {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                (status, response) = try await json(openAIRequest("chat/completions", key: key, body: openAIBody(model: model, mime: mime, data: data)))
+            }
+            return try openAIText(status: status, response).get()
+        } catch let failure as Failure { throw failure }
+        catch { throw Failure(message: "Couldn’t reach OpenAI: \(error.localizedDescription)") }
+    }
+    /// Checks an OpenAI key by listing the models it can use, so Settings can say straight away whether it works.
+    public static func checkOpenAI(key: String) async throws {
+        let (status, response) = try await json(openAIRequest("models", key: key))
+        guard status == 200 else { throw openAIFailure(status: status, response) }
     }
 }

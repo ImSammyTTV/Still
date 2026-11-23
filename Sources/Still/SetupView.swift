@@ -6,6 +6,9 @@ struct SetupRootView: View {
     @ObservedObject var library: Library
     @ObservedObject var recorder: Recorder
     @AppStorage("studioSetupComplete") private var complete = false
+    /// Set by the first capture, unlike `complete`, which Set Up Later also sets: Settings → General offers the
+    /// Setup Assistant again only until this is true.
+    @AppStorage("studioFirstCaptureDone") private var firstCaptureDone = false
     var body: some View {
         Group {
             if complete { MainView(library: library, recorder: recorder) }
@@ -13,7 +16,9 @@ struct SetupRootView: View {
         }
         // The welcome window has done its job once the first capture is in: setup is marked done and the window closes.
         .onChange(of: library.items.count) { old, new in
-            guard !complete, new > old else { return }
+            guard new > old else { return }
+            firstCaptureDone = true
+            guard !complete else { return }
             complete = true; AppController.shared.closeMain()
         }
     }

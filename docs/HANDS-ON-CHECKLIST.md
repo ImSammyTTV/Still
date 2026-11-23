@@ -129,6 +129,7 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 - **Describe with Claude.** In Settings → AI, choose Claude and save an Anthropic API key, then
   Describe Image on a screenshot.
 - **Describe with ChatGPT (Windows, Linux).** In Settings → AI, choose ChatGPT, save an OpenAI API key, then Describe Image.
+- **Describe with ChatGPT (Mac).** In Settings → AI, choose ChatGPT (OpenAI key), save an OpenAI API key (a wrong one says it isn’t valid), then Describe Image on a screenshot; History’s search finds the description.
 
 ## After the checklist
 

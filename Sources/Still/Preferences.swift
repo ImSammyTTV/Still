@@ -136,7 +136,7 @@ import StillCore
     @AppStorage("annotateDefaultTool") var annotateDefaultTool = "arrow"
     @AppStorage("annotateDefaultColor") var annotateDefaultColor = "FF414E"
     @AppStorage("annotateDefaultWidth") var annotateDefaultWidth: Double = 5
-    /// Describe Image: "gemini" (Google, free key) or "claude" (Anthropic API key).
+    /// Describe Image: "gemini" (Google, free key), "claude" (Anthropic API key) or "openai" (OpenAI API key).
     @AppStorage("describeProvider") var describeProvider = "gemini"
     /// Still for Claude: whether Claude may use Still through its MCP connector (Settings → Claude).
     @AppStorage("claudeConnector") var claudeConnector = false
