@@ -838,6 +838,7 @@ $('#findPrivate').onclick = async () => {
 
 function renderCaptions() {
   if (selectedCaption >= captions.length) selectedCaption = -1;
+  $('#copyTranscript').hidden = !captions.some((c) => c.speech);
   const lane = $('#captionLane'); lane.replaceChildren();
   captions.forEach((c, i) => {
     const left = StillTrim.position(c.start, duration) * 100, width = StillTrim.position(c.end, duration) * 100 - left;
@@ -862,6 +863,42 @@ $('#addCaption').onclick = () => {
   selectedCaption = captions.findIndex((c) => c.start <= video.currentTime + 0.01 && c.end >= video.currentTime && c.text === 'Your text');
   clearOthersForCaption();
   renderCaptions(); $('#captionText').focus(); $('#captionText').select();
+};
+// Captions from Speech: the kept part of the recording's sound, a few minutes at a time as small mono WAV files, is
+// written down by the AI service chosen in Settings → AI, then shown as captions that can be edited like any other.
+let transcribing = false;
+async function speechPiece(sound, piece) {
+  const frames = Math.max(1, Math.ceil((piece.end - piece.start) * StillSpeech.RATE));
+  const context = new OfflineAudioContext(1, frames, StillSpeech.RATE), player = context.createBufferSource();
+  player.buffer = sound; player.connect(context.destination); player.start(0, piece.start, piece.end - piece.start);
+  return StillSpeech.wav((await context.startRendering()).getChannelData(0));
+}
+$('#transcribe').onclick = async () => {
+  if (transcribing) return;
+  if (captions.some((c) => c.speech) && !confirm('Replace the captions from the last transcription? Captions you added yourself are kept.')) return;
+  transcribing = true; $('#transcribe').disabled = true;
+  try {
+    toast('Listening to the recording…');
+    const data = await (await fetch(video.currentSrc || source)).arrayBuffer();
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+    let sound;
+    try { sound = await context.decodeAudioData(data); } catch { throw new Error('This recording has no sound to transcribe.'); } finally { context.close(); }
+    const clip = { start: trim.start, end: Math.min(trim.end, sound.duration) }, pieces = StillSpeech.pieces(clip), results = [];
+    for (const [i, piece] of pieces.entries()) {
+      toast(pieces.length > 1 ? `Transcribing part ${i + 1} of ${pieces.length}…` : 'Transcribing…');
+      const segments = await still.raw('video_transcribe', await speechPiece(sound, piece), { 'x-length': String(piece.end - piece.start) });
+      results.push({ offset: piece.start, segments });
+    }
+    const before = captions.filter((c) => c.speech).length;
+    captions = StillSpeech.toCaptions(captions, results, clip); selectedCaption = -1;
+    clearOthersForCaption(); renderCaptions();
+    const made = captions.filter((c) => c.speech).length;
+    toast(made ? `Added ${made} caption${made === 1 ? '' : 's'} from what was said${before ? ', replacing the last ones' : ''}` : 'No speech found in this recording');
+  } catch (error) { toast(`Couldn’t transcribe: ${message(error)}`); }
+  finally { transcribing = false; $('#transcribe').disabled = false; }
+};
+$('#copyTranscript').onclick = async () => {
+  try { await navigator.clipboard.writeText(StillSpeech.transcript(captions)); toast('Transcript copied'); } catch (error) { toast(`Couldn’t copy: ${message(error)}`); }
 };
 $('#opening').onchange = (e) => { opening = e.target.value; renderView(); saveProject(); };
 $('#closing').onchange = (e) => { closing = e.target.value; renderView(); saveProject(); };
@@ -1425,7 +1462,7 @@ async function open() {
   showClicks = !!project.showClicks;
   if (project.cursorFx && typeof project.cursorFx === 'object') cursorFx = { ...cursorFx, ...project.cursorFx };
   $('#status').hidden = true;
-  $$('#play, #setIn, #setOut, #cut, #addSkim, #speedWaits, #findChapters, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot, #saveFrame, #storyboard').forEach((button) => { button.disabled = false; });
+  $$('#play, #setIn, #setOut, #cut, #addSkim, #speedWaits, #findChapters, #exportVideo, #exportGif, #background, #addZoom, #addCaption, #transcribe, #opening, #closing, #tighten, #addBlur, #findPrivate, #addChapter, #chooseMusic, #addArrow, #addBox, #addSpot, #saveFrame, #storyboard').forEach((button) => { button.disabled = false; });
   render(); renderPlayhead(); renderBackground(); renderZooms();
   if (hasBg()) { $('#backdrop').hidden = false; $('#background').setAttribute('aria-expanded', 'true'); }
   fillThumbnails().catch(() => {}); // The film strip is a nicety; trimming works without it.

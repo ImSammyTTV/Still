@@ -191,6 +191,8 @@
   </div>
   <div class="panel" role="tabpanel" data-panel="text" hidden>
     <button class="btn" id="addCaption" title="Show text over the video from the playhead (T)" disabled><i data-lucide="captions"></i>Add Text</button>
+    <button class="btn" id="transcribe" title="Write down what's said in the recording as captions, with the AI key in Settings → AI" disabled><i data-lucide="audio-lines"></i>Captions from Speech</button>
+    <button class="btn plain" id="copyTranscript" title="Copy everything that was said as plain text" hidden><i data-lucide="copy"></i>Copy Transcript</button>
     <span class="grow"></span>
     <span class="zoom-tools" id="captionTools" hidden>
       <input class="field" id="captionText" aria-label="Caption text" maxlength="160" style="width:220px">
@@ -330,6 +332,7 @@
 <script src="shared/zoom.js"></script>
 <script src="shared/cursor.js"></script>
 <script src="shared/captions.js"></script>
+<script src="shared/speech.js"></script>
 <script src="shared/transitions.js"></script>
 <script src="shared/blurs.js"></script>
 <script src="shared/callouts.js"></script>

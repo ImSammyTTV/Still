@@ -63,6 +63,11 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 10. **Pause, resume and stop from the shortcut** while a full-screen app is in front.
 11. **Windows: Cursor effects on.** Record with Settings → Recording → Cursor effects. In the video editor, the
     cursor's Size, Style and Smooth settings change the export.
+- **Windows N without the Media Feature Pack.** Settings → Screen Recording says Windows' own recorder is in use and
+  Open Optional Features opens the page to add the pack. After adding it and restarting, it says Still's own recorder.
+- **Hide desktop icons on Linux** (GNOME with desktop icons, Xfce, MATE or Cinnamon). Turn it on in Settings, take a
+  full-screen capture: the icons are gone from the capture and back straight after. Quit Still mid-capture: they
+  still come back.
 
 ## Video editor
 
@@ -78,6 +83,9 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 17. **Export GIF** of a 10-second stretch. Its size and frame count match what the GIF sheet said.
 18. **Drag text anywhere.** Add text, drag its pill to a corner of the video, then export. The text is in the same
     place in the file. Choosing Top, Middle or Bottom again puts it back.
+- **Captions from Speech (Windows, Linux).** With a Gemini or ChatGPT key saved in Settings → AI, open a recording
+  where you talk, go to Text and press Captions from Speech. Captions appear in time with what you said; Copy
+  Transcript copies the words. Press it again: it offers to replace the last set and keeps text you added yourself.
 
 ## History and sharing
 

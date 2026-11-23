@@ -20,6 +20,8 @@
     "allow-update-check",
     "allow-update-install",
     "allow-ai-get",
+    "allow-recorder-status",
+    "allow-recorder-add-media",
     "allow-ai-set-key",
     "allow-connector-info",
     "allow-connector-add-to-claude",

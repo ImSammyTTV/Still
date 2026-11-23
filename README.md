@@ -81,7 +81,7 @@ and music, and export a video or GIF.
 </tr>
 </table>
 
-**Extra on Mac:** clipboard history and image actions in Finder's right-click menu.
+**Also included:** clipboard history, captions from what's said in a recording, and image actions in the right-click menu.
 
 > [!NOTE]
 > A few features depend on your system. [FEATURES.md](FEATURES.md) lists what works where.
@@ -220,7 +220,8 @@ you expected and what happened.
 ## Privacy
 
 🔒 Your screenshots and recordings stay on your computer. Still goes online only to check for updates, and, if you use
-Describe Image with your own key, to send that one picture to the AI service you chose.
+Describe Image or Captions from Speech with your own key, to send that one picture or that recording's sound to the AI
+service you chose.
 
 Every download is built from this repository's public source code by its
 [release workflow](.github/workflows/release.yml), and each release lists the files' checksums in `SHA256SUMS`.

@@ -25,7 +25,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Escape cancels and Enter confirms, even when another app had focus | ✅ keyboard policy tested | ☑️ Windows takes focus for the overlay; Escape works without it |
 | Capture the previous area again | ☑️ | ☑️ |
 | Scrolling capture | ☑️ | ☑️ down or sideways, worked out from how you scroll · Auto Scroll stops at the end of the page · off on Wayland |
-| Hide desktop icons while capturing | ☑️ | ☑️ Windows · — Linux |
+| Hide desktop icons while capturing | ☑️ | ☑️ Windows · ☑️ Linux on GNOME (desktop icons extension), Xfce, MATE and Cinnamon · — KDE |
 | Colour under the crosshair, copied with C and kept as recent colours in the editor | ☑️ | ☑️ |
 | Copy text from the screen (OCR) | ✅ | ✅ English |
 | QR code reading | ☑️ | ☑️ |
@@ -99,7 +99,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
 | Video editor: pick several zooms on the trim bar (⌘/Ctrl- or Shift-click) and remove them together | ☑️ | ☑️ checked in Chromium |
 | Video editor: cursor size, style (Arrow or Dot) and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
-| Audio transcription | ☑️ | — |
+| Audio transcription | ☑️ on the Mac | ☑️ Captions from Speech in the Text tab, with your own Gemini or ChatGPT key from Settings → AI · checked against the API answers in tests |
 
 ## App
 
@@ -117,11 +117,11 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 
 ## Not done yet
 
-- **Windows and Linux:** audio transcription. Linux can't hide desktop icons.
-- **Mac:** Apple notarization (needs a paid Apple Developer account).
-- **Windows:** code-signed downloads.
+- **Windows and Linux:** transcription needs an AI key; the Mac transcribes on the computer itself. Linux on KDE can't
+  hide desktop icons.
 - **Windows:** "N" editions without the Media Feature Pack can't use Still's own recorder, so they record with the
-  system web engine, which asks for a screen and shows its "sharing your screen" bar.
+  system web engine, which asks for a screen and shows its "sharing your screen" bar. Settings → Screen Recording says
+  which recorder is in use and opens Optional features to add the pack.
 - **Windows and Linux:** recording needs a hands-on pass on real hardware after the 1.2.11 fixes.
 - **Everywhere:** the ☑️ items above need a hands-on pass; [the hands-on checklist](docs/HANDS-ON-CHECKLIST.md) covers the riskiest.
 
