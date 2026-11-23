@@ -1632,14 +1632,40 @@ async fn library_describe(app: AppHandle, id: String) -> Result<String, String> 
 async fn library_send_to_claude(app: AppHandle, id: String) -> Result<bool, String> {
     library_copy(app, id).await?;
     #[cfg(windows)] {
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let exe = std::path::Path::new(&local).join("AnthropicClaude").join("claude.exe");
-            if exe.exists() && std::process::Command::new(&exe).spawn().is_ok() { return Ok(true); }
-        }
+        if let Some(exe) = claude_exe() { if std::process::Command::new(&exe).spawn().is_ok() { return Ok(true); } }
+        if claude_link_registered() { open_url("claude://"); return Ok(true); }
     }
     open_url("https://claude.ai/new");
     Ok(false)
 }
+/// Where Claude Desktop's program is, for the installs that put one in a known folder.
+#[cfg(windows)]
+fn claude_exe() -> Option<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let programs = std::env::var_os("ProgramFiles").map(PathBuf::from);
+    [
+        local.as_ref().map(|l| l.join("AnthropicClaude").join("claude.exe")),
+        local.as_ref().map(|l| l.join("Programs").join("Claude").join("Claude.exe")),
+        local.as_ref().map(|l| l.join("Programs").join("claude").join("Claude.exe")),
+        programs.as_ref().map(|p| p.join("Claude").join("Claude.exe")),
+    ].into_iter().flatten().find(|p| p.exists())
+}
+/// Newer Claude Desktop installs live in a protected app folder, but every install registers claude:// links (and
+/// opens .mcpb extensions), so those registrations show it's there.
+#[cfg(windows)]
+fn claude_link_registered() -> bool {
+    use windows_sys::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, KEY_READ};
+    let exists = |name: &str| {
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut key: HKEY = std::ptr::null_mut();
+        let found = unsafe { RegOpenKeyExW(HKEY_CLASSES_ROOT, wide.as_ptr(), 0, KEY_READ, &mut key) } == 0;
+        if found { unsafe { RegCloseKey(key); } }
+        found
+    };
+    exists("claude") || exists(".mcpb")
+}
+#[cfg(windows)]
+fn claude_desktop_installed() -> bool { claude_exe().is_some() || claude_link_registered() }
 // ---- Still for Claude (MCP) ------------------------------------------------------------------------
 
 /// `Still --mcp`, started by Claude: speaks MCP on stdin/stdout and passes tool calls to the running app.
@@ -1762,8 +1788,7 @@ async fn connector_add_to_claude(app: AppHandle) -> Result<bool, String> {
     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
     std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
     #[cfg(windows)] {
-        let installed = std::env::var_os("LOCALAPPDATA").map(|l| std::path::Path::new(&l).join("AnthropicClaude").join("claude.exe").exists()).unwrap_or(false);
-        if !installed { return Ok(false); }
+        if !claude_desktop_installed() { return Ok(false); }
     }
     open_path(&file);
     Ok(true)
