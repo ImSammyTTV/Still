@@ -128,6 +128,7 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 - **Send to Claude.** Right-click a screenshot in History → Send to Claude. Claude opens; pasting adds the picture.
 - **Describe with Claude.** In Settings → AI, choose Claude and save an Anthropic API key, then
   Describe Image on a screenshot.
+- **Describe with ChatGPT (Windows, Linux).** In Settings → AI, choose ChatGPT, save an OpenAI API key, then Describe Image.
 
 ## After the checklist
 

@@ -2,7 +2,7 @@ let kind = 'all';
 // Find Similar: the screenshot the grid is showing look-alikes of, or null for the usual History.
 let similarTo = null;
 function findSimilar(item) { similarTo = item; $('#grid').scrollTop = 0; load(); }
-// Describe Image: Gemini writes a short description (with the user's own key), kept with the capture for search.
+// Describe Image: the AI service chosen in Settings writes a short description (with the user's own key), kept with the capture for search.
 async function describe(item) {
   toast('Describing…');
   try { const text = await still.invoke('library:describe', item.id); await navigator.clipboard.writeText(text).catch(() => {}); toast(`${text.split('\n')[0]} (copied)`); }

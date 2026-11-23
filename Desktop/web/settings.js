@@ -9,12 +9,12 @@ const SHORTCUTS = [
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture'],
   ['clipboard', 'Clipboard History']
 ];
-let prefs, current = 'General', recordingKey = null, aiState = { hasKey: false, hasClaudeKey: false, provider: 'gemini' }, connector = null;
+let prefs, current = 'General', recordingKey = null, aiState = { hasKey: false, hasClaudeKey: false, hasOpenAIKey: false, provider: 'gemini' }, connector = null;
 let searchBox = null;
 // Clipboard History's state for its page: how many items are saved, and whether pasting for you can work here.
 let clipboardState = { items: [], canPaste: true };
 
-// Setup is a one-time guide: once finished it leaves the sidebar, and General offers to bring it back.
+// Setup is a one-time guide: once finished it leaves the sidebar, and General stops offering it.
 const setupDone = () => { try { return localStorage.getItem('stillSetupComplete') === '1'; } catch { return true; } };
 const setSetupDone = (done) => { try { if (done) localStorage.setItem('stillSetupComplete', '1'); else localStorage.removeItem('stillSetupComplete'); } catch { /* the guide simply stays available */ } };
 function filterNav() {
@@ -141,7 +141,8 @@ const pages = {
       select('Appearance', 'theme', [['system', 'System Default'], ['dark', 'Dark'], ['light', 'Light']])
     ]),
     group('Sounds', [toggle('Play sounds', 'playSounds')]),
-    group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: async () => { setSetupDone(false); current = 'Setup'; capturesAtStart = await captureCount(); render(); } }, 'Open Setup Assistant…'))]),
+    // Only until the first-capture guide is finished: after that it has done its job, so the whole section goes.
+    setupDone() ? null : group('Setup', [row('Walk through the first-capture guide again.', el('button', { class: 'btn', onclick: async () => { setSetupDone(false); current = 'Setup'; capturesAtStart = await captureCount(); render(); } }, 'Open Setup Assistant…'))]),
     group('Export', [row('Export location', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
       el('span', { style: 'color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, prefs.exportFolder || 'Documents › Still'),
       el('button', { class: 'btn', onclick: async () => { if (await still.invoke('settings:chooseFolder')) { prefs = await still.invoke('settings:get'); render(); } } }, 'Choose…')
@@ -220,11 +221,14 @@ const pages = {
     ], 'Tool keys: V select · A arrow · R rectangle · O ellipse · L line · P pen · H highlight · T text · N step · B redact · U blur · X pixelate · S spotlight · C crop')
   ],
   AI: () => {
-    // Describe Image: Google's Gemini with the user's own free key, or Claude with their Anthropic API key.
-    const claude = (prefs.ai && prefs.ai.provider) === 'claude', provider = claude ? 'claude' : 'gemini';
-    const saved = claude ? aiState.hasClaudeKey : aiState.hasKey;
+    // Describe Image: Google's Gemini with the user's own free key, Claude with their Anthropic API key, or ChatGPT
+    // with their OpenAI API key. Each key is the user's own and goes only to its own service.
+    const chosen = prefs.ai && prefs.ai.provider, provider = ['claude', 'openai'].includes(chosen) ? chosen : 'gemini';
+    const claude = provider === 'claude', openai = provider === 'openai';
+    const saved = claude ? aiState.hasClaudeKey : openai ? aiState.hasOpenAIKey : aiState.hasKey;
+    const keyLabel = claude ? 'Anthropic API key' : openai ? 'OpenAI API key' : 'Gemini API key';
     const aiStatus = el('span', { style: 'color:var(--text-2)' }, saved ? 'Key saved' : 'No key');
-    const aiKey = el('input', { class: 'field', style: 'width:300px', type: 'password', autocomplete: 'off', placeholder: saved ? 'Saved — paste a new one to replace it' : claude ? 'Anthropic API key' : 'Gemini API key' });
+    const aiKey = el('input', { class: 'field', style: 'width:300px', type: 'password', autocomplete: 'off', placeholder: saved ? 'Saved — paste a new one to replace it' : keyLabel });
     const refreshAi = async () => { aiState = await still.invoke('ai:get').catch(() => aiState); render(); };
     const aiSave = el('button', { class: 'btn primary', onclick: async () => {
       aiStatus.textContent = 'Checking…'; aiStatus.style.color = 'var(--text-2)';
@@ -232,11 +236,17 @@ const pages = {
       catch (error) { aiStatus.textContent = explain(error); aiStatus.style.color = 'var(--red)'; }
     } }, 'Save');
     const aiForget = el('button', { class: 'btn', onclick: async () => { await still.invoke('ai:setKey', provider, ''); await refreshAi(); } }, 'Remove');
+    // A Claude Pro or Max plan already covers this through the Claude page, so nobody pays for a key they don't need.
+    const claudePlan = el('div', { class: 'hint' }, ['Have Claude Pro or Max? Turn on ',
+      el('button', { class: 'link', onclick: () => { current = 'Claude'; render(); } }, 'Settings → Claude'),
+      ' and ask Claude to describe or search your captures — it uses your own Claude plan, no key needed.']);
     return [
       group('Describe Image', [row('Describe with', el('select', { class: 'field', 'aria-label': 'Describe with', onchange: async (e) => { await set({ ai: { provider: e.target.value } }); render(); } },
-          [['gemini', 'Google Gemini (free key)'], ['claude', 'Claude (Anthropic API key)']].map(([value, text]) => el('option', { value, selected: provider === value }, text)))), row(claude ? 'Anthropic API key' : 'Gemini API key', aiKey), row(aiStatus, el('div', { style: 'display:flex;gap:8px' }, [saved ? aiForget : null, aiSave]))],
-        `Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. Only the picture you describe is sent, and only then. ${claude
+          [['gemini', 'Google Gemini (free key)'], ['claude', 'Claude (Anthropic API key)'], ['openai', 'ChatGPT (OpenAI key)']].map(([value, text]) => el('option', { value, selected: provider === value }, text)))), row(keyLabel, aiKey), row(aiStatus, el('div', { style: 'display:flex;gap:8px' }, [saved ? aiForget : null, aiSave]))]),
+      claudePlan,
+      el('div', { class: 'hint' }, `Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. Only the picture you describe is sent, and only then. ${claude
           ? 'Claude uses your own Anthropic API key (from console.anthropic.com → API Keys) and is billed to that account: about a cent per picture.'
+          : openai ? 'ChatGPT uses your own OpenAI API key: get one at platform.openai.com (API keys). Each picture is billed to your OpenAI account, which is separate from a ChatGPT Plus subscription.'
           : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`)
     ];
   },
