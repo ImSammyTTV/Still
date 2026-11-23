@@ -1594,28 +1594,35 @@ async fn library_folder_match(index: usize, reveal_it: bool) -> Result<(), Strin
     Ok(())
 }
 /// Describe Image (Settings → AI): the user's own Gemini key lives in a private file only your account can read.
-/// Claude's key (an Anthropic API key) sits in its own file beside it.
-fn ai_key_file(app: &AppHandle, provider: &str) -> Option<PathBuf> { app.path().app_config_dir().ok().map(|d| d.join(if provider == "claude" { "anthropic-key" } else { "gemini-key" })) }
+/// Claude's key (an Anthropic API key) and ChatGPT's (an OpenAI API key) each sit in their own file beside it.
+fn ai_key_file(app: &AppHandle, provider: &str) -> Option<PathBuf> {
+    let name = match provider { "claude" => "anthropic-key", "openai" => "openai-key", _ => "gemini-key" };
+    app.path().app_config_dir().ok().map(|d| d.join(name))
+}
 fn ai_key(app: &AppHandle, provider: &str) -> String { ai_key_file(app, provider).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().trim().to_string() }
-fn ai_provider(app: &AppHandle) -> String { if setting(app, "ai.provider").as_str() == Some("claude") { "claude".into() } else { "gemini".into() } }
+fn ai_provider(app: &AppHandle) -> String { match setting(app, "ai.provider").as_str() { Some(p @ ("claude" | "openai")) => p.into(), _ => "gemini".into() } }
 #[tauri::command]
-async fn ai_get(app: AppHandle) -> Value { json!({ "hasKey": !ai_key(&app, "gemini").is_empty(), "hasClaudeKey": !ai_key(&app, "claude").is_empty(), "provider": ai_provider(&app) }) }
+async fn ai_get(app: AppHandle) -> Value { json!({ "hasKey": !ai_key(&app, "gemini").is_empty(), "hasClaudeKey": !ai_key(&app, "claude").is_empty(), "hasOpenAIKey": !ai_key(&app, "openai").is_empty(), "provider": ai_provider(&app) }) }
 /// Saves a key once its service accepts it; an empty key forgets the saved one.
 #[tauri::command]
 async fn ai_set_key(app: AppHandle, provider: Option<String>, key: String) -> Result<(), String> {
     let provider = provider.unwrap_or_else(|| "gemini".into());
     let file = ai_key_file(&app, &provider).ok_or("No settings folder")?;
     if key.trim().is_empty() { let _ = std::fs::remove_file(file); return Ok(()); }
-    if provider == "claude" { describe::check_claude(&key).await? } else { describe::check(&key).await? }
+    match provider.as_str() { "claude" => describe::check_claude(&key).await?, "openai" => describe::check_openai(&key).await?, _ => describe::check(&key).await? }
     write_private(&file, key.trim())
 }
 /// Describes a picture with whichever service Settings picked.
 async fn describe_bytes(app: &AppHandle, mime: &str, bytes: &[u8]) -> Result<String, String> {
     use base64::Engine;
     let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-    if ai_provider(app) == "claude" { describe::describe_with_claude(&ai_key(app, "claude"), mime, &data).await } else { describe::describe(&ai_key(app, "gemini"), mime, &data).await }
+    match ai_provider(app).as_str() {
+        "claude" => describe::describe_with_claude(&ai_key(app, "claude"), mime, &data).await,
+        "openai" => describe::describe_with_openai(&ai_key(app, "openai"), mime, &data).await,
+        _ => describe::describe(&ai_key(app, "gemini"), mime, &data).await,
+    }
 }
-/// Sends the screenshot to Gemini and keeps the description with it. Only this picture is sent, and only now.
+/// Sends the screenshot to the chosen AI service and keeps the description with it. Only this picture is sent, and only now.
 #[tauri::command]
 async fn library_describe(app: AppHandle, id: String) -> Result<String, String> {
     let file = { let lib = st(&app).library.lock().unwrap(); let i = lib.get(&id).ok_or("That capture no longer exists.")?; if i.kind == "recording" { return Err("Only screenshots can be described.".into()); } lib.thumb(&i).unwrap_or_else(|| lib.file(&i)) };
@@ -1632,14 +1639,40 @@ async fn library_describe(app: AppHandle, id: String) -> Result<String, String> 
 async fn library_send_to_claude(app: AppHandle, id: String) -> Result<bool, String> {
     library_copy(app, id).await?;
     #[cfg(windows)] {
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let exe = std::path::Path::new(&local).join("AnthropicClaude").join("claude.exe");
-            if exe.exists() && std::process::Command::new(&exe).spawn().is_ok() { return Ok(true); }
-        }
+        if let Some(exe) = claude_exe() { if std::process::Command::new(&exe).spawn().is_ok() { return Ok(true); } }
+        if claude_link_registered() { open_url("claude://"); return Ok(true); }
     }
     open_url("https://claude.ai/new");
     Ok(false)
 }
+/// Where Claude Desktop's program is, for the installs that put one in a known folder.
+#[cfg(windows)]
+fn claude_exe() -> Option<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let programs = std::env::var_os("ProgramFiles").map(PathBuf::from);
+    [
+        local.as_ref().map(|l| l.join("AnthropicClaude").join("claude.exe")),
+        local.as_ref().map(|l| l.join("Programs").join("Claude").join("Claude.exe")),
+        local.as_ref().map(|l| l.join("Programs").join("claude").join("Claude.exe")),
+        programs.as_ref().map(|p| p.join("Claude").join("Claude.exe")),
+    ].into_iter().flatten().find(|p| p.exists())
+}
+/// Newer Claude Desktop installs live in a protected app folder, but every install registers claude:// links (and
+/// opens .mcpb extensions), so those registrations show it's there.
+#[cfg(windows)]
+fn claude_link_registered() -> bool {
+    use windows_sys::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, KEY_READ};
+    let exists = |name: &str| {
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut key: HKEY = std::ptr::null_mut();
+        let found = unsafe { RegOpenKeyExW(HKEY_CLASSES_ROOT, wide.as_ptr(), 0, KEY_READ, &mut key) } == 0;
+        if found { unsafe { RegCloseKey(key); } }
+        found
+    };
+    exists("claude") || exists(".mcpb")
+}
+#[cfg(windows)]
+fn claude_desktop_installed() -> bool { claude_exe().is_some() || claude_link_registered() }
 // ---- Still for Claude (MCP) ------------------------------------------------------------------------
 
 /// `Still --mcp`, started by Claude: speaks MCP on stdin/stdout and passes tool calls to the running app.
@@ -1762,8 +1795,7 @@ async fn connector_add_to_claude(app: AppHandle) -> Result<bool, String> {
     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
     std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
     #[cfg(windows)] {
-        let installed = std::env::var_os("LOCALAPPDATA").map(|l| std::path::Path::new(&l).join("AnthropicClaude").join("claude.exe").exists()).unwrap_or(false);
-        if !installed { return Ok(false); }
+        if !claude_desktop_installed() { return Ok(false); }
     }
     open_path(&file);
     Ok(true)

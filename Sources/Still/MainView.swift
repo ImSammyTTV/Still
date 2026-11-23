@@ -15,6 +15,8 @@ struct MainView: View {
     /// not on every redraw.
     @State private var launchAtLogin = false
     @AppStorage("autoUpdate") private var autoUpdate = true
+    /// Set by the first capture (see SetupRootView); hides the Setup section in General.
+    @AppStorage("studioFirstCaptureDone") private var firstCaptureDone = false
     @State private var shortcuts = Shortcut.load()
     @State private var loginError: String?
     private let categories: [(String, String, Color)] = [
@@ -103,8 +105,14 @@ struct MainView: View {
     }
     private var general: some View {
         Group {
+            // Only for people who haven't made their first capture yet (they chose Set Up Later): once one is in, the
+            // guide has nothing left to show, so the whole section goes and the next one moves up.
+            if !firstCaptureDone && library.items.isEmpty {
+                section("Setup") {
+                    HStack { Text("Walk through the first-capture guide again.").foregroundStyle(.secondary); Spacer(); Button("Open Setup Assistant…") { UserDefaults.standard.set(false, forKey: "studioSetupComplete") } }
+                }
+            }
             section("App") {
-                Button("Open Setup Assistant…") { UserDefaults.standard.set(false, forKey: "studioSetupComplete") }
                 Toggle("Launch at login", isOn: Binding(get: { launchAtLogin }, set: { do { try prefs.setLaunchAtLogin($0) } catch { loginError = error.localizedDescription }; launchAtLogin = SMAppService.mainApp.status == .enabled }))
                     .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
                 Toggle("Check for updates automatically", isOn: $autoUpdate).onChange(of: autoUpdate) { _, on in if on { Updater.shared.scheduleChecks() } else { Updater.shared.stop() } }

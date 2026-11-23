@@ -1,5 +1,6 @@
 //! Describe Image: a short description of a screenshot, from Google's Gemini API with the user's own free key (from
-//! Google AI Studio), or from Claude with the user's own Anthropic API key. Still sends the picture only when asked, and keeps the description with the capture so History's
+//! Google AI Studio), from Claude with the user's own Anthropic API key, or from ChatGPT with the user's own OpenAI
+//! API key. Still sends the picture only when asked, and keeps the description with the capture so History's
 //! search finds it. The Mac app's ImageDescriber follows the same rules and shares the test cases.
 use serde_json::{json, Value};
 
@@ -167,6 +168,96 @@ pub async fn check_claude(key: &str) -> Result<(), String> {
     claude_text(status, &v).map(|_| ())
 }
 
+// ---- ChatGPT (OpenAI) ------------------------------------------------------------------------------
+
+const OPENAI_URL: &str = "https://api.openai.com/v1";
+/// Asked first: small, quick and cheap per picture.
+pub const OPENAI_MODEL: &str = "gpt-5-mini";
+/// Asked when the first model isn't offered to this key (older or limited accounts still have this one).
+pub const OPENAI_FALLBACK_MODEL: &str = "gpt-4o-mini";
+
+/// The Chat Completions request for one picture: the same prompt as the other services, then the picture. No token,
+/// temperature or reasoning settings, because OpenAI's models don't all accept the same ones.
+pub fn openai_body(model: &str, mime: &str, base64: &str) -> Value {
+    json!({ "model": model, "messages": [{ "role": "user", "content": [
+        { "type": "text", "text": PROMPT },
+        { "type": "image_url", "image_url": { "url": format!("data:{mime};base64,{base64}") } } ] }] })
+}
+
+/// The model asked for isn't available to this key, so the fallback model is worth asking instead.
+pub fn openai_missing_model(status: u16, response: &Value) -> bool { status == 404 || response["error"]["code"] == "model_not_found" }
+
+/// No credit left on the account: asking again won't help, so it isn't treated as busy.
+fn openai_no_credit(status: u16, response: &Value) -> bool { status == 429 && response["error"]["code"] == "insufficient_quota" }
+
+/// Busy for a moment (rate limit or a server hiccup), worth one more try after a short wait.
+pub fn openai_busy(status: u16, response: &Value) -> bool { matches!(status, 429 | 500 | 502 | 503) && !openai_no_credit(status, response) }
+
+/// What went wrong, in plain words, when OpenAI answered with an error; None when it didn't.
+pub fn openai_error(status: u16, response: &Value) -> Option<String> {
+    if status < 400 && response.get("error").map_or(true, |e| e.is_null()) { return None; }
+    let message = response["error"]["message"].as_str().unwrap_or("");
+    Some(match status {
+        _ if openai_no_credit(status, response) => "Your OpenAI account has no credit left. Add billing at platform.openai.com, then try again.".into(),
+        401 => "That OpenAI API key isn’t valid. Copy it again from platform.openai.com (API keys).".into(),
+        403 => "OpenAI refused the key (it may not have access to this model).".into(),
+        429 | 500 | 502 | 503 => "ChatGPT is busy right now. Try again in a minute.".into(),
+        _ if message.is_empty() => format!("ChatGPT answered with an error ({status})."),
+        _ => format!("ChatGPT: {message}"),
+    })
+}
+
+/// The description in a Chat Completions response. The message's content is usually a string, but can come as a list
+/// of parts, each with its own text. A refusal comes back with no description, so it reads as "couldn't describe".
+pub fn openai_text(status: u16, response: &Value) -> Result<String, String> {
+    if let Some(error) = openai_error(status, response) { return Err(error); }
+    let content = &response["choices"][0]["message"]["content"];
+    let text = match content.as_array() {
+        Some(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""),
+        None => content.as_str().unwrap_or("").to_string(),
+    };
+    let text = text.trim().to_string();
+    if text.is_empty() { Err("ChatGPT couldn’t describe this picture.".into()) } else { Ok(text) }
+}
+
+fn openai_request(client: &reqwest::Client, method: reqwest::Method, path: &str, key: &str) -> reqwest::RequestBuilder {
+    client.request(method, format!("{OPENAI_URL}/{path}")).bearer_auth(key.trim())
+}
+
+async fn openai_call(client: &reqwest::Client, key: &str, model: &str, mime: &str, base64: &str) -> Result<(u16, Value), String> {
+    let res = openai_request(client, reqwest::Method::POST, "chat/completions", key).json(&openai_body(model, mime, base64)).send().await
+        .map_err(|e| format!("Couldn’t reach ChatGPT: {e}"))?;
+    let status = res.status().as_u16();
+    Ok((status, res.json().await.unwrap_or(Value::Null)))
+}
+
+/// Describes a picture with the user's own OpenAI key. The picture goes only to OpenAI, and only now.
+pub async fn describe_with_openai(key: &str, mime: &str, base64: &str) -> Result<String, String> {
+    if key.trim().is_empty() { return Err("Add an OpenAI API key in Settings → AI first.".into()); }
+    let client = http()?;
+    let mut model = OPENAI_MODEL;
+    let (mut status, mut response) = openai_call(&client, key, model, mime, base64).await?;
+    if openai_missing_model(status, &response) {
+        model = OPENAI_FALLBACK_MODEL;
+        (status, response) = openai_call(&client, key, model, mime, base64).await?;
+    }
+    // Busy for a moment: wait and ask once more, as with Gemini.
+    if openai_busy(status, &response) {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        (status, response) = openai_call(&client, key, model, mime, base64).await?;
+    }
+    openai_text(status, &response)
+}
+
+/// Checks an OpenAI key by listing its models, so Settings can say straight away whether it works.
+pub async fn check_openai(key: &str) -> Result<(), String> {
+    let res = openai_request(&http()?, reqwest::Method::GET, "models", key).send().await.map_err(|e| format!("Couldn’t reach ChatGPT: {e}"))?;
+    let status = res.status().as_u16();
+    if status == 200 { return Ok(()); }
+    let v: Value = res.json().await.unwrap_or(Value::Null);
+    Err(openai_error(status, &v).unwrap_or_else(|| format!("ChatGPT answered with an error ({status}).")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +316,44 @@ mod tests {
         assert!(text_of(&empty).unwrap_err().contains("MAX_TOKENS"));
         let cut = json!({ "candidates": [{ "content": { "parts": [{ "text": "A settings page" }] }, "finishReason": "MAX_TOKENS" }] });
         assert!(!ran_out(&cut), "a cut-off description is still a description");
+    }
+    #[test]
+    fn openai_requests_carry_the_prompt_and_the_picture_and_nothing_model_specific() {
+        let b = openai_body(OPENAI_MODEL, "image/jpeg", "AAAA");
+        assert_eq!(b["model"], "gpt-5-mini");
+        assert_eq!(b["messages"][0]["role"], "user");
+        assert_eq!(b["messages"][0]["content"][0]["text"], PROMPT);
+        assert_eq!(b["messages"][0]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,AAAA");
+        for unwanted in ["max_tokens", "max_completion_tokens", "temperature", "reasoning_effort", "reasoning"] { assert!(b.get(unwanted).is_none(), "{unwanted}"); }
+    }
+    #[test]
+    fn openai_answers_are_read_as_text_or_parts() {
+        let plain = json!({ "choices": [{ "message": { "role": "assistant", "content": " A dark settings window.\n" } }] });
+        assert_eq!(openai_text(200, &plain).unwrap(), "A dark settings window.");
+        let parts = json!({ "choices": [{ "message": { "content": [{ "type": "text", "text": "A settings page " }, { "type": "text", "text": "with a sidebar." }] } }] });
+        assert_eq!(openai_text(200, &parts).unwrap(), "A settings page with a sidebar.");
+        let refused = json!({ "choices": [{ "message": { "content": null, "refusal": "I can’t help with that." } }] });
+        assert!(openai_text(200, &refused).unwrap_err().contains("couldn’t describe"));
+        assert!(openai_text(200, &json!({ "choices": [{ "message": { "content": "" } }] })).unwrap_err().contains("couldn’t describe"));
+    }
+    #[test]
+    fn openai_errors_are_plain_and_only_busy_ones_are_retried() {
+        let bad_key = json!({ "error": { "message": "Incorrect API key provided", "type": "invalid_request_error", "code": "invalid_api_key" } });
+        assert!(openai_text(401, &bad_key).unwrap_err().contains("isn’t valid"));
+        let no_credit = json!({ "error": { "message": "You exceeded your current quota", "type": "insufficient_quota", "code": "insufficient_quota" } });
+        assert!(openai_text(429, &no_credit).unwrap_err().contains("no credit"));
+        assert!(!openai_busy(429, &no_credit), "no credit isn’t fixed by asking again");
+        let limited = json!({ "error": { "message": "Rate limit reached", "code": "rate_limit_exceeded" } });
+        assert!(openai_busy(429, &limited) && openai_busy(503, &Value::Null) && openai_busy(500, &Value::Null));
+        assert!(!openai_busy(401, &bad_key) && !openai_busy(200, &Value::Null));
+        assert!(openai_text(502, &Value::Null).unwrap_err().contains("busy"));
+        assert_eq!(openai_error(200, &json!({ "choices": [] })), None);
+    }
+    #[test]
+    fn a_missing_openai_model_falls_back() {
+        let missing = json!({ "error": { "message": "The model `gpt-5-mini` does not exist", "code": "model_not_found" } });
+        assert!(openai_missing_model(404, &missing) && openai_missing_model(400, &missing) && openai_missing_model(404, &Value::Null));
+        assert!(!openai_missing_model(401, &json!({ "error": { "code": "invalid_api_key" } })));
+        assert_eq!(openai_body(OPENAI_FALLBACK_MODEL, "image/png", "AAAA")["model"], "gpt-4o-mini");
     }
 }
