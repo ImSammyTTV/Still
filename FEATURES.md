@@ -99,6 +99,7 @@ The Mac app is native Swift. The Windows and Linux app is built with Tauri and s
 | Video editor: zooms (Add Zoom, Auto Zoom on recorded clicks) and click rings | ✅ export tested | ☑️ checked in Chromium · the pointer's path and clicks are noted while recording on Windows and on Linux with X11, not Wayland |
 | Video editor: pick several zooms on the trim bar (⌘/Ctrl- or Shift-click) and remove them together | ☑️ | ☑️ checked in Chromium |
 | Video editor: cursor size, style (Arrow or Dot) and smoothing | ✅ export tested | ☑️ Windows, with Settings → Recording → Cursor effects: the pointer is left out of the recording and drawn from its path · Linux: the pointer is part of the picture |
+| Record at up to 120 fps (4K areas are kept to about 60, the most H.264 allows); edits export at the recording's own rate | ☑️ | ☑️ Windows recorder and Settings · exports follow the recording in Chromium |
 | Audio transcription | ☑️ on the Mac | ☑️ Captions from Speech in the Text tab, with your own Gemini or ChatGPT key from Settings → AI · checked against the API answers in tests |
 
 ## App

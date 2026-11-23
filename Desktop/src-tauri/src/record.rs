@@ -67,6 +67,14 @@ pub fn even_crop(x: f64, y: f64, w: f64, h: f64, display_w: u32, display_h: u32)
     (x, y, (w / 2 * 2).max(2), (h / 2 * 2).max(2))
 }
 
+/// The frame rate to record at: what was asked for, 1 to 120, but no faster than H.264 (High profile, level 5.2)
+/// allows for the area's size. That is any rate up to 120 for 1440p and smaller, and about 60 for a 4K screen.
+pub fn frame_rate(fps: u32, width: u32, height: u32) -> u32 {
+    const MACROBLOCKS_PER_SECOND: u64 = 2_073_600;
+    let blocks = (width as u64).div_ceil(16).max(1) * (height as u64).div_ceil(16).max(1);
+    (fps.clamp(1, 120) as u64).min((MACROBLOCKS_PER_SECOND / blocks).max(1)) as u32
+}
+
 /// The Mac app's qualities, in bits per pixel per frame: "high", "balanced" or "compact" (Smaller File), kept within
 /// sensible bounds.
 pub fn bitrate(width: u32, height: u32, fps: u32, quality: &str) -> u32 {
@@ -689,10 +697,11 @@ mod imp {
         }
     }
 
-    fn run(mf: &Mf, options: Options, mut sound: Sound, commands: mpsc::Receiver<Cmd>, ready: &mpsc::Sender<Result<(), String>>, ended: &Ended) -> Result<(), String> {
+    fn run(mf: &Mf, mut options: Options, mut sound: Sound, commands: mpsc::Receiver<Cmd>, ready: &mpsc::Sender<Result<(), String>>, ended: &Ended) -> Result<(), String> {
         let mut capture = Capture::open(&options)?;
         let (_, _, width, height) = capture.crop;
-        let fps = options.fps.clamp(1, 60);
+        let fps = super::frame_rate(options.fps, width, height);
+        options.fps = fps; // The encoder is told the same rate.
         let frame = 10_000_000 / fps as i64;
         // Windows sends a frame as soon as capture starts; wait briefly for it so the video doesn't begin black.
         let mut pixels = Vec::new();
@@ -784,6 +793,16 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_rates_stay_within_what_h264_can_encode() {
+        assert_eq!(frame_rate(120, 1920, 1080), 120);
+        assert_eq!(frame_rate(120, 2560, 1440), 120);
+        assert_eq!(frame_rate(120, 3840, 2160), 64);
+        assert_eq!(frame_rate(60, 3840, 2160), 60);
+        assert_eq!(frame_rate(240, 800, 600), 120);
+        assert_eq!(frame_rate(0, 800, 600), 1);
+    }
 
     #[test]
     fn crops_are_even_and_stay_on_the_display() {

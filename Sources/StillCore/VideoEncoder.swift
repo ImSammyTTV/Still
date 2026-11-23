@@ -9,6 +9,16 @@ public enum VideoQuality: String, Codable, CaseIterable, Identifiable {
         return max(400_000, min(100_000_000, Int(size.width*size.height*Double(max(1, fps))*factor)))
     }
 }
+/// The frame rate to record and export at: what was asked for, 1 to 120, but no faster than H.264 (High profile,
+/// level 5.2) allows for the picture's size: any rate up to 120 for 1440p and smaller, about 60 for 4K. The Windows
+/// recorder follows the same rule.
+public enum VideoFrameRate {
+    public static let choices = [15, 24, 30, 60, 120]
+    public static func limit(_ fps: Int, width: Int, height: Int) -> Int {
+        let blocks = max(1, (width+15)/16) * max(1, (height+15)/16)
+        return max(1, min(min(120, max(1, fps)), 2_073_600/blocks))
+    }
+}
 /// A video bitrate you name in Settings. Its `tag` goes wherever a quality name goes (`VideoSettings.quality`) and
 /// carries the bitrate itself, so saved edits keep working after a preset is deleted, and builds that don't know
 /// presets fall back to High.

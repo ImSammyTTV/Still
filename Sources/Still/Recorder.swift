@@ -127,7 +127,7 @@ import StillCore
             config.width = max(2, Int(originalWidth*ratio)/2*2); config.height = max(2, Int(originalHeight*ratio)/2*2)
             metadata.presentation?.cameraSize = min(0.6, max(0.05, Preferences.shared.recordingCameraSize*scale/Double(config.width)))
             if let captureRegion { config.sourceRect = captureRegion }
-            config.minimumFrameInterval = CMTime(value: 1, timescale: Int32(Preferences.shared.recordingFPS))
+            config.minimumFrameInterval = CMTime(value: 1, timescale: Int32(VideoFrameRate.limit(Preferences.shared.recordingFPS, width: config.width, height: config.height)))
             // The cursor is recorded separately so its size, motion and click effects remain editable.
             config.microphoneCaptureDeviceID = Preferences.shared.recordingMicrophoneID.isEmpty ? nil : Preferences.shared.recordingMicrophoneID
             config.showsCursor = false; config.capturesAudio = systemAudio; config.captureMicrophone = microphone; config.excludesCurrentProcessAudio = true; config.queueDepth = 5
