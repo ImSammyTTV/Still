@@ -2169,10 +2169,12 @@ fn start_native(app: AppHandle) -> Result<(), String> {
         system_audio: params["options"]["systemAudio"].as_bool().unwrap_or(false),
         microphone: params["options"]["microphone"].as_bool().unwrap_or(false),
         path: native_part(),
+        hevc: params["options"]["codec"].as_str() == Some("h265"),
     };
     let separate = !options.cursor && params["options"]["cursorEffects"].as_bool().unwrap_or(false);
     let handle = record::start(options)?;
-    let warnings = handle.warnings.join(" ");
+    let (codec, sound): (Vec<String>, Vec<String>) = handle.warnings.iter().cloned().partition(|w| w.contains("H.265"));
+    let warnings = sound.join(" ");
     {
         let mut s = st(&app).session.lock().unwrap();
         // Stopped or cancelled while the recorder was starting: it must not go on recording with no controls.
@@ -2181,6 +2183,7 @@ fn start_native(app: AppHandle) -> Result<(), String> {
         s.recorder = Some(Arc::new(handle));
     }
     if !warnings.is_empty() { notify(&app, "Recording without some sound", &warnings); }
+    if !codec.is_empty() { notify(&app, "Recording in H.264", &codec.join(" ")); }
     Ok(())
 }
 #[tauri::command]
@@ -2618,7 +2621,7 @@ fn self_test(app: AppHandle, dir: PathBuf) {
             Ok(()) => {
                 let origin = capture::grab_all().ok().and_then(|g| g.first().map(|g| (g.x + 1, g.y + 1))).unwrap_or((1, 1));
                 let path = dir.join("native-recording.mp4");
-                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, quality: "high".into(), cursor: true, system_audio: true, microphone: false, path: path.clone() };
+                let options = record::Options { monitor: origin, crop: (100, 100, 400, 300), fps: 30, quality: "high".into(), cursor: true, system_audio: true, microphone: false, path: path.clone(), hevc: false };
                 match record::start(options) {
                     Err(e) => log("nativeRecorder", json!(format!("didn’t start: {e}"))),
                     Ok(recorder) => {

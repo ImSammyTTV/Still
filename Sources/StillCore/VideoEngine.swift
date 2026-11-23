@@ -127,7 +127,7 @@ public enum VideoEngine {
         let size = CGSize(width: width, height: height)
         let composition = AVMutableVideoComposition()
         composition.customVideoCompositorClass = CaptureVideoCompositor.self
-        composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(VideoFrameRate.limit(settings.fps, width: Int(width), height: Int(height))))
+        composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(VideoFrameRate.limit(settings.fps, width: Int(width), height: Int(height), codec: .hevc)))
         let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: cm(total/speed)), kept: kept, speed: speed, screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
         instruction.live = live
         composition.instructions = [instruction]
@@ -176,9 +176,12 @@ public enum VideoEngine {
         let at = { (i: Int) in Int((Double(i) / Double(max(1, rate)) * 100).rounded()) }
         return Double(max(2, at(index + 1) - at(index))) / 100
     }
-    public static func export(_ prepared: PreparedVideo, to url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
-        if prepared.quality != .original || prepared.bitrate != nil { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, progress: progress); return }
-        guard let exporter = AVAssetExportSession(asset: prepared.asset, presetName: AVAssetExportPresetHighestQuality) else { throw VideoError.export }
+    public static func export(_ prepared: PreparedVideo, to url: URL, codec: VideoCodec = .h264, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
+        // Prepared for H.265's limits; H.264 can't go as fast at large sizes, so its rate comes down where needed.
+        let rate = Int((1/prepared.composition.frameDuration.seconds).rounded()), allowed = VideoFrameRate.limit(rate, width: Int(prepared.size.width), height: Int(prepared.size.height), codec: codec)
+        if allowed < rate { prepared.composition.frameDuration = CMTime(value: 1, timescale: Int32(allowed)) }
+        if prepared.quality != .original || prepared.bitrate != nil { try await VideoEncoder.encode(prepared, to: url, quality: prepared.quality, codec: codec, progress: progress); return }
+        guard let exporter = AVAssetExportSession(asset: prepared.asset, presetName: codec == .hevc ? AVAssetExportPresetHEVCHighestQuality : AVAssetExportPresetHighestQuality) else { throw VideoError.export }
         exporter.videoComposition = prepared.composition; exporter.audioMix = prepared.audioMix; exporter.shouldOptimizeForNetworkUse = true; exporter.audioTimePitchAlgorithm = .spectral
         let observer = Task {
             for await state in exporter.states(updateInterval: 0.15) {

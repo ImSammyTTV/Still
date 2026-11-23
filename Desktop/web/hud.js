@@ -73,7 +73,8 @@ setInterval(() => {
 }, 250);
 
 function pickType(format) {
-  const mp4 = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/mp4'];
+  const hevc = (opts.options || {}).codec === 'h265' ? ['video/mp4;codecs=hvc1.1.6.L186.B0,mp4a.40.2', 'video/mp4;codecs=hvc1,opus'] : [];
+  const mp4 = [...hevc, 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/mp4'];
   const webm = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
   for (const type of format === 'mp4' ? [...mp4, ...webm] : webm) if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
   return '';

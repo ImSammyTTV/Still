@@ -9,14 +9,27 @@ public enum VideoQuality: String, Codable, CaseIterable, Identifiable {
         return max(400_000, min(100_000_000, Int(size.width*size.height*Double(max(1, fps))*factor)))
     }
 }
-/// The frame rate to record and export at: what was asked for, 1 to 120, but no faster than H.264 (High profile,
-/// level 5.2) allows for the picture's size: any rate up to 120 for 1440p and smaller, about 60 for 4K. The Windows
-/// recorder follows the same rule.
+/// The codec recordings and exports use. H.265 (HEVC) makes files about 40% smaller for the same picture and
+/// manages 4K at 120 fps; H.264 plays everywhere.
+public enum VideoCodec: String, CaseIterable, Identifiable {
+    case h264, hevc
+    public var id: String { rawValue }
+    public var title: String { self == .h264 ? "H.264 (plays everywhere)" : "H.265 (smaller files)" }
+    public var avCodec: AVVideoCodecType { self == .h264 ? .h264 : .hevc }
+    /// The share of H.264's bitrate this codec needs for the same picture.
+    public var bitrateShare: Double { self == .h264 ? 1 : 0.6 }
+}
+
+/// The frame rate to record and export at: what was asked for, 1 to 120, but no faster than the codec allows for the
+/// picture's size. H.264 (High profile, level 5.2) manages any rate up to 120 for 1440p and smaller, about 60 for 4K;
+/// H.265 (level 6.2) manages 120 at 4K. The Windows recorder follows the same rule.
 public enum VideoFrameRate {
     public static let choices = [15, 24, 30, 60, 120]
-    public static func limit(_ fps: Int, width: Int, height: Int) -> Int {
-        let blocks = max(1, (width+15)/16) * max(1, (height+15)/16)
-        return max(1, min(min(120, max(1, fps)), 2_073_600/blocks))
+    public static func limit(_ fps: Int, width: Int, height: Int, codec: VideoCodec = .h264) -> Int {
+        let most: Int
+        if codec == .hevc { most = Int(4_278_190_080 / Int64(max(1, width*height))) }
+        else { most = 2_073_600 / (max(1, (width+15)/16) * max(1, (height+15)/16)) }
+        return max(1, min(min(120, max(1, fps)), most))
     }
 }
 /// A video bitrate you name in Settings. Its `tag` goes wherever a quality name goes (`VideoSettings.quality`) and
@@ -44,7 +57,7 @@ private final class EncodingSession: @unchecked Sendable {
     func cancel() { reader.cancelReading(); writer.cancelWriting() }
 }
 public enum VideoEncoder {
-    public static func encode(_ video: PreparedVideo, to url: URL, quality: VideoQuality, progress: @escaping @Sendable (Double) -> Void) async throws {
+    public static func encode(_ video: PreparedVideo, to url: URL, quality: VideoQuality, codec: VideoCodec = .h264, progress: @escaping @Sendable (Double) -> Void) async throws {
         let reader = try AVAssetReader(asset: video.asset)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let session = EncodingSession(reader: reader, writer: writer)
@@ -53,7 +66,9 @@ public enum VideoEncoder {
         output.videoComposition = video.composition; output.alwaysCopiesSampleData = false
         guard reader.canAdd(output) else { throw VideoError.export }; reader.add(output)
         let fps = max(1, Int((1/video.composition.frameDuration.seconds).rounded()))
-        let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(video.size.width), AVVideoHeightKey: Int(video.size.height), AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: video.bitrate ?? quality.bitrate(size: video.size, fps: fps), AVVideoExpectedSourceFrameRateKey: fps, AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel, AVVideoMaxKeyFrameIntervalKey: fps*2]]
+        var compression: [String: Any] = [AVVideoAverageBitRateKey: video.bitrate ?? Int(Double(quality.bitrate(size: video.size, fps: fps))*codec.bitrateShare), AVVideoExpectedSourceFrameRateKey: fps, AVVideoMaxKeyFrameIntervalKey: fps*2]
+        if codec == .h264 { compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel }
+        let settings: [String: Any] = [AVVideoCodecKey: codec.avCodec, AVVideoWidthKey: Int(video.size.width), AVVideoHeightKey: Int(video.size.height), AVVideoCompressionPropertiesKey: compression]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
         guard writer.canAdd(input) else { throw VideoError.export }; writer.add(input)

@@ -119,6 +119,9 @@ final class PreviewAndEncodingTests: XCTestCase {
         XCTAssertEqual(VideoFrameRate.limit(240, width: 800, height: 600), 120)
         XCTAssertEqual(VideoFrameRate.limit(0, width: 800, height: 600), 1)
         XCTAssertTrue(VideoFrameRate.choices.contains(120))
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 3840, height: 2160, codec: .hevc), 120)
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 7680, height: 4320, codec: .hevc), 120)
+        XCTAssertEqual(VideoCodec.hevc.avCodec, .hevc)
     }
     func testSettingsWithoutAPresetKeepTheirQuality() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-bitrate-\(UUID())")

@@ -31,8 +31,9 @@
 
   // The recorder format for a trimmed copy: the source's container if the engine can write it, otherwise
   // the other one. An empty type means this web engine can't re-encode video at all.
-  const recorderType = (ext, supported) => {
-    const mp4 = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/mp4'];
+  // With `hevc`, an MP4 is H.265 where the engine can write it.
+  const recorderType = (ext, supported, hevc = false) => {
+    const mp4 = [...(hevc ? ['video/mp4;codecs=hvc1.1.6.L186.B0,mp4a.40.2', 'video/mp4;codecs=hvc1,opus'] : []), 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/mp4'];
     const webm = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
     const type = (ext === 'mp4' ? [...mp4, ...webm] : [...webm, ...mp4]).find(supported) || '';
     return { type, ext: type.startsWith('video/mp4') ? 'mp4' : 'webm' };

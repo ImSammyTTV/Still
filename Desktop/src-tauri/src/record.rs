@@ -14,6 +14,7 @@
 use std::path::PathBuf;
 
 /// Where and how to record.
+#[derive(Clone)]
 pub struct Options {
     /// A point on the display to record, in physical screen pixels.
     pub monitor: (i32, i32),
@@ -28,6 +29,8 @@ pub struct Options {
     pub microphone: bool,
     /// The MP4 to write.
     pub path: PathBuf,
+    /// H.265 (HEVC) rather than H.264: about 40% smaller for the same picture, where the PC has an H.265 encoder.
+    pub hevc: bool,
 }
 
 /// A finished recording.
@@ -67,12 +70,22 @@ pub fn even_crop(x: f64, y: f64, w: f64, h: f64, display_w: u32, display_h: u32)
     (x, y, (w / 2 * 2).max(2), (h / 2 * 2).max(2))
 }
 
-/// The frame rate to record at: what was asked for, 1 to 120, but no faster than H.264 (High profile, level 5.2)
-/// allows for the area's size. That is any rate up to 120 for 1440p and smaller, and about 60 for a 4K screen.
-pub fn frame_rate(fps: u32, width: u32, height: u32) -> u32 {
-    const MACROBLOCKS_PER_SECOND: u64 = 2_073_600;
-    let blocks = (width as u64).div_ceil(16).max(1) * (height as u64).div_ceil(16).max(1);
-    (fps.clamp(1, 120) as u64).min((MACROBLOCKS_PER_SECOND / blocks).max(1)) as u32
+/// The frame rate to record at: what was asked for, 1 to 120, but no faster than the codec allows for the area's
+/// size. H.264 (High profile, level 5.2) manages any rate up to 120 for 1440p and smaller, and about 60 for 4K;
+/// H.265 (level 6.2) manages 120 at 4K. The Mac's VideoFrameRate follows the same rule.
+pub fn frame_rate(fps: u32, width: u32, height: u32, hevc: bool) -> u32 {
+    let most = if hevc {
+        4_278_190_080 / (width as u64 * height as u64).max(1)
+    } else {
+        2_073_600 / ((width as u64).div_ceil(16).max(1) * (height as u64).div_ceil(16).max(1))
+    };
+    (fps.clamp(1, 120) as u64).min(most.max(1)) as u32
+}
+
+/// H.265 needs about 60% of H.264's bitrate for the same picture. A bitrate chosen in Settings is kept as it is.
+pub fn codec_bitrate(bits: u32, hevc: bool, quality: &str) -> u32 {
+    if !hevc || quality.starts_with("bitrate:") { return bits; }
+    ((bits as f64 * 0.6) as u32).max(400_000)
 }
 
 /// The Mac app's qualities, in bits per pixel per frame: "high", "balanced" or "compact" (Smaller File), kept within
@@ -185,7 +198,7 @@ pub fn start(_: Options) -> Result<Handle, String> { Err("Still’s own recorder
 
 #[cfg(windows)]
 mod imp {
-    use super::{bitrate, lit_share, mix, Cmd, Ended, Finished, Handle, Options, Queue, Timeline, RATE};
+    use super::{bitrate, codec_bitrate, lit_share, mix, Cmd, Ended, Finished, Handle, Options, Queue, Timeline, RATE};
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc, Mutex};
@@ -267,7 +280,7 @@ mod imp {
             match Source::open(loopback) { Ok(source) => sources.push(source), Err(e) => warnings.push(e) }
         }
         let (tx, rx) = mpsc::channel();
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<Vec<String>, String>>();
         let ended: Ended = Default::default();
         let ended_here = ended.clone();
         std::thread::Builder::new().name("still-recorder".into()).spawn(move || {
@@ -277,7 +290,7 @@ mod imp {
             if let Err(e) = outcome { let _ = ready_tx.send(Err(e)); }
             unsafe { let _ = (mf.shutdown)(); }
         }).map_err(|e| err("The recorder couldn’t start", e))?;
-        ready_rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "The recorder didn’t start in time.".to_string())??;
+        warnings.extend(ready_rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "The recorder didn’t start in time.".to_string())??);
         Ok(Handle { tx: std::sync::Mutex::new(tx), warnings, ended })
     }
 
@@ -434,10 +447,10 @@ mod imp {
                 let frame_rate = ((options.fps as u64) << 32) | 1;
                 let output = media_type(mf)?;
                 output.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(|e| err("Encoder output", e))?;
-                output.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264).map_err(|e| err("Encoder output", e))?;
-                output.SetUINT32(&MF_MT_AVG_BITRATE, bitrate(width, height, options.fps, &options.quality)).map_err(|e| err("Encoder output", e))?;
+                output.SetGUID(&MF_MT_SUBTYPE, if options.hevc { &MFVideoFormat_HEVC } else { &MFVideoFormat_H264 }).map_err(|e| err("Encoder output", e))?;
+                output.SetUINT32(&MF_MT_AVG_BITRATE, codec_bitrate(bitrate(width, height, options.fps, &options.quality), options.hevc, &options.quality)).map_err(|e| err("Encoder output", e))?;
                 output.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32).map_err(|e| err("Encoder output", e))?;
-                output.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32).map_err(|e| err("Encoder output", e))?;
+                if !options.hevc { output.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32).map_err(|e| err("Encoder output", e))?; }
                 output.SetUINT64(&MF_MT_FRAME_SIZE, frame_size).map_err(|e| err("Encoder output", e))?;
                 output.SetUINT64(&MF_MT_FRAME_RATE, frame_rate).map_err(|e| err("Encoder output", e))?;
                 output.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, (1u64 << 32) | 1).map_err(|e| err("Encoder output", e))?;
@@ -520,6 +533,17 @@ mod imp {
     fn media_type(mf: &Mf) -> Result<IMFMediaType, String> {
         let mut raw = std::ptr::null_mut();
         unsafe { (mf.create_media_type)(&mut raw).ok().map_err(|e| err("Media type", e))?; Ok(IMFMediaType::from_raw(raw)) }
+    }
+
+    /// Whether this PC can encode H.265 at this size: a hardware encoder, or the software one Windows' HEVC Video
+    /// Extensions add. Tried on a scratch file, before recording starts.
+    fn hevc_available(mf: &Mf, options: &Options, width: u32, height: u32) -> bool {
+        let mut probe = options.clone();
+        probe.hevc = true;
+        probe.path = options.path.with_extension("probe.mp4");
+        let ok = [true, false].into_iter().any(|hardware| Writer::create(mf, &probe, width, height, hardware, false).is_ok());
+        let _ = std::fs::remove_file(&probe.path);
+        ok
     }
 
     /// A writer with the hardware encoder if it takes the first frame, or Windows' software encoder.
@@ -697,10 +721,15 @@ mod imp {
         }
     }
 
-    fn run(mf: &Mf, mut options: Options, mut sound: Sound, commands: mpsc::Receiver<Cmd>, ready: &mpsc::Sender<Result<(), String>>, ended: &Ended) -> Result<(), String> {
+    fn run(mf: &Mf, mut options: Options, mut sound: Sound, commands: mpsc::Receiver<Cmd>, ready: &mpsc::Sender<Result<Vec<String>, String>>, ended: &Ended) -> Result<(), String> {
         let mut capture = Capture::open(&options)?;
         let (_, _, width, height) = capture.crop;
-        let fps = super::frame_rate(options.fps, width, height);
+        let mut notes = Vec::new();
+        if options.hevc && !hevc_available(mf, &options, width, height) {
+            options.hevc = false;
+            notes.push("This PC has no H.265 encoder, so this recording is H.264. Windows’ HEVC Video Extensions add one.".to_string());
+        }
+        let fps = super::frame_rate(options.fps, width, height, options.hevc);
         options.fps = fps; // The encoder is told the same rate.
         let frame = 10_000_000 / fps as i64;
         // Windows sends a frame as soon as capture starts; wait briefly for it so the video doesn't begin black.
@@ -714,7 +743,7 @@ mod imp {
         sound.clear();
         let mut timeline = Timeline::new();
         let (mut frames, mut dropped, mut written_until) = (1u64, 0u64, frame);
-        let _ = ready.send(Ok(()));
+        let _ = ready.send(Ok(notes));
         let mut next_tick = Instant::now() + Duration::from_nanos(1_000_000_000 / fps as u64);
         // Anything that fails from here on ends the loop with the reason, so the file can still be finished below.
         let failure = loop {
@@ -796,12 +825,21 @@ mod tests {
 
     #[test]
     fn frame_rates_stay_within_what_h264_can_encode() {
-        assert_eq!(frame_rate(120, 1920, 1080), 120);
-        assert_eq!(frame_rate(120, 2560, 1440), 120);
-        assert_eq!(frame_rate(120, 3840, 2160), 64);
-        assert_eq!(frame_rate(60, 3840, 2160), 60);
-        assert_eq!(frame_rate(240, 800, 600), 120);
-        assert_eq!(frame_rate(0, 800, 600), 1);
+        assert_eq!(frame_rate(120, 1920, 1080, false), 120);
+        assert_eq!(frame_rate(120, 2560, 1440, false), 120);
+        assert_eq!(frame_rate(120, 3840, 2160, false), 64);
+        assert_eq!(frame_rate(60, 3840, 2160, false), 60);
+        assert_eq!(frame_rate(240, 800, 600, false), 120);
+        assert_eq!(frame_rate(0, 800, 600, false), 1);
+        assert_eq!(frame_rate(120, 3840, 2160, true), 120, "H.265 records 4K at 120");
+        assert_eq!(frame_rate(120, 7680, 4320, true), 120);
+    }
+    #[test]
+    fn h265_uses_a_smaller_bitrate_unless_one_was_chosen() {
+        assert_eq!(codec_bitrate(10_000_000, false, "high"), 10_000_000);
+        assert_eq!(codec_bitrate(10_000_000, true, "high"), 6_000_000);
+        assert_eq!(codec_bitrate(500_000, true, "compact"), 400_000);
+        assert_eq!(codec_bitrate(8_000_000, true, "bitrate:8000000"), 8_000_000);
     }
 
     #[test]

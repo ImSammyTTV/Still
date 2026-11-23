@@ -1326,7 +1326,7 @@ $('#exportGo').onclick = () => {
       return target && still.invoke('video:copy');
     });
   }
-  const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && !!window.MediaStream && MediaRecorder.isTypeSupported(type));
+  const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && !!window.MediaStream && MediaRecorder.isTypeSupported(type), prefs.recording?.codec === 'h265');
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
   runExport(needsCanvas() || plan.scaled ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);

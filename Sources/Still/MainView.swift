@@ -221,6 +221,7 @@ struct MainView: View {
                 choice("Quality", selection: $prefs.recordingQuality) { ForEach(prefs.qualityOptions(including: prefs.recordingQuality), id: \.tag) { Text($0.title).tag($0.tag) } }
                 BitratePresetEditor()
                 choice("Frame rate", selection: $prefs.recordingFPS) { ForEach(VideoFrameRate.choices, id: \.self) { Text("\($0) fps").tag($0) } }
+                choice("Video codec", selection: $prefs.recordingCodec) { ForEach(VideoCodec.allCases) { Text($0.title).tag($0.rawValue) } }
                 choice("Max resolution", selection: $prefs.recordingResolution) { Text("Original").tag(0); Text("1080p").tag(1920); Text("1440p").tag(2560); Text("4K").tag(3840) }
                 Toggle("Show cursor", isOn: $prefs.recordingCursor)
             }

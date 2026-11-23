@@ -98,7 +98,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     settings.cameraShape = Preferences.shared.recordingCameraShape
                     let prepared = try await VideoEngine.prepare(url: url, settings: settings, metadata: metadata, cameraURL: camera)
                     if gif { try await VideoEngine.gif(prepared, to: exported, fps: Preferences.shared.gifFPS, width: Preferences.shared.gifWidth) }
-                    else { try await VideoEngine.export(prepared, to: exported) }
+                    else { try await VideoEngine.export(prepared, to: exported, codec: Preferences.shared.videoCodec) }
                     let item = try await self.library.add(file: exported, title: self.captureTitle("Recording"), video: true)
                     try self.library.attachVideoSource(item, source: url); try self.library.saveRecordingMetadata(item, metadata: metadata, camera: camera)
                     if Preferences.shared.copyRecording { self.library.copy(item) }
