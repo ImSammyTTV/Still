@@ -4,6 +4,16 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.63 — 2026-11-23
+
+- **Captions from Speech** (Windows, Linux). In the video editor's Text tab, one button writes down what's said in a
+  recording and adds it as captions you can edit, move and export. Copy Transcript copies the words as plain text.
+  It uses your own key from Settings → AI, and the recording's sound is sent only when you ask.
+- **Hide desktop icons on Linux.** Settings now offers to hide desktop icons while capturing on GNOME, Xfce, MATE and
+  Cinnamon. They come back as soon as the capture ends, even if Still closes unexpectedly.
+- **Recorder help for Windows N** (Windows). Settings → Screen Recording shows which recorder is in use. When Windows'
+  media features are missing, it explains why and opens Optional features so you can add the Media Feature Pack.
+
 ## v1.2.62 — 2026-11-23
 
 - **Describe Image with ChatGPT** (Mac, Windows, Linux). Settings → AI now offers ChatGPT, using your own OpenAI API
