@@ -4,6 +4,17 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.62 — 2026-11-23
+
+- **Describe Image with ChatGPT** (Mac, Windows, Linux). Settings → AI now offers ChatGPT, using your own OpenAI API
+  key. Each picture is billed to your OpenAI account, separately from a ChatGPT Plus subscription. Only the picture you
+  describe is sent, and only to OpenAI.
+- **Use your Claude plan, no key needed** (Mac, Windows, Linux). The AI page now points Claude Pro and Max members to
+  Settings → Claude, where Claude can describe and search your captures on your own plan.
+- **Add to Claude and Send to Claude find Claude Desktop** (Windows), however it was installed. Before, newer installs
+  were reported as missing.
+- **The Setup section leaves Settings → General** once the first-capture guide is done (Mac, Windows, Linux).
+
 ## v1.2.61 — 2026-11-22
 
 - **Clipboard History on Windows and Linux.** Press Ctrl+Shift+V (or choose Clipboard History in the tray) to see what
