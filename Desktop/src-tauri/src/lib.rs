@@ -12,6 +12,7 @@ mod scroll;
 mod settings;
 mod similar;
 mod describe;
+mod transcribe;
 mod trash;
 mod mcp;
 mod video;
@@ -828,6 +829,18 @@ fn native_engine(rec: &Value) -> Result<(), String> {
     let _ = rec;
     record::available()
 }
+
+/// For Settings → Screen Recording on Windows: whether Still's own recorder can run here, why not if it can't, and
+/// whether the missing piece is Windows' media features (the Media Feature Pack that "N" editions leave out).
+#[tauri::command]
+async fn recorder_status() -> Value {
+    let why = record::available().err();
+    let media_missing = why.as_deref().is_some_and(|w| w.contains("Media Foundation") || w.contains("Media Feature Pack"));
+    json!({ "own": why.is_none(), "why": why, "mediaMissing": media_missing })
+}
+/// Opens Windows' Optional features page, where the Media Feature Pack is added.
+#[tauri::command]
+async fn recorder_add_media() { open_url("ms-settings:optionalfeatures"); }
 
 fn stop_recording_state(app: &AppHandle) {
     end_recording_extras(app);
@@ -2420,6 +2433,14 @@ async fn video_export_part(window: tauri::Window, request: tauri::ipc::Request<'
     let written = std::fs::OpenOptions::new().create(true).write(true).append(!first).truncate(first).open(&file).and_then(|mut out| out.write_all(bytes));
     written.map_err(|e| { let _ = std::fs::remove_file(&file); format!("Couldn’t write the export: {e}") })
 }
+/// Transcribe Recording: one piece of the recording's sound (a mono WAV, `x-length` seconds long) written down by the
+/// AI service chosen in Settings → AI, with timings in seconds from the start of the piece.
+#[tauri::command]
+async fn video_transcribe(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<Vec<transcribe::Segment>, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected the recording’s sound".into()) };
+    let length = request.headers().get("x-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+    transcribe::transcribe(&ai_provider(&app), &ai_key(&app, "openai"), &ai_key(&app, "gemini"), bytes.clone(), length).await
+}
 /// A picture made in the video editor (a frame, or a storyboard of frames): added to History, copied, and opened in
 /// the image editor when asked.
 #[tauri::command]
@@ -2723,11 +2744,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings_get, settings_set, settings_reset, settings_choose_folder, shortcuts_pause,
             overlay_done, overlay_cancel, overlay_fullscreen, overlay_timer, countdown_cancel, overlay_purpose, overlay_window_mode, overlay_pointer, overlay_color, overlay_ready, overlay_drawn,
-            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, ai_set_key, connector_info, connector_add_to_claude, library_search_web, library_pin, library_drag,
+            library_list, library_get, library_rename, library_delete, library_copy, library_save, library_save_as, library_reveal, library_open, library_play, library_combine, library_star, library_similar, library_similar_in_folder, library_folder_match, library_describe, library_send_to_claude, ai_get, recorder_status, recorder_add_media, ai_set_key, connector_info, connector_add_to_claude, library_search_web, library_pin, library_drag,
             editor_save, editor_copy, editor_export, watermark_choose_image, editor_save_file, library_save_for_size, editor_drag, editor_pin, editor_open_image,
             preview_edit, open_settings_cmd, open_history_cmd, open_demo, capture_action, ocr_result,
             recording_prepared, recording_started, recording_listen, recording_finished, camera_failed,
-            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, editor_save_raw, picture_raw, recording_chunk_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
+            recording_cancel, recording_error, recording_chunk, recording_reset, recording_save, recording_begin, recording_stop, recording_pause, recording_restart, recording_tick, video_export_target, video_export_save, video_export_part, video_transcribe, editor_save_raw, picture_raw, recording_chunk_raw, video_export_copy, video_project_save, video_music_choose, video_image_save,
             update_status, update_check, update_install,
             scroll::scroll_stop, scroll::scroll_auto,
             diag::report_problem,

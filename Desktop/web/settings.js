@@ -9,7 +9,7 @@ const SHORTCUTS = [
   ['text', 'Capture Text (OCR)'], ['record', 'Start / Stop Recording'], ['history', 'Open Capture History'], ['restore', 'Restore Last Capture'],
   ['clipboard', 'Clipboard History']
 ];
-let prefs, current = 'General', recordingKey = null, aiState = { hasKey: false, hasClaudeKey: false, hasOpenAIKey: false, provider: 'gemini' }, connector = null;
+let prefs, current = 'General', recordingKey = null, aiState = { hasKey: false, hasClaudeKey: false, hasOpenAIKey: false, provider: 'gemini' }, connector = null, recorderState = null;
 let searchBox = null;
 // Clipboard History's state for its page: how many items are saved, and whether pasting for you can work here.
 let clipboardState = { items: [], canPaste: true };
@@ -186,12 +186,14 @@ const pages = {
       select('Crosshair', 'crosshair', [['partial', 'Small'], ['full', 'Full screen'], ['disabled', 'Off']]),
       toggle('Show magnifier', 'magnifier'), toggle('Adjust the area before capturing', 'adjustAreaBeforeCapture'), toggle('Remember last selection', 'rememberSelection')
     ], prefs.wayland ? 'Window selection with Space needs an X11 session. On Wayland your desktop asks which screen to share.' : 'Hold Space while selecting to capture a whole window. Arrow keys nudge the selection; Alt+arrows resize it. Scroll to zoom the magnifier.'),
-    prefs.platform === 'win32' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], 'Your icons come back as soon as the capture ends.') : null
+    prefs.platform !== 'darwin' ? group('Desktop', [toggle('Hide desktop icons while capturing', 'hideDesktopIcons')], prefs.platform === 'win32' ? 'Your icons come back as soon as the capture ends.' : 'Your icons come back as soon as the capture ends. Works on GNOME (with desktop icons), Xfce, MATE and Cinnamon.') : null
   ],
   'Screen Recording': () => [
     prefs.platform === 'win32' ? group('Recorder', [
+      recorderState ? row('Recording with', el('span', { title: recorderState.why || '' }, recorderState.own ? 'Still’s own recorder' : 'Windows’ own recorder')) : null,
+      recorderState && recorderState.mediaMissing ? row('Media Feature Pack', el('button', { class: 'btn', onclick: () => still.invoke('recorder:addMedia') }, 'Open Optional Features…')) : null,
       toggle('Cursor effects in the video editor', 'recording.cursorEffects')
-    ], 'Still records the screen, the computer’s sound and the microphone itself, with no screen picker and no “sharing your screen” bar. Only if Still’s recorder can’t run on this computer does Windows’ own recorder take over. With Cursor effects on, the pointer is left out of the recording and drawn by the video editor, where you can make it bigger or smooth its movement.') : null,
+    ].filter(Boolean), (recorderState && recorderState.mediaMissing ? 'This edition of Windows leaves out its media features, so Windows’ own recorder takes over: it asks for a screen each time and shows a “sharing your screen” bar. Add the Media Feature Pack under Optional features, restart, and Still records by itself. ' : '') + 'Still records the screen, the computer’s sound and the microphone itself, with no screen picker and no “sharing your screen” bar. Only if Still’s recorder can’t run on this computer does Windows’ own recorder take over. With Cursor effects on, the pointer is left out of the recording and drawn by the video editor, where you can make it bigger or smooth its movement.') : null,
     group('Video', [
       select('Format', 'recording.format', [['mp4', 'MP4'], ['webm', 'WebM']]),
       qualityRow(),
@@ -247,7 +249,8 @@ const pages = {
       el('div', { class: 'hint' }, `Right-click a screenshot in History and choose Describe Image to get a short description of it, which History’s search then finds. Only the picture you describe is sent, and only then. ${claude
           ? 'Claude uses your own Anthropic API key (from console.anthropic.com → API Keys) and is billed to that account: about a cent per picture.'
           : openai ? 'ChatGPT uses your own OpenAI API key: get one at platform.openai.com (API keys). Each picture is billed to your OpenAI account, which is separate from a ChatGPT Plus subscription.'
-          : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`)
+          : 'Gemini uses your own key, free from aistudio.google.com (Get API key). On Google’s free tier, Google may use what you send to improve its products, so don’t describe anything private.'} Keys are stored in your user profile, readable only by you.`),
+      el('div', { class: 'hint' }, 'Captions from Speech in the video editor uses the same key with Gemini or ChatGPT (Claude can’t listen to sound). The kept part of the recording’s sound is sent, and only when you ask.')
     ];
   },
   // Clipboard History: what you copy, kept on this computer so any of it can be put back (see clipboard.js).
@@ -397,6 +400,7 @@ still.on('shortcuts:status', (failed) => { if (prefs) { prefs.failedShortcuts = 
   if (pages[params.get('page')]) current = params.get('page');
   updateStatus = await still.invoke('update:status');
   aiState = await still.invoke('ai:get').catch(() => ({ hasKey: false }));
+  if (prefs.platform === 'win32') recorderState = await still.invoke('recorder:status').catch(() => null);
   connector = await still.invoke('connector:info').catch(() => null);
   await loadClipboard();
   const search = el('input', { type: 'search', class: 'field settings-search', placeholder: 'Search settings', 'aria-label': 'Search settings categories', autocomplete: 'off' });
