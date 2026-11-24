@@ -120,7 +120,9 @@ import StillCore
     @AppStorage("allowURLScheme") var allowURLScheme = true
     @AppStorage("recordingFPS") var recordingFPS = 30
     @AppStorage("recordingCodec") var recordingCodec = "h264"
-    var videoCodec: VideoCodec { VideoCodec(rawValue: recordingCodec) ?? .h264 }
+    /// HDR recordings keep the brightness and colour range of an HDR display. They need H.265, which carries 10-bit video.
+    @AppStorage("recordingHDR") var recordingHDR = false
+    var videoCodec: VideoCodec { recordingHDR ? .hevc : VideoCodec(rawValue: recordingCodec) ?? .h264 }
     @AppStorage("recordingFormat") var recordingFormat = "mp4"
     @AppStorage("recordingResolution") var recordingResolution = 3840
     @AppStorage("recordingCursor") var recordingCursor = true

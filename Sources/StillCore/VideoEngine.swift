@@ -127,6 +127,8 @@ public enum VideoEngine {
         let size = CGSize(width: width, height: height)
         let composition = AVMutableVideoComposition()
         composition.customVideoCompositorClass = CaptureVideoCompositor.self
+        // Edits are drawn in standard range, so an HDR recording is converted to it here rather than looking washed out.
+        composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2; composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2; composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         composition.renderSize = size; composition.frameDuration = CMTime(value: 1, timescale: Int32(VideoFrameRate.limit(settings.fps, width: Int(width), height: Int(height), codec: .hevc)))
         let instruction = CaptureVideoInstruction(timeRange: CMTimeRange(start: .zero, duration: cm(total/speed)), kept: kept, speed: speed, screenID: video.trackID, cameraID: cameraID, settings: settings, metadata: metadata, size: size, transform: transform, cameraTransform: cameraTransform, sourceSize: oriented)
         instruction.live = live

@@ -119,7 +119,7 @@ enum DiagnosticLog {
             "windowBackground": flag(p.windowBackground), "exportFormat": p.exportFormat, "filenamePattern": p.filenamePattern,
             "saveAfterCapture": flag(p.saveAfterCapture), "annotateAfterCapture": flag(p.annotateAfterCapture), "pinAfterCapture": flag(p.pinAfterCapture),
             "previewPosition": p.previewPosition, "previewTimeout": String(Int(p.previewTimeout)),
-            "recordingFormat": p.recordingFormat, "recordingFPS": String(p.recordingFPS), "recordingCodec": p.recordingCodec, "recordingQuality": p.recordingQuality,
+            "recordingFormat": p.recordingFormat, "recordingFPS": String(p.recordingFPS), "recordingCodec": p.recordingCodec, "recordingHDR": String(p.recordingHDR), "recordingQuality": p.recordingQuality,
             "recordingResolution": String(p.recordingResolution), "recordingCursor": flag(p.recordingCursor), "recordingClicks": flag(p.recordingClicks),
             "recordingKeys": flag(p.recordingKeys), "recordingCamera": flag(p.recordingCamera), "recordingAutomation": flag(p.recordingAutomation),
             "gifFPS": String(p.gifFPS), "gifWidth": String(p.gifWidth), "retentionDays": String(p.retentionDays), "ocrLanguage": p.ocrLanguage,
