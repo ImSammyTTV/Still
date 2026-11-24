@@ -4,6 +4,16 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.64 — 2026-11-24
+
+- **Record at 120 fps** (Mac, Windows, Linux). Frame rate now goes up to 120 fps for smooth motion on 120 Hz
+  displays. With H.264, recordings of a whole 4K screen are kept to about 60 fps, the most it can encode.
+- **H.265 recording and export** (Mac, Windows). Choose H.265 under Video codec in Settings for files about 40%
+  smaller, and 4K at the full 120 fps. On Windows, Still records H.264 instead, and says so, if the PC has no H.265
+  encoder. H.264 stays the default because it plays everywhere.
+- **Smoother exports** (Windows, Linux). Exports with edits now follow the recording's own frame rate instead of
+  always coming out at 30 fps.
+
 ## v1.2.63 — 2026-11-23
 
 - **Captions from Speech** (Windows, Linux). In the video editor's Text tab, one button writes down what's said in a
