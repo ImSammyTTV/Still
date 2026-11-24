@@ -110,6 +110,19 @@ final class PreviewAndEncodingTests: XCTestCase {
         XCTAssertEqual(VideoQuality.balanced.bitrate(size: size, fps: 30), 5_598_720)
         XCTAssertEqual(VideoQuality.compact.bitrate(size: size, fps: 30), 2_799_360)
     }
+    // The Windows recorder's frame_rate test has the same cases.
+    func testFrameRatesStayWithinWhatH264CanEncode() {
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 1920, height: 1080), 120)
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 2560, height: 1440), 120)
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 3840, height: 2160), 64)
+        XCTAssertEqual(VideoFrameRate.limit(60, width: 3840, height: 2160), 60)
+        XCTAssertEqual(VideoFrameRate.limit(240, width: 800, height: 600), 120)
+        XCTAssertEqual(VideoFrameRate.limit(0, width: 800, height: 600), 1)
+        XCTAssertTrue(VideoFrameRate.choices.contains(120))
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 3840, height: 2160, codec: .hevc), 120)
+        XCTAssertEqual(VideoFrameRate.limit(120, width: 7680, height: 4320, codec: .hevc), 120)
+        XCTAssertEqual(VideoCodec.hevc.avCodec, .hevc)
+    }
     func testSettingsWithoutAPresetKeepTheirQuality() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Still-bitrate-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: folder) }

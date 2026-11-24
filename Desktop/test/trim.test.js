@@ -144,3 +144,10 @@ test('waits: still, silent stretches of four seconds or more become fast-forward
   assert.deepEqual(T.waits(changes, 0.5, [], { start: 10, rate: 8 }), [{ start: 12.5, end: 19.5, rate: 8 }]);
   assert.deepEqual(T.waits(Array(20).fill(0), 0.5, []), [{ start: 0.5, end: 9.5, rate: 4 }]);
 });
+
+test('an H.265 export is asked for first only when chosen, and falls back to H.264', () => {
+  const all = () => true, noHevc = (t) => !t.includes('hvc1');
+  assert.equal(T.recorderType('mp4', all).type, 'video/mp4;codecs=avc1.640028,mp4a.40.2');
+  assert.equal(T.recorderType('mp4', all, true).type, 'video/mp4;codecs=hvc1.1.6.L186.B0,mp4a.40.2');
+  assert.equal(T.recorderType('mp4', noHevc, true).type, 'video/mp4;codecs=avc1.640028,mp4a.40.2');
+});

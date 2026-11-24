@@ -1186,7 +1186,12 @@ function captureSource(player, size, musicBuffer = null) {
   ctx.imageSmoothingQuality = 'high';
   const draw = () => { ctx.setTransform(out.width / F.w, 0, 0, out.height / F.h, 0, 0); drawFrame(ctx, player, F); };
   draw();
-  const timer = setInterval(draw, 1000 / 30);
+  // Each of the recording's frames is drawn as it arrives, so a 60 or 120 fps recording exports at its own rate; the
+  // timer keeps zooms and fades moving when the picture holds still (and is all WebKitGTK has).
+  let following = true;
+  const follow = () => { if (!following) return; draw(); player.requestVideoFrameCallback(follow); };
+  if (player.requestVideoFrameCallback) player.requestVideoFrameCallback(follow);
+  const interval = setInterval(draw, 1000 / 30), timer = { stop: () => { following = false; clearInterval(interval); } };
   let audio = null, sound, gain = null, musicGain = null, musicSource = null;
   // The opening and closing fade the sound too, and music is mixed in, so they go through Web Audio.
   if (player.captureStream && !StillTransitions.active(opening, closing) && !musicBuffer && !skims.length) sound = player.captureStream().getAudioTracks();
@@ -1204,13 +1209,13 @@ function captureSource(player, size, musicBuffer = null) {
     if (gain) gain.gain.value = ends(player.currentTime).level * voiceLevel(player.currentTime);
     if (musicGain) musicGain.gain.value = musicLevel(player.currentTime);
   }, 20);
-  const tracks = [...canvas.captureStream(30).getVideoTracks(), ...sound];
+  const tracks = [...canvas.captureStream(120).getVideoTracks(), ...sound];
   return {
     stream: new MediaStream(tracks),
     // The music starts with the recording, and holds while a cut is skipped so it stays in step with the picture.
     start() { if (musicSource) musicSource.start(); },
     hold(on) { if (audio) (on ? audio.suspend() : audio.resume()).catch(() => {}); },
-    stop() { clearInterval(timer); clearInterval(level); if (audio) audio.close(); },
+    stop() { timer.stop(); clearInterval(level); if (audio) audio.close(); },
   };
 }
 
@@ -1321,7 +1326,7 @@ $('#exportGo').onclick = () => {
       return target && still.invoke('video:copy');
     });
   }
-  const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && !!window.MediaStream && MediaRecorder.isTypeSupported(type));
+  const format = StillTrim.recorderType(ext, (type) => !!window.MediaRecorder && !!window.MediaStream && MediaRecorder.isTypeSupported(type), prefs.recording?.codec === 'h265');
   if (!format.type) return showError('Couldn’t export: this system’s web engine can’t record video, so a trimmed copy can’t be made here. GIF export still works.');
   runExport(needsCanvas() || plan.scaled ? 'Exporting…' : 'Trimming…', async (run) => {
     const target = await still.invoke('video:target', format.ext);

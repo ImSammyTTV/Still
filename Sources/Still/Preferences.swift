@@ -119,6 +119,8 @@ import StillCore
     @AppStorage("pinBorder") var pinBorder = false
     @AppStorage("allowURLScheme") var allowURLScheme = true
     @AppStorage("recordingFPS") var recordingFPS = 30
+    @AppStorage("recordingCodec") var recordingCodec = "h264"
+    var videoCodec: VideoCodec { VideoCodec(rawValue: recordingCodec) ?? .h264 }
     @AppStorage("recordingFormat") var recordingFormat = "mp4"
     @AppStorage("recordingResolution") var recordingResolution = 3840
     @AppStorage("recordingCursor") var recordingCursor = true

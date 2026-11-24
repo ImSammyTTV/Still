@@ -63,6 +63,9 @@ Mark each one ✅ works, ⚠️ works but feels off (say how), or ❌ broken.
 10. **Pause, resume and stop from the shortcut** while a full-screen app is in front.
 11. **Windows: Cursor effects on.** Record with Settings → Recording → Cursor effects. In the video editor, the
     cursor's Size, Style and Smooth settings change the export.
+- **H.265.** Choose H.265 in Settings (Mac: Recording → Video codec; Windows: Screen Recording → Video codec), record
+  a minute, and compare its size with an H.264 recording. It opens and exports in the video editor. On a Windows PC
+  without an H.265 encoder, a note says the recording is H.264 instead.
 - **Windows N without the Media Feature Pack.** Settings → Screen Recording says Windows' own recorder is in use and
   Open Optional Features opens the page to add the pack. After adding it and restarting, it says Still's own recorder.
 - **Hide desktop icons on Linux** (GNOME with desktop icons, Xfce, MATE or Cinnamon). Turn it on in Settings, take a
