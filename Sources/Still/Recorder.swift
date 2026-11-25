@@ -121,7 +121,8 @@ import StillCore
                     onWarning?("The camera couldn’t restart. Recording continues without the camera: \(error.localizedDescription)")
                 }
             }
-            let scale = Double(filter.pointPixelScale), config = SCStreamConfiguration()
+            // HDR: ScreenCaptureKit's canonical HDR stream, 10-bit with the display's full brightness, the same on any Mac.
+            let scale = Double(filter.pointPixelScale), config = Preferences.shared.recordingHDR ? SCStreamConfiguration(preset: .captureHDRStreamCanonicalDisplay) : SCStreamConfiguration()
             let originalWidth = max(2, Double(captureRegion?.width ?? filter.contentRect.width)*scale), originalHeight = max(2, Double(captureRegion?.height ?? filter.contentRect.height)*scale)
             let maxSize = Preferences.shared.recordingResolution, ratio = maxSize == 0 ? 1 : min(1, Double(maxSize)/max(originalWidth, originalHeight))
             config.width = max(2, Int(originalWidth*ratio)/2*2); config.height = max(2, Int(originalHeight*ratio)/2*2)

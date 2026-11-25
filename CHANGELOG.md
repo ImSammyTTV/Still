@@ -4,6 +4,12 @@ What changed in each version of Still. The newest is at the top. Each section be
 GitHub, so write for people using Still: what they'll notice, in plain words. Describe Still's own features only: never
 name or compare with other apps or services.
 
+## v1.2.65 — 2026-11-25
+
+- **Record in HDR** (Mac). Turn on Record in HDR in Settings → Recording to keep the brightness and colour of an HDR
+  display. HDR recordings use H.265. Copying or saving a recording keeps it in HDR; exports from the video editor are
+  converted to standard range so they look right everywhere.
+
 ## v1.2.64 — 2026-11-24
 
 - **Record at 120 fps** (Mac, Windows, Linux). Frame rate now goes up to 120 fps for smooth motion on 120 Hz
